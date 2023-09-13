@@ -1,0 +1,33 @@
+Metadata-Version: 2.1
+Name: manipulation
+Version: 2023.9.9
+Summary: MIT 6.4210 - Robotic Manipulation
+Home-page: https://manipulation.mit.edu
+Author: Russ Tedrake
+Author-email: russt@mit.edu
+Project-URL: Bug Tracker, https://github.com/RussTedrake/manipulation/issues
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: BSD License
+Classifier: Operating System :: POSIX :: Linux
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+License-File: LICENSE.TXT
+Requires-Dist: cloudpickle >=1.6.0
+Requires-Dist: drake >=1.17.0
+Requires-Dist: gradescope-utils >=0.4.0
+Requires-Dist: mpld3 >=0.5.1
+Requires-Dist: timeout-decorator >=0.4.1
+
+<!-- Remember, this produces the front page on github, dockerhub, and pypi. -->
+
+# Robotic Manipulation
+
+*Perception, Planning, and Control*
+
+This is the companion software for the textbook available at:
+https://manipulation.mit.edu/
+
+To cite this software (or the corresponding textbook), please use:
+
+Russ Tedrake. _Robotic Manipulation: Perception, Planning, and Control (Course
+Notes for MIT 6.4210/6.4212)._ Downloaded on [date] from <https://manipulation.mit.edu/>.
