@@ -17,10 +17,19 @@ from pydrake.geometry import (
     Role,
     StartMeshcat,
 )
-from pydrake.math import RigidTransform, RollPitchYaw
+from pydrake.math import RigidTransform, RollPitchYaw, RotationMatrix
 from pydrake.multibody.parsing import Parser
 from pydrake.multibody.plant import AddMultibodyPlantSceneGraph
-from pydrake.multibody.tree import BodyIndex
+from pydrake.multibody.tree import(
+    BodyIndex,
+    BallRpyJoint,
+    RevoluteJoint,
+    PrismaticJoint,
+    SpatialInertia,
+    UnitInertia,
+    FixedOffsetFrame,
+) 
+from pydrake.multibody.meshcat import JointSliders
 from pydrake.systems.analysis import Simulator
 from pydrake.systems.framework import DiagramBuilder
 from pydrake.systems.sensors import (
@@ -33,33 +42,41 @@ from pydrake.visualization import (
     ColorizeLabelImage,
 )
 
+import time
+
+from IPython.display import clear_output
+from pydrake.all import (
+    AddMultibodyPlantSceneGraph,
+    DiagramBuilder,
+    JacobianWrtVariable,
+    MathematicalProgram,
+    MeshcatVisualizer,
+    PiecewisePolynomial,
+    Solve,
+    StartMeshcat,
+)
+
 def xyz_rpy_deg(xyz, rpy_deg):
     """Shorthand for defining a pose."""
     rpy_deg = np.asarray(rpy_deg)
     return RigidTransform(RollPitchYaw(rpy_deg * np.pi / 180), xyz)
 
-def start_camera_sim():
-    meshcat = StartMeshcat()
-
+# This one is specific to this notebook, but I'm putting it in the header to make it less distracting.
+def Visualizer(dirstr):
     builder = DiagramBuilder()
-    plant, scene_graph = AddMultibodyPlantSceneGraph(builder, 0.0)
 
-    iiwa_url = (
-        "package://drake/manipulation/models/iiwa_description/sdf/"
-        "iiwa14_no_collision.sdf"
-    )
-
-    mustard = parser.AddModelsFromUrl(
-        "package://drake/manipulation/models/ycb/sdf/006_mustard_bottle.sdf"
-    )[0]
-
-    mustard_body = plant.GetBodyByName("006_mustard_bottle", mustard)
-    plant.SetDefaultFreeBodyPose(mustard_body, xyz_rpy_deg([0, 0, 0.5], [0, 0, 0]))
-
+    # Make plant, scene graph, add body
+    plant, scene_graph = AddMultibodyPlantSceneGraph(builder, time_step=0.0)
+    sugar_box_url = "package://drake/manipulation/models/ycb/sdf/003_cracker_box.sdf"
+    (sugar_box,) = Parser(plant).AddModels(url=sugar_box_url)
+    sugar_box_body = plant.GetBodyByName("base_link_cracker", sugar_box)
+    plant.SetDefaultFreeBodyPose(sugar_box_body, xyz_rpy_deg([0, 0, 0.5], [0, 0, 0]))
+    
+    # Add cameras
     renderer_name = "renderer"
     scene_graph.AddRenderer(
         renderer_name, MakeRenderEngineVtk(RenderEngineVtkParams()))
-
+    
     # N.B. These properties are chosen arbitrarily.
     intrinsics = CameraInfo(
         width=640,
@@ -84,7 +101,17 @@ def start_camera_sim():
         depth_camera=depth_camera,
     )
 
-    instrinsic_matrix = sensor.depth_camera_info().instrinsic_matrix()
+    # Save camera intrinsics here
+    K = sensor.color_camera_info().intrinsic_matrix()
+    if not os.path.exists(dirstr):
+        os.makedirs(dirstr)
+    if not os.path.exists(dirstr+"/RGB/"):
+        os.makedirs(dirstr+"/RGB/")
+    if not os.path.exists(dirstr+"/depth/"):
+        os.makedirs(dirstr+"/depth/")
+    if not os.path.exists(dirstr+"/masks/"):
+        os.makedirs(dirstr+"/masks/")
+    np.savetxt(dirstr+"/cam_k.txt", K)
 
     builder.AddSystem(sensor)
     builder.Connect(
@@ -92,14 +119,60 @@ def start_camera_sim():
         sensor.query_object_input_port(),
     )
 
+    colorize_depth = builder.AddSystem(ColorizeDepthImage())
+    colorize_label = builder.AddSystem(ColorizeLabelImage())
+    colorize_label.background_color.set([0,0,0])
+    builder.Connect(sensor.GetOutputPort("depth_image_32f"),
+                    colorize_depth.GetInputPort("depth_image_32f"))
+    builder.Connect(sensor.GetOutputPort("label_image"),
+                    colorize_label.GetInputPort("label_image"))
+
     plant.Finalize()
+    print(plant.GetStateNames())
 
     AddDefaultVisualization(builder=builder, meshcat=meshcat)
-
     diagram = builder.Build()
-    diagram_context = diagram.CreateDefaultContext()
+    context = diagram.CreateDefaultContext()
+    plant_context = plant.GetMyContextFromRoot(context)
 
-    Simulator(diagram).Initialize()
+    meshcat.Delete()
+
+    def visualize(q, timestr):
+        plant.SetPositions(plant_context, q)
+        diagram.ForcedPublish(context)
+
+        color = sensor.color_image_output_port().Eval(
+            sensor.GetMyContextFromRoot(context)).data
+        depth = colorize_depth.get_output_port().Eval(
+            colorize_depth.GetMyContextFromRoot(context)).data
+        label = colorize_label.get_output_port().Eval(
+            colorize_label.GetMyContextFromRoot(context)).data
+
+        plt.imsave(dirstr+"/RGB/"+timestr+"_color.png", color)
+        plt.imsave(dirstr+"/depth/"+timestr+"_depth.png", depth)
+        plt.imsave(dirstr+"/masks/"+timestr+"_label.png", label)
+
+    return visualize
 
 if __name__ == "__main__":
-    start_camera_sim()
+    meshcat = StartMeshcat()
+
+    visualize = Visualizer("test1")
+
+    meshcat.AddSlider(name="x", value=0, min=-0.5, max=0.5, step=0.01)
+    meshcat.AddSlider(name="y", value=0, min=-0.5, max=0.5, step=0.01)
+    meshcat.AddSlider(name="z", value=0, min=-0.5, max=0.5, step=0.01)
+    meshcat.AddSlider(name="x_rot", value=0, min=-np.pi, max=np.pi, step=0.1)
+    meshcat.AddSlider(name="y_rot", value=0, min=-np.pi, max=np.pi, step=0.1)
+    meshcat.AddSlider(name="z_rot", value=0,  min=-np.pi, max=np.pi, step=0.1)
+
+    meshcat.AddButton("Stop Interaction Loop")
+    time_step = 0
+    while meshcat.GetButtonClicks("Stop Interaction Loop") < 1:
+        q = [1, meshcat.GetSliderValue("x_rot"), meshcat.GetSliderValue("y_rot"), meshcat.GetSliderValue("z_rot"),
+            meshcat.GetSliderValue("x"), meshcat.GetSliderValue("y"), meshcat.GetSliderValue("z")]
+
+        visualize(q, str(time_step))
+        time.sleep(0.03)
+        time_step += 1
+    meshcat.DeleteAddedControls()
