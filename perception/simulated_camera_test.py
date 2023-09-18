@@ -61,16 +61,14 @@ def xyz_rpy_deg(xyz, rpy_deg):
     rpy_deg = np.asarray(rpy_deg)
     return RigidTransform(RollPitchYaw(rpy_deg * np.pi / 180), xyz)
 
-# This one is specific to this notebook, but I'm putting it in the header to make it less distracting.
 def Visualizer(dirstr):
     builder = DiagramBuilder()
 
     # Make plant, scene graph, add body
     plant, scene_graph = AddMultibodyPlantSceneGraph(builder, time_step=0.0)
-    sugar_box_url = "package://drake/manipulation/models/ycb/sdf/003_cracker_box.sdf"
-    (sugar_box,) = Parser(plant).AddModels(url=sugar_box_url)
-    sugar_box_body = plant.GetBodyByName("base_link_cracker", sugar_box)
-    plant.SetDefaultFreeBodyPose(sugar_box_body, xyz_rpy_deg([0, 0, 0.5], [0, 0, 0]))
+    mustard_url = "package://drake/manipulation/models/ycb/sdf/006_mustard_bottle.sdf"
+    (mustard,) = Parser(plant).AddModels(url=mustard_url)
+    mustard_body = plant.GetBodyByName("base_link_mustard", mustard)
     
     # Add cameras
     renderer_name = "renderer"
@@ -105,8 +103,8 @@ def Visualizer(dirstr):
     K = sensor.color_camera_info().intrinsic_matrix()
     if not os.path.exists(dirstr):
         os.makedirs(dirstr)
-    if not os.path.exists(dirstr+"/RGB/"):
-        os.makedirs(dirstr+"/RGB/")
+    if not os.path.exists(dirstr+"/rgb/"):
+        os.makedirs(dirstr+"/rgb/")
     if not os.path.exists(dirstr+"/depth/"):
         os.makedirs(dirstr+"/depth/")
     if not os.path.exists(dirstr+"/masks/"):
@@ -148,9 +146,9 @@ def Visualizer(dirstr):
         label = colorize_label.get_output_port().Eval(
             colorize_label.GetMyContextFromRoot(context)).data
 
-        plt.imsave(dirstr+"/RGB/"+timestr+"_color.png", color)
-        plt.imsave(dirstr+"/depth/"+timestr+"_depth.png", depth)
-        plt.imsave(dirstr+"/masks/"+timestr+"_label.png", label)
+        plt.imsave(dirstr+"/rgb/"+timestr+".png", color)
+        plt.imsave(dirstr+"/depth/"+timestr+".png", depth)
+        plt.imsave(dirstr+"/masks/"+timestr+".png", label)
 
     return visualize
 
@@ -161,7 +159,7 @@ if __name__ == "__main__":
 
     meshcat.AddSlider(name="x", value=0, min=-0.5, max=0.5, step=0.01)
     meshcat.AddSlider(name="y", value=0, min=-0.5, max=0.5, step=0.01)
-    meshcat.AddSlider(name="z", value=0, min=-0.5, max=0.5, step=0.01)
+    meshcat.AddSlider(name="z", value=0.5, min=-0.0, max=1.0, step=0.01)
     meshcat.AddSlider(name="x_rot", value=0, min=-np.pi, max=np.pi, step=0.1)
     meshcat.AddSlider(name="y_rot", value=0, min=-np.pi, max=np.pi, step=0.1)
     meshcat.AddSlider(name="z_rot", value=0,  min=-np.pi, max=np.pi, step=0.1)
