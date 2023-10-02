@@ -1,13 +1,45 @@
-
 directives:
 - add_directives:
     file: package://manipulation/iiwa_and_wsg.dmd.yaml
 - add_model:
-    name: foam_brick
-    file: package://manipulation/hydro/061_foam_brick.sdf
+    name: mustard_bottle
+    file: package://drake/manipulation/models/ycb/sdf/006_mustard_bottle.sdf
     default_free_body_pose:
-        base_link:
+        base_link_mustard:
             translation: [0, -0.6, 0.2]
+- add_frame:
+    name: table_origin
+    X_PF:
+        base_frame: world
+        rotation: !Rpy { deg: [0.0, 0.0, 0.0 ]}
+        translation: [0, 0, 0]
+
+- add_model:
+    name: table
+    file: package://drake/examples/manipulation_station/models/table_wide.sdf
+
+- add_weld:
+    parent: table_origin
+    child: table::table_body
+
+- add_model:
+    name: camera
+    file: package://manipulation/camera_box.sdf
+- add_weld:
+    parent: world
+    child: camera::base
+    X_PC:
+        translation: [0, -1.6, 0.5]
+        # Point slightly down towards camera
+        # RollPitchYaw(0, -0.2, 0.2) @ RollPitchYaw(-np.pi/2, 0, np.pi/2)
+        rotation: !Rpy { deg: [-110, 0, 0] }
+cameras:
+    main_camera:
+        name: camera0
+        depth: True
+        X_PB:
+            base_frame: camera::base
+    
 model_drivers:
     iiwa: !IiwaDriver
       hand_model_name: wsg

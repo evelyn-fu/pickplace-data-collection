@@ -109,7 +109,7 @@ def Visualizer(dirstr):
         os.makedirs(dirstr+"/depth/")
     if not os.path.exists(dirstr+"/masks/"):
         os.makedirs(dirstr+"/masks/")
-    np.savetxt(dirstr+"/cam_k.txt", K)
+    np.savetxt(dirstr+"/cam_K.txt", K)
 
     builder.AddSystem(sensor)
     builder.Connect(
