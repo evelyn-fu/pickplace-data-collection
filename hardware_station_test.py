@@ -176,7 +176,7 @@ def teleop_with_camera(dirstr = "test2"):
         if body.model_instance() == plant.GetModelInstanceByName("mustard_bottle"):
             properties.UpdateProperty("label", "id", RenderLabel(0)) # Make mustard label 0
         else:
-            properties.UpdateProperty("label", "id", RenderLabel.kDoNotRender)
+            properties.UpdateProperty("label", "id", RenderLabel.kDontCare)
         scene_graph.RemoveRole(scene_graph_context, source_id, geometry_id, Role.kPerception)
         scene_graph.AssignRole(scene_graph_context, source_id, geometry_id, properties)
 
