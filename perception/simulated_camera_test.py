@@ -92,7 +92,7 @@ def Visualizer(dirstr):
     depth_camera = DepthRenderCamera(core, DepthRange(0.01, 10.0))
 
     world_id = plant.GetBodyFrameIdOrThrow(plant.world_body().index())
-    X_WB = xyz_rpy_deg([1, 0, 0.75], [-90, 0, 90])
+    X_WB = xyz_rpy_deg([0.5, 0, 0.5], [-90, 0, 90])
     sensor = RgbdSensor(
         world_id,
         X_PB=X_WB,
@@ -162,7 +162,7 @@ def Visualizer(dirstr):
 if __name__ == "__main__":
     meshcat = StartMeshcat()
 
-    visualize = Visualizer("test1_newmasks")
+    visualize = Visualizer("test1")
 
     meshcat.AddSlider(name="x", value=0, min=-0.5, max=0.5, step=0.01)
     meshcat.AddSlider(name="y", value=0, min=-0.5, max=0.5, step=0.01)
