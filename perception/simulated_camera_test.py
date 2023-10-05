@@ -173,11 +173,25 @@ if __name__ == "__main__":
 
     meshcat.AddButton("Stop Interaction Loop")
     time_step = 0
+    x = -3.14
+    y = -3.14
+    z = -3.14
     while meshcat.GetButtonClicks("Stop Interaction Loop") < 1:
-        q = [1, meshcat.GetSliderValue("x_rot"), meshcat.GetSliderValue("y_rot"), meshcat.GetSliderValue("z_rot"),
-            meshcat.GetSliderValue("x"), meshcat.GetSliderValue("y"), meshcat.GetSliderValue("z")]
+        if time_step < 314:
+            x += 0.02
+        elif time_step < 628:
+            y += 0.02
+        elif time_step < 942:
+            z += 0.02
+        else:
+            break
 
-        visualize(q, str(time_step))
-        time.sleep(0.03)
+        # q = [1, meshcat.GetSliderValue("x_rot"), meshcat.GetSliderValue("y_rot"), meshcat.GetSliderValue("z_rot"),
+        #     meshcat.GetSliderValue("x"), meshcat.GetSliderValue("y"), meshcat.GetSliderValue("z")]
+
+        q = [1, x, y, z, meshcat.GetSliderValue("x"), meshcat.GetSliderValue("y"), meshcat.GetSliderValue("z")]
+
+        visualize(q, f"{time_step:03d}")
+        time.sleep(0.01)
         time_step += 1
     meshcat.DeleteAddedControls()
