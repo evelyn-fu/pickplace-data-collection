@@ -1,5 +1,6 @@
 import copy
 import os
+from PIL import Image
 
 import matplotlib.pyplot as plt
 import matplotlib as mpl
@@ -117,14 +118,6 @@ def Visualizer(dirstr):
         sensor.query_object_input_port(),
     )
 
-    colorize_depth = builder.AddSystem(ColorizeDepthImage())
-    colorize_label = builder.AddSystem(ColorizeLabelImage())
-    colorize_label.background_color.set([0,0,0])
-    builder.Connect(sensor.GetOutputPort("depth_image_32f"),
-                    colorize_depth.GetInputPort("depth_image_32f"))
-    builder.Connect(sensor.GetOutputPort("label_image"),
-                    colorize_label.GetInputPort("label_image"))
-
     plant.Finalize()
     print(plant.GetStateNames())
 
@@ -141,21 +134,35 @@ def Visualizer(dirstr):
 
         color = sensor.color_image_output_port().Eval(
             sensor.GetMyContextFromRoot(context)).data
-        depth = colorize_depth.get_output_port().Eval(
-            colorize_depth.GetMyContextFromRoot(context)).data
-        label = colorize_label.get_output_port().Eval(
-            colorize_label.GetMyContextFromRoot(context)).data
+        depth = copy.deepcopy(
+            sensor.GetOutputPort("depth_image_16u").Eval(
+                sensor.GetMyContextFromRoot(context)).data.squeeze()
+        )
+        label_image = copy.deepcopy(
+            sensor.GetOutputPort("label_image").Eval(
+                sensor.GetMyContextFromRoot(context)).data.squeeze()
+        )
 
         plt.imsave(dirstr+"/rgb/"+timestr+".png", color)
-        plt.imsave(dirstr+"/depth/"+timestr+".png", depth)
-        plt.imsave(dirstr+"/masks/"+timestr+".png", label)
+        
+        object_labels = np.unique(label_image)
+        masks = [
+            np.uint8(np.where(label_image == label, 255, 0)) for label in object_labels
+        ]
+
+        mask_pil = Image.fromarray(masks[0])
+        mask_pil.save(dirstr+"/masks/"+timestr+".png")
+
+        depth[depth > 3000] = 3000
+        depth_pil = Image.fromarray(depth)
+        depth_pil.save(dirstr+"/depth/"+timestr+".png")
 
     return visualize
 
 if __name__ == "__main__":
     meshcat = StartMeshcat()
 
-    visualize = Visualizer("test1")
+    visualize = Visualizer("test1_newmasks")
 
     meshcat.AddSlider(name="x", value=0, min=-0.5, max=0.5, step=0.01)
     meshcat.AddSlider(name="y", value=0, min=-0.5, max=0.5, step=0.01)
