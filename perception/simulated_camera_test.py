@@ -92,7 +92,7 @@ def Visualizer(dirstr):
     depth_camera = DepthRenderCamera(core, DepthRange(0.01, 10.0))
 
     world_id = plant.GetBodyFrameIdOrThrow(plant.world_body().index())
-    X_WB = xyz_rpy_deg([2, 0, 0.75], [-90, 0, 90])
+    X_WB = xyz_rpy_deg([1, 0, 0.75], [-90, 0, 90])
     sensor = RgbdSensor(
         world_id,
         X_PB=X_WB,
@@ -167,9 +167,9 @@ if __name__ == "__main__":
     meshcat.AddSlider(name="x", value=0, min=-0.5, max=0.5, step=0.01)
     meshcat.AddSlider(name="y", value=0, min=-0.5, max=0.5, step=0.01)
     meshcat.AddSlider(name="z", value=0.5, min=-0.0, max=1.0, step=0.01)
-    meshcat.AddSlider(name="x_rot", value=0, min=-np.pi, max=np.pi, step=0.1)
-    meshcat.AddSlider(name="y_rot", value=0, min=-np.pi, max=np.pi, step=0.1)
-    meshcat.AddSlider(name="z_rot", value=0,  min=-np.pi, max=np.pi, step=0.1)
+    meshcat.AddSlider(name="x_rot", value=0, min=-np.pi, max=np.pi, step=0.01)
+    meshcat.AddSlider(name="y_rot", value=0, min=-np.pi, max=np.pi, step=0.01)
+    meshcat.AddSlider(name="z_rot", value=0,  min=-np.pi, max=np.pi, step=0.01)
 
     meshcat.AddButton("Stop Interaction Loop")
     time_step = 0
