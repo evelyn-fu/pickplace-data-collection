@@ -101,14 +101,6 @@ def teleop_with_camera(dirstr = "test2"):
         wsg_teleop.get_output_port(0), station.GetInputPort("wsg.position")
     )
 
-    colorize_depth = builder.AddSystem(ColorizeDepthImage())
-    colorize_label = builder.AddSystem(ColorizeLabelImage())
-    colorize_label.background_color.set([0,0,0])
-    builder.Connect(station.GetOutputPort("camera0.depth_image"),
-                    colorize_depth.GetInputPort("depth_image_32f"))
-    builder.Connect(station.GetOutputPort("camera0.label_image"),
-                    colorize_label.GetInputPort("label_image"))
-
     # initialize image writer and save directories
     sensor = station.GetSubsystemByName("rgbd_sensor_camera0")
     K = sensor.color_camera_info().intrinsic_matrix()
@@ -126,21 +118,21 @@ def teleop_with_camera(dirstr = "test2"):
     img_writer.DeclareImageInputPort(
         pixel_type=PixelType.kRgba8U, 
         port_name="RGB", 
-        file_name_format=dirstr+"/{port_name}/{time_usec}",
+        file_name_format=dirstr+"/{port_name}/{time_msec:06}",
         publish_period=0.03,
         start_time=0.0,
     )   
     img_writer.DeclareImageInputPort(
-        pixel_type=PixelType.kRgba8U, 
+        pixel_type=PixelType.kDepth16U, 
         port_name="depth", 
-        file_name_format=dirstr+"/{port_name}/{time_usec}",
+        file_name_format=dirstr+"/{port_name}/{time_msec:06}",
         publish_period=0.03,
         start_time=0.0,
     )   
     img_writer.DeclareImageInputPort(
-        pixel_type=PixelType.kRgba8U, 
+        pixel_type=PixelType.kLabel16I, 
         port_name="masks", 
-        file_name_format=dirstr+"/{port_name}/{time_usec}",
+        file_name_format=dirstr+"/{port_name}/{time_msec:06}",
         publish_period=0.03,
         start_time=0.0,
     )   
@@ -148,9 +140,9 @@ def teleop_with_camera(dirstr = "test2"):
     # Connect to image writer
     builder.Connect(station.GetOutputPort("camera0.rgb_image"),
                     img_writer.GetInputPort("RGB"))
-    builder.Connect(colorize_depth.get_output_port(),
+    builder.Connect(station.GetOutputPort("camera0.depth_image_16u"),
                     img_writer.GetInputPort("depth"))
-    builder.Connect(colorize_label.get_output_port(),
+    builder.Connect(station.GetOutputPort("camera0.label_image"),
                     img_writer.GetInputPort("masks"))
 
     # Build diagram
