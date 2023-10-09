@@ -5,50 +5,27 @@ from PIL import Image
 import matplotlib.pyplot as plt
 from pydrake.geometry import (
     StartMeshcat,
-    SceneGraph,
-    ClippingRange,
-    ColorRenderCamera,
-    DepthRange,
-    DepthRenderCamera,
-    MakeRenderEngineVtk,
-    RenderCameraCore,
-    RenderEngineVtkParams,
     RenderLabel,
     Role,
 )
-from pydrake.multibody.inverse_kinematics import (
-    DifferentialInverseKinematicsParameters,
-    DifferentialInverseKinematicsStatus,
-    DoDifferentialInverseKinematics,
-)
 from pydrake.systems.analysis import Simulator
-from pydrake.systems.framework import DiagramBuilder, EventStatus, LeafSystem
+from pydrake.systems.framework import DiagramBuilder, LeafSystem
 from pydrake.visualization import (
     MeshcatPoseSliders,
-    ColorizeDepthImage,
-    ColorizeLabelImage,
-    AddDefaultVisualization,
 )
 from pydrake.systems.sensors import (
     ImageRgba8U,
     ImageDepth16U,
     ImageLabel16I,
-    CameraInfo,
-    RgbdSensor,
-    ImageWriter,
-    PixelType,
 )
 from pydrake.common.value import Value
-from pydrake.math import RigidTransform, RollPitchYaw
-from pydrake.multibody.plant import AddMultibodyPlantSceneGraph
 
-from manipulation import running_as_notebook
 from manipulation.meshcat_utils import WsgButton
 from manipulation.scenarios import AddIiwaDifferentialIK, ExtractBodyPose
 from manipulation.station import MakeHardwareStation, load_scenario
 
 class ImageSaver(LeafSystem):
-    def __init__(self, dirstr = "test1"):
+    def __init__(self, dirstr = "test2"):
         super().__init__()
 
         self.dirstr = dirstr

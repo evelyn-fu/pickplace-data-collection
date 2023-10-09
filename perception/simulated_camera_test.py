@@ -14,24 +14,11 @@ from pydrake.geometry import (
     MakeRenderEngineVtk,
     RenderCameraCore,
     RenderEngineVtkParams,
-    RenderLabel,
-    Role,
     StartMeshcat,
 )
-from pydrake.math import RigidTransform, RollPitchYaw, RotationMatrix
+from pydrake.math import RigidTransform, RollPitchYaw
 from pydrake.multibody.parsing import Parser
 from pydrake.multibody.plant import AddMultibodyPlantSceneGraph
-from pydrake.multibody.tree import(
-    BodyIndex,
-    BallRpyJoint,
-    RevoluteJoint,
-    PrismaticJoint,
-    SpatialInertia,
-    UnitInertia,
-    FixedOffsetFrame,
-) 
-from pydrake.multibody.meshcat import JointSliders
-from pydrake.systems.analysis import Simulator
 from pydrake.systems.framework import DiagramBuilder
 from pydrake.systems.sensors import (
     CameraInfo,
@@ -39,21 +26,13 @@ from pydrake.systems.sensors import (
 )
 from pydrake.visualization import (
     AddDefaultVisualization,
-    ColorizeDepthImage,
-    ColorizeLabelImage,
 )
 
 import time
 
-from IPython.display import clear_output
 from pydrake.all import (
     AddMultibodyPlantSceneGraph,
     DiagramBuilder,
-    JacobianWrtVariable,
-    MathematicalProgram,
-    MeshcatVisualizer,
-    PiecewisePolynomial,
-    Solve,
     StartMeshcat,
 )
 
