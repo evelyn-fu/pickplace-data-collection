@@ -1,6 +1,8 @@
 import numpy as np
 import os
 import copy
+from PIL import Image
+import matplotlib.pyplot as plt
 from pydrake.geometry import (
     StartMeshcat,
     SceneGraph,
@@ -29,6 +31,8 @@ from pydrake.visualization import (
 )
 from pydrake.systems.sensors import (
     ImageRgba8U,
+    ImageDepth16U,
+    ImageLabel16I,
     CameraInfo,
     RgbdSensor,
     ImageWriter,
@@ -42,6 +46,54 @@ from manipulation import running_as_notebook
 from manipulation.meshcat_utils import WsgButton
 from manipulation.scenarios import AddIiwaDifferentialIK, ExtractBodyPose
 from manipulation.station import MakeHardwareStation, load_scenario
+
+class ImageSaver(LeafSystem):
+    def __init__(self, dirstr = "test1"):
+        super().__init__()
+
+        self.dirstr = dirstr
+        self.DeclareAbstractInputPort(name="rgb_in",
+                                      model_value=Value(ImageRgba8U()))
+        self.DeclareAbstractInputPort(name="depth_in",
+                                      model_value=Value(ImageDepth16U()))
+        self.DeclareAbstractInputPort(name="label_in",
+                                      model_value=Value(ImageLabel16I()))
+
+        # Calling `ForcePublish()` will trigger the callback.
+        self.DeclareForcedPublishEvent(self.Publish)
+
+        # Publish once every second.
+        self.DeclarePeriodicPublishEvent(period_sec=0.03,
+                                         offset_sec=0,
+                                         publish=self.Publish)
+        
+    def Publish(self, context):
+        time_ms = int(context.get_time() * 1000)
+        timestr = f"{time_ms:06d}"
+        
+        color = self.GetInputPort("rgb_in").Eval(context).data
+
+        depth = copy.deepcopy(
+            self.GetInputPort("depth_in").Eval(context).data.squeeze()
+        )
+
+        label_image = copy.deepcopy(
+            self.GetInputPort("label_in").Eval(context).data.squeeze()
+        )
+
+        plt.imsave(self.dirstr+"/rgb/"+timestr+".png", color)
+        
+        object_labels = np.unique(label_image)
+        masks = [
+            np.uint8(np.where(label_image == label, 255, 0)) for label in object_labels
+        ]
+
+        mask_pil = Image.fromarray(masks[0])
+        mask_pil.save(self.dirstr+"/masks/"+timestr+".png")
+
+        depth[depth > 3000] = 3000
+        depth_pil = Image.fromarray(depth)
+        depth_pil.save(self.dirstr+"/depth/"+timestr+".png")
 
 
 def teleop_with_camera(dirstr = "test2"):
@@ -106,48 +158,22 @@ def teleop_with_camera(dirstr = "test2"):
     K = sensor.color_camera_info().intrinsic_matrix()
     if not os.path.exists(dirstr):
         os.makedirs(dirstr)
-    if not os.path.exists(dirstr+"/RGB/"):
-        os.makedirs(dirstr+"/RGB/")
+    if not os.path.exists(dirstr+"/rgb/"):
+        os.makedirs(dirstr+"/rgb/")
     if not os.path.exists(dirstr+"/depth/"):
         os.makedirs(dirstr+"/depth/")
     if not os.path.exists(dirstr+"/masks/"):
         os.makedirs(dirstr+"/masks/")
     np.savetxt(dirstr+"/cam_K.txt", K)
 
-    img_writer = builder.AddSystem(ImageWriter())
-    img_writer.DeclareImageInputPort(
-        pixel_type=PixelType.kRgba8U, 
-        port_name="RGB", 
-        file_name_format=dirstr+"/{port_name}/{time_msec:06}",
-        publish_period=0.03,
-        start_time=0.0,
-    )   
-    img_writer.DeclareImageInputPort(
-        pixel_type=PixelType.kDepth16U, 
-        port_name="depth", 
-        file_name_format=dirstr+"/{port_name}/{time_msec:06}",
-        publish_period=0.03,
-        start_time=0.0,
-    )   
-    img_writer.DeclareImageInputPort(
-        pixel_type=PixelType.kLabel16I, 
-        port_name="masks", 
-        file_name_format=dirstr+"/{port_name}/{time_msec:06}",
-        publish_period=0.03,
-        start_time=0.0,
-    )   
     
-    # Connect to image writer
-    builder.Connect(station.GetOutputPort("camera0.rgb_image"),
-                    img_writer.GetInputPort("RGB"))
-    builder.Connect(station.GetOutputPort("camera0.depth_image_16u"),
-                    img_writer.GetInputPort("depth"))
-    builder.Connect(station.GetOutputPort("camera0.label_image"),
-                    img_writer.GetInputPort("masks"))
+    img_saver = builder.AddSystem(ImageSaver(dirstr))
+    builder.Connect(station.GetOutputPort("camera0.rgb_image"), img_saver.GetInputPort("rgb_in"))
+    builder.Connect(station.GetOutputPort("camera0.depth_image_16u"), img_saver.GetInputPort("depth_in"))
+    builder.Connect(station.GetOutputPort("camera0.label_image"), img_saver.GetInputPort("label_in"))
 
     # Build diagram
     diagram = builder.Build()
-    diagram_context = diagram.CreateDefaultContext()
 
     # Simulate
     simulator = Simulator(diagram)
