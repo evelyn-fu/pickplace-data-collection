@@ -122,7 +122,9 @@ def Visualizer(dirstr):
                 sensor.GetMyContextFromRoot(context)).data.squeeze()
         )
 
-        plt.imsave(dirstr+"/rgb/"+timestr+".png", color)
+        color = color[:, :, :3]
+        color_pil = Image.fromarray(color)
+        color_pil.save(dirstr+"/rgb/"+timestr+".png")
         
         object_labels = np.unique(label_image)
         masks = [
@@ -141,7 +143,7 @@ def Visualizer(dirstr):
 if __name__ == "__main__":
     meshcat = StartMeshcat()
 
-    visualize = Visualizer("test1_manual")
+    visualize = Visualizer("test1")
 
     meshcat.AddSlider(name="x", value=0, min=-0.5, max=0.5, step=0.01)
     meshcat.AddSlider(name="y", value=0, min=-0.5, max=0.5, step=0.01)
@@ -156,19 +158,19 @@ if __name__ == "__main__":
     y = -3.14
     z = -3.14
     while meshcat.GetButtonClicks("Stop Interaction Loop") < 1:
-        # if time_step < 314:
-        #     x += 0.02
-        # elif time_step < 628:
-        #     y += 0.02
-        # elif time_step < 942:
-        #     z += 0.02
-        # else:
-        #     break
+        if time_step < 314:
+            x += 0.02
+        elif time_step < 628:
+            y += 0.02
+        elif time_step < 942:
+            z += 0.02
+        else:
+            break
 
-        # q = [1, x, y, z, meshcat.GetSliderValue("x"), meshcat.GetSliderValue("y"), meshcat.GetSliderValue("z")]
+        q = [1, x, y, z, meshcat.GetSliderValue("x"), meshcat.GetSliderValue("y"), meshcat.GetSliderValue("z")]
 
-        q = [1, meshcat.GetSliderValue("x_rot"), meshcat.GetSliderValue("y_rot"), meshcat.GetSliderValue("z_rot"),
-            meshcat.GetSliderValue("x"), meshcat.GetSliderValue("y"), meshcat.GetSliderValue("z")]
+        # q = [1, meshcat.GetSliderValue("x_rot"), meshcat.GetSliderValue("y_rot"), meshcat.GetSliderValue("z_rot"),
+        #     meshcat.GetSliderValue("x"), meshcat.GetSliderValue("y"), meshcat.GetSliderValue("z")]
 
         visualize(q, f"{time_step:03d}")
         time.sleep(0.01)

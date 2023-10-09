@@ -58,7 +58,9 @@ class ImageSaver(LeafSystem):
             self.GetInputPort("label_in").Eval(context).data.squeeze()
         )
 
-        plt.imsave(self.dirstr+"/rgb/"+timestr+".png", color)
+        color = color[:, :, :3]
+        color_pil = Image.fromarray(color)
+        color_pil.save(self.dirstr+"/rgb/"+timestr+".png")
         
         object_labels = np.unique(label_image)
         masks = [
@@ -188,4 +190,4 @@ def teleop_with_camera(dirstr = "test2"):
 if __name__ == "__main__":
     # Start the visualizer.
     meshcat = StartMeshcat()
-    teleop_with_camera()
+    teleop_with_camera("test2_fix_rgb")

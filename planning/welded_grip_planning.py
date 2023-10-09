@@ -63,7 +63,9 @@ class ImageSaver(LeafSystem):
             self.GetInputPort("label_in").Eval(context).data.squeeze()
         )
 
-        plt.imsave(self.dirstr+"/rgb/"+timestr+".png", color)
+        color = color[:, :, :3]
+        color_pil = Image.fromarray(color)
+        color_pil.save(self.dirstr+"/rgb/"+timestr+".png")
         
         object_labels = np.unique(label_image)
         masks = [
