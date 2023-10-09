@@ -30,8 +30,6 @@ directives:
     child: camera::base
     X_PC:
         translation: [0, -1.2, 0.5]
-        # Point slightly down towards camera
-        # RollPitchYaw(0, -0.2, 0.2) @ RollPitchYaw(-np.pi/2, 0, np.pi/2)
         rotation: !Rpy { deg: [-110, 0, 0] }
 cameras:
     main_camera:
