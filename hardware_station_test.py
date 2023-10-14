@@ -39,7 +39,7 @@ class ImageSaver(LeafSystem):
         # Calling `ForcePublish()` will trigger the callback.
         self.DeclareForcedPublishEvent(self.Publish)
 
-        # Publish once every second.
+        # Publish at 33 fps
         self.DeclarePeriodicPublishEvent(period_sec=0.03,
                                          offset_sec=0,
                                          publish=self.Publish)
@@ -58,18 +58,20 @@ class ImageSaver(LeafSystem):
             self.GetInputPort("label_in").Eval(context).data.squeeze()
         )
 
+        # remove alpha
         color = color[:, :, :3]
         color_pil = Image.fromarray(color)
         color_pil.save(self.dirstr+"/rgb/"+timestr+".png")
         
+        # get mask for bottle
         object_labels = np.unique(label_image)
         masks = [
             np.uint8(np.where(label_image == label, 255, 0)) for label in object_labels
         ]
-
         mask_pil = Image.fromarray(masks[0])
         mask_pil.save(self.dirstr+"/masks/"+timestr+".png")
 
+        # cap depth at 3000mm
         depth[depth > 3000] = 3000
         depth_pil = Image.fromarray(depth)
         depth_pil.save(self.dirstr+"/depth/"+timestr+".png")
@@ -83,7 +85,6 @@ def teleop_with_camera(dirstr = "test2"):
     scenario = load_scenario(filename="scenario_data.yml")
     station = builder.AddSystem(MakeHardwareStation(scenario, meshcat))
 
-    # TODO(russt): Replace with station.AddDiffIk(...)
     controller_plant = station.GetSubsystemByName(
         "iiwa.controller"
     ).get_multibody_plant_for_control()

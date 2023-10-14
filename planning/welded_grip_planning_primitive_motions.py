@@ -29,6 +29,84 @@ from manipulation.meshcat_utils import WsgButton
 from manipulation.scenarios import AddIiwaDifferentialIK, ExtractBodyPose
 from manipulation.station import MakeHardwareStation, load_scenario
 
+# Each motion given by axis of motion (X, Y, Z, y, p, r), direction (1, -1), amount (radians or m), and time it should take (s)
+default_motion_primitives = [
+    ("y", 1, np.pi, 5.0), 
+    ("p", -1, np.pi * 110.0 / 180.0, 3.0),
+    ("p", 1, np.pi * 130.0 / 180.0, 4.0),
+    ("p", -1, np.pi * 20.0 / 180.0, 1.0),
+    ("y", -1, np.pi * 1.5, 10.0),
+    ("y", 1, np.pi * 0.5, 5.0),
+    ("p", 1, np.pi * 110.0 / 180.0, 3.0),
+    ("p", -1, np.pi * 130.0 / 180.0, 4.0),
+    ("p", 1, np.pi * 20.0 / 180.0, 1.0)
+]
+
+# [x, y, z, y, p, r, initialization time]
+default_start_pose = [0.0, -0.5, 0.3, np.pi/2, 0.0, np.pi, 3.0]
+
+axis_index = {"X": 0, "Y": 1, "Z": 2, "y": 3, "p": 4, "r": 5}
+
+class MotionPrimitives(LeafSystem):
+    def __init__(self, motion_map=default_motion_primitives, start_pose=default_start_pose):
+        super().__init__()
+
+        self.times = [0.0, start_pose[6]]
+        self.X = [start_pose[0], start_pose[0]]
+        self.Y = [start_pose[1], start_pose[1]]
+        self.Z = [start_pose[2], start_pose[2]]
+        self.y = [start_pose[3], start_pose[3]]
+        self.p = [start_pose[4], start_pose[4]]
+        self.r = [start_pose[5], start_pose[5]]
+
+        all_checkpoints = [self.X, self.Y, self.Z, self.y, self.p, self.r]
+
+        cur_pose = copy.deepcopy(start_pose)
+        cur_time = start_pose[6]
+        for motion in motion_map:
+            cur_time += motion[3]
+            self.times.append(cur_time)
+
+            cur_pose[axis_index[motion[0]]] += motion[1] * motion[2]
+            for i in range(len(all_checkpoints)):
+                all_checkpoints[i].append(cur_pose[i])
+
+        self.DeclareAbstractOutputPort(name="pose_out",
+                                        alloc=lambda: Value(RigidTransform()),
+                                        calc=self.PoseOut)
+        
+        self.DeclareVectorOutputPort(
+            "wsg_position", 1, self.GripperOut
+        )
+    
+    def PoseOut(self, context, output):
+        t = context.get_time()
+
+        pose_out = RigidTransform()
+        if (t > self.times[-1]):
+            pose_out = RigidTransform(RotationMatrix(RollPitchYaw(self.r[-1], self.p[-1], self.y[-1])), [self.X[-1], self.Y[-1], self.Z[-1]])
+        else:
+            X = np.interp(t, self.times, self.X)
+            Y = np.interp(t, self.times, self.Y)
+            Z = np.interp(t, self.times, self.Z)
+            y = np.interp(t, self.times, self.y)
+            p = np.interp(t, self.times, self.p)
+            r = np.interp(t, self.times, self.r)
+
+            pose_out = RigidTransform(RotationMatrix(RollPitchYaw(r, p, y)), [X, Y, Z])
+
+        output.set_value(pose_out)
+
+    def GripperOut(self, context, output):
+        t = context.get_time()
+
+        position = 0.107  # open
+        if (t >= self.times[1]):
+            position = 0.002  # close
+
+        output.SetAtIndex(0, position)
+
+
 class ImageSaver(LeafSystem):
     def __init__(self, dirstr = "test3"):
         super().__init__()
@@ -44,7 +122,7 @@ class ImageSaver(LeafSystem):
         # Calling `ForcePublish()` will trigger the callback.
         self.DeclareForcedPublishEvent(self.Publish)
 
-        # Publish once every second.
+        # Publish at 33 fps
         self.DeclarePeriodicPublishEvent(period_sec=0.03,
                                          offset_sec=0,
                                          publish=self.Publish)
@@ -63,24 +141,26 @@ class ImageSaver(LeafSystem):
             self.GetInputPort("label_in").Eval(context).data.squeeze()
         )
 
+        # remove alpha
         color = color[:, :, :3]
         color_pil = Image.fromarray(color)
         color_pil.save(self.dirstr+"/rgb/"+timestr+".png")
         
+        # get mask for bottle
         object_labels = np.unique(label_image)
         masks = [
             np.uint8(np.where(label_image == label, 255, 0)) for label in object_labels
         ]
-
         mask_pil = Image.fromarray(masks[0])
         mask_pil.save(self.dirstr+"/masks/"+timestr+".png")
 
+        # cap depth at 3000mm
         depth[depth > 3000] = 3000
         depth_pil = Image.fromarray(depth)
         depth_pil.save(self.dirstr+"/depth/"+timestr+".png")
 
 
-def teleop_with_camera(dirstr = "test3"):
+def motion_primitives_with_camera(dirstr = "test3"):
     meshcat.ResetRenderMode()
 
     builder = DiagramBuilder()
@@ -90,7 +170,6 @@ def teleop_with_camera(dirstr = "test3"):
     scenario = load_scenario(filename=full_file_path)
     station = builder.AddSystem(MakeHardwareStation(scenario, meshcat))
 
-    # TODO(russt): Replace with station.AddDiffIk(...)
     controller_plant = station.GetSubsystemByName(
         "iiwa.controller"
     ).get_multibody_plant_for_control()
@@ -109,37 +188,14 @@ def teleop_with_camera(dirstr = "test3"):
         differential_ik.GetInputPort("robot_state"),
     )
 
-    # Set up teleop widgets.
-    meshcat.DeleteAddedControls()
-    default_pose = RigidTransform(RotationMatrix(RollPitchYaw(3.14, 0.24, 1.57)), [0, -0.44, 0.3])
-    teleop = builder.AddSystem(
-        MeshcatPoseSliders(
-            meshcat,
-            lower_limit=[0, -0.5, -np.pi, -0.6, -0.8, 0.0],
-            upper_limit=[2 * np.pi, np.pi, np.pi, 0.8, 0.3, 1.1],
-            initial_pose=default_pose
-        )
-    )
-    # teleop.SetPose(RigidTransform(RotationMatrix(RollPitchYaw()), [0, 0, 0.3]))
+    # Set up motion primitives
+    motion_primitives = builder.AddSystem(MotionPrimitives())
+    
     builder.Connect(
-        teleop.get_output_port(), differential_ik.GetInputPort("X_WE_desired")
-    )
-    # Note: This is using "Cheat Ports". For it to work on hardware, we would
-    # need to construct the initial pose from the HardwareStation outputs.
-    plant = station.GetSubsystemByName("plant")
-    ee_pose = builder.AddSystem(
-        ExtractBodyPose(
-            station.GetOutputPort("body_poses"),
-            plant.GetBodyByName("iiwa_link_7").index(),
-        )
+        motion_primitives.GetOutputPort("pose_out"), differential_ik.GetInputPort("X_WE_desired")
     )
     builder.Connect(
-        station.GetOutputPort("body_poses"), ee_pose.get_input_port()
-    )
-    builder.Connect(ee_pose.get_output_port(), teleop.get_input_port())
-    wsg_teleop = builder.AddSystem(WsgButton(meshcat))
-    builder.Connect(
-        wsg_teleop.get_output_port(0), station.GetInputPort("wsg.position")
+        motion_primitives.GetOutputPort("wsg_position"), station.GetInputPort("wsg.position")
     )
 
     # initialize image writer and save directories
@@ -170,6 +226,7 @@ def teleop_with_camera(dirstr = "test3"):
 
     # Remove labels of anything but mustard
     scene_graph = station.GetSubsystemByName("scene_graph")
+    plant = station.GetSubsystemByName("plant")
     source_id = plant.get_source_id()
     scene_graph_context = scene_graph.GetMyMutableContextFromRoot(simulator_context)
     query_object = scene_graph.get_query_output_port().Eval(scene_graph_context)
@@ -200,4 +257,4 @@ def teleop_with_camera(dirstr = "test3"):
 if __name__ == "__main__":
     # Start the visualizer.
     meshcat = StartMeshcat()
-    teleop_with_camera()
+    motion_primitives_with_camera()
