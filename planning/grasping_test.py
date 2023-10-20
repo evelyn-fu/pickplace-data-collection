@@ -19,6 +19,10 @@ from pydrake.systems.sensors import (
     ImageLabel16I,
 )
 from pydrake.common.value import Value
+from pydrake.perception import (
+    Concatenate,
+    DepthImageToPointCloud
+)
 
 from manipulation.meshcat_utils import WsgButton
 from manipulation.scenarios import AddIiwaDifferentialIK, ExtractBodyPose
@@ -77,12 +81,42 @@ class ImageSaver(LeafSystem):
         depth_pil.save(self.dirstr+"/depth/"+timestr+".png")
 
 
+def process_point_cloud(diagram, station, context, cameras):
+    plant = station.GetSubsystemByName("plant")
+    plant_context = plant.GetMyContextFromRoot(context)
+
+    pcd = []
+    for i in range(3):
+        cloud = diagram.GetOutputPort(f"{cameras[i]}_point_cloud").Eval(
+            context
+        )
+
+        # Crop to region of interest.
+        pcd.append(cloud.Crop(lower_xyz=[-0.5, -1.0, 0.01], upper_xyz=[0.5, -0.3, 0.2]))
+        # Estimate normals
+        pcd[i].EstimateNormals(radius=0.1, num_closest=30)
+
+        # Flip normals toward camera
+        camera = plant.GetModelInstanceByName(cameras[i])
+        body = plant.GetBodyByName("base", camera)
+        X_C = plant.EvalBodyPoseInWorld(plant_context, body)
+        pcd[i].FlipNormalsTowardPoint(X_C.translation())
+
+    # Merge point clouds.
+    merged_pcd = Concatenate(pcd)
+
+    # Voxelize down-sample.  (Note that the normals still look reasonable)
+    return merged_pcd.VoxelizedDownSample(voxel_size=0.005)
+
+
 def teleop_with_camera(dirstr = "test2"):
     meshcat.ResetRenderMode()
 
     builder = DiagramBuilder()
 
-    scenario = load_scenario(filename="scenario_data.yml")
+    dir_path = os.path.dirname(os.path.realpath(__file__))
+    filename = os.path.join(dir_path, "scenario_data_grasping.yml")
+    scenario = load_scenario(filename=filename)
     station = builder.AddSystem(MakeHardwareStation(scenario, meshcat))
 
     controller_plant = station.GetSubsystemByName(
@@ -134,8 +168,10 @@ def teleop_with_camera(dirstr = "test2"):
     )
 
     # initialize image writer and save directories
-    sensor = station.GetSubsystemByName("rgbd_sensor_camera0")
-    K = sensor.color_camera_info().intrinsic_matrix()
+    camera0 = station.GetSubsystemByName("rgbd_sensor_camera0")
+    camera1 = station.GetSubsystemByName("rgbd_sensor_camera1")
+    camera2 = station.GetSubsystemByName("rgbd_sensor_camera2")
+    K = camera0.color_camera_info().intrinsic_matrix()
     if not os.path.exists(dirstr):
         os.makedirs(dirstr)
     if not os.path.exists(dirstr+"/rgb/"):
@@ -151,6 +187,70 @@ def teleop_with_camera(dirstr = "test2"):
     builder.Connect(station.GetOutputPort("camera0.rgb_image"), img_saver.GetInputPort("rgb_in"))
     builder.Connect(station.GetOutputPort("camera0.depth_image_16u"), img_saver.GetInputPort("depth_in"))
     builder.Connect(station.GetOutputPort("camera0.label_image"), img_saver.GetInputPort("label_in"))
+
+    # initialize point cloud output ports
+    camera0_pcd = builder.AddSystem(DepthImageToPointCloud(camera0.depth_camera_info()))
+    camera1_pcd = builder.AddSystem(DepthImageToPointCloud(camera1.depth_camera_info()))
+    camera2_pcd = builder.AddSystem(DepthImageToPointCloud(camera2.depth_camera_info()))
+
+    builder.Connect(station.GetOutputPort("camera0.depth_image"), camera0_pcd.GetInputPort("depth_image"))
+    # builder.Connect(station.GetOutputPort("camera0.rgb_image"), camera0_pcd.color_image_input_port())
+    camera_pose0 = builder.AddSystem(
+        ExtractBodyPose(
+            plant.get_body_poses_output_port(), plant.GetBodyIndices(plant.GetModelInstanceByName("camera_main"))[0]
+        )
+    )
+    builder.Connect(
+        station.GetOutputPort("body_poses"),
+        camera_pose0.get_input_port(),
+    )
+    builder.Connect(
+        camera_pose0.get_output_port(),
+        camera0_pcd.GetInputPort("camera_pose"),
+    )
+
+    builder.Connect(station.GetOutputPort("camera1.depth_image"), camera1_pcd.GetInputPort("depth_image"))
+    # builder.Connect(station.GetOutputPort("camera1.rgb_image"), camera1_pcd.color_image_input_port())
+    camera_pose1 = builder.AddSystem(
+        ExtractBodyPose(
+            plant.get_body_poses_output_port(), plant.GetBodyIndices(plant.GetModelInstanceByName("camera_1"))[0]
+        )
+    )
+    builder.Connect(
+        station.GetOutputPort("body_poses"),
+        camera_pose1.get_input_port(),
+    )
+    builder.Connect(
+        camera_pose1.get_output_port(),
+        camera1_pcd.GetInputPort("camera_pose"),
+    )
+
+    builder.Connect(station.GetOutputPort("camera2.depth_image"), camera2_pcd.GetInputPort("depth_image"))
+    # builder.Connect(station.GetOutputPort("camera2.rgb_image"), camera2_pcd.color_image_input_port())
+    camera_pose2 = builder.AddSystem(
+        ExtractBodyPose(
+            plant.get_body_poses_output_port(), plant.GetBodyIndices(plant.GetModelInstanceByName("camera_2"))[0]
+        )
+    )
+    builder.Connect(
+        station.GetOutputPort("body_poses"),
+        camera_pose2.get_input_port(),
+    )
+    builder.Connect(
+        camera_pose2.get_output_port(),
+        camera2_pcd.GetInputPort("camera_pose"),
+    )
+
+    # Expore point cloud output ports
+    builder.ExportOutput(
+        camera0_pcd.GetOutputPort("point_cloud"), "camera_main_point_cloud"
+    )
+    builder.ExportOutput(
+        camera1_pcd.GetOutputPort("point_cloud"), "camera_1_point_cloud"
+    )
+    builder.ExportOutput(
+        camera1_pcd.GetOutputPort("point_cloud"), "camera_2_point_cloud"
+    )
 
     # Build diagram
     diagram = builder.Build()
@@ -178,13 +278,14 @@ def teleop_with_camera(dirstr = "test2"):
         scene_graph.RemoveRole(scene_graph_context, source_id, geometry_id, Role.kPerception)
         scene_graph.AssignRole(scene_graph_context, source_id, geometry_id, properties)
 
-
     simulator.set_target_realtime_rate(1.0)
 
     meshcat.AddButton("Stop Simulation", "Escape")
     print("Press Escape to stop the simulation")
     while meshcat.GetButtonClicks("Stop Simulation") < 1:
         simulator.AdvanceTo(simulator.get_context().get_time() + 0.03)
+        pcd = process_point_cloud(diagram, station, simulator_context, ["camera_main", "camera_1", "camera_2"])
+        meshcat.SetObject("cloud", pcd, point_size=0.001)
     meshcat.DeleteButton("Stop Simulation")
 
 
@@ -192,6 +293,5 @@ if __name__ == "__main__":
     # Start the visualizer.
     meshcat = StartMeshcat()
 
-    dir_path = os.path.dirname(os.path.realpath(__file__))
-    save_dir_path = os.path.join(os.path.join(dir_path, "tests"), "test2_fix_rgb")
+    save_dir_path = os.path.abspath(os.path.join(os.path.dirname( __file__ ), '..', 'tests', 'test_grasping'))
     teleop_with_camera(save_dir_path)
