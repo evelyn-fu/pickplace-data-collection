@@ -32,18 +32,18 @@ from manipulation.station import MakeHardwareStation, load_scenario
 # Each motion given by axis of motion (X, Y, Z, y, p, r), direction (1, -1), amount (radians or m), and time it should take (s)
 default_motion_primitives = [
     ("y", 1, np.pi, 5.0), 
-    ("p", -1, np.pi * 110.0 / 180.0, 3.0),
-    ("p", 1, np.pi * 130.0 / 180.0, 4.0),
-    ("p", -1, np.pi * 20.0 / 180.0, 1.0),
+    # ("p", -1, np.pi * 110.0 / 180.0, 3.0),
+    # ("p", 1, np.pi * 130.0 / 180.0, 4.0),
+    # ("p", -1, np.pi * 20.0 / 180.0, 1.0),
     ("y", -1, np.pi * 1.5, 10.0),
     ("y", 1, np.pi * 0.5, 5.0),
-    ("p", 1, np.pi * 110.0 / 180.0, 3.0),
-    ("p", -1, np.pi * 130.0 / 180.0, 4.0),
-    ("p", 1, np.pi * 20.0 / 180.0, 1.0)
+    # ("p", 1, np.pi * 110.0 / 180.0, 3.0),
+    # ("p", -1, np.pi * 130.0 / 180.0, 4.0),
+    # ("p", 1, np.pi * 20.0 / 180.0, 1.0)
 ]
 
 # [x, y, z, y, p, r, initialization time]
-default_start_pose = [0.0, -0.5, 0.3, np.pi/2, 0.0, np.pi, 3.0]
+default_start_pose = [0.0, -0.5, 0.35, np.pi/2, 0.0, np.pi, 3.0]
 
 axis_index = {"X": 0, "Y": 1, "Z": 2, "y": 3, "p": 4, "r": 5}
 
@@ -160,13 +160,13 @@ class ImageSaver(LeafSystem):
         depth_pil.save(self.dirstr+"/depth/"+timestr+".png")
 
 
-def motion_primitives_with_camera(dirstr = "test3"):
+def motion_primitives_with_camera(dirstr = "test3", scenario_data_filename="scenario_data_welded.yml"):
     meshcat.ResetRenderMode()
 
     builder = DiagramBuilder()
 
     cwd = os.path.abspath(os.path.dirname(__file__))
-    full_file_path = os.path.join(cwd, "scenario_data_welded.yml")
+    full_file_path = os.path.join(cwd, scenario_data_filename)
     scenario = load_scenario(filename=full_file_path)
     station = builder.AddSystem(MakeHardwareStation(scenario, meshcat))
 
@@ -257,4 +257,4 @@ def motion_primitives_with_camera(dirstr = "test3"):
 if __name__ == "__main__":
     # Start the visualizer.
     meshcat = StartMeshcat()
-    motion_primitives_with_camera()
+    motion_primitives_with_camera(dirstr="test_welded_short_grip", scenario_data_filename="scenario_data_welded_short_axis_grip.yml")
