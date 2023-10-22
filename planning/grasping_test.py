@@ -2,6 +2,7 @@ import numpy as np
 import os
 import copy
 from PIL import Image
+from grasp import GraspListener
 import matplotlib.pyplot as plt
 from pydrake.geometry import (
     StartMeshcat,
@@ -23,10 +24,38 @@ from pydrake.perception import (
     Concatenate,
     DepthImageToPointCloud
 )
+from pydrake.math import (
+    RigidTransform,
+    RotationMatrix,
+    RollPitchYaw,
+)
+from pydrake.common.value import Value
 
 from manipulation.meshcat_utils import WsgButton
 from manipulation.scenarios import AddIiwaDifferentialIK, ExtractBodyPose
 from manipulation.station import MakeHardwareStation, load_scenario
+
+default_start_pose = [0.0, -0.5, 0.5, np.pi/2, 0.0, np.pi, 3.0]
+
+class GraspSelector(LeafSystem):
+    def __init__(self, start_pose=default_start_pose):
+        super().__init__()
+
+        X = start_pose[0]
+        Y = start_pose[1]
+        Z = start_pose[2]
+        y = start_pose[3]
+        p = start_pose[4]
+        r = start_pose[5]
+        self.pose_out = RigidTransform(RotationMatrix(RollPitchYaw(r, p, y)), [X, Y, Z])
+
+        self.DeclareAbstractOutputPort(name="pose_out",
+                                        alloc=lambda: Value(RigidTransform()),
+                                        calc=self.PoseOut)
+    
+    def PoseOut(self, context, output):
+        output.set_value(self.pose_out)
+
 
 class ImageSaver(LeafSystem):
     def __init__(self, dirstr = "test2"):
@@ -108,8 +137,7 @@ def process_point_cloud(diagram, station, context, cameras):
     # Voxelize down-sample.  (Note that the normals still look reasonable)
     return merged_pcd.VoxelizedDownSample(voxel_size=0.005)
 
-
-def teleop_with_camera(dirstr = "test2"):
+def start_scenario(dirstr = "test4"):
     meshcat.ResetRenderMode()
 
     builder = DiagramBuilder()
@@ -139,29 +167,11 @@ def teleop_with_camera(dirstr = "test2"):
 
     # Set up teleop widgets.
     meshcat.DeleteAddedControls()
-    teleop = builder.AddSystem(
-        MeshcatPoseSliders(
-            meshcat,
-            lower_limit=[0, -0.5, -np.pi, -0.6, -0.8, 0.0],
-            upper_limit=[2 * np.pi, np.pi, np.pi, 0.8, 0.3, 1.1],
-        )
-    )
+    grasp_selector = builder.AddSystem(GraspSelector())
+    
     builder.Connect(
-        teleop.get_output_port(), differential_ik.GetInputPort("X_WE_desired")
+        grasp_selector.GetOutputPort("pose_out"), differential_ik.GetInputPort("X_WE_desired")
     )
-    # Note: This is using "Cheat Ports". For it to work on hardware, we would
-    # need to construct the initial pose from the HardwareStation outputs.
-    plant = station.GetSubsystemByName("plant")
-    ee_pose = builder.AddSystem(
-        ExtractBodyPose(
-            station.GetOutputPort("body_poses"),
-            plant.GetBodyByName("iiwa_link_7").index(),
-        )
-    )
-    builder.Connect(
-        station.GetOutputPort("body_poses"), ee_pose.get_input_port()
-    )
-    builder.Connect(ee_pose.get_output_port(), teleop.get_input_port())
     wsg_teleop = builder.AddSystem(WsgButton(meshcat))
     builder.Connect(
         wsg_teleop.get_output_port(0), station.GetInputPort("wsg.position")
@@ -188,6 +198,7 @@ def teleop_with_camera(dirstr = "test2"):
     builder.Connect(station.GetOutputPort("camera0.depth_image_16u"), img_saver.GetInputPort("depth_in"))
     builder.Connect(station.GetOutputPort("camera0.label_image"), img_saver.GetInputPort("label_in"))
 
+    plant = station.GetSubsystemByName("plant")
     # initialize point cloud output ports
     camera0_pcd = builder.AddSystem(DepthImageToPointCloud(camera0.depth_camera_info()))
     camera1_pcd = builder.AddSystem(DepthImageToPointCloud(camera1.depth_camera_info()))
@@ -280,12 +291,25 @@ def teleop_with_camera(dirstr = "test2"):
 
     simulator.set_target_realtime_rate(1.0)
 
+    grasp_btn_presses = 0
+    grasp_node = GraspListener()
     meshcat.AddButton("Stop Simulation", "Escape")
+    meshcat.AddButton("Compute Grasps")
     print("Press Escape to stop the simulation")
     while meshcat.GetButtonClicks("Stop Simulation") < 1:
         simulator.AdvanceTo(simulator.get_context().get_time() + 0.03)
-        pcd = process_point_cloud(diagram, station, simulator_context, ["camera_main", "camera_1", "camera_2"])
-        meshcat.SetObject("cloud", pcd, point_size=0.001)
+        
+        if (meshcat.GetButtonClicks("Compute Grasps") > grasp_btn_presses):
+            pcd = process_point_cloud(diagram, station, simulator_context, ["camera_main", "camera_1", "camera_2"])
+            meshcat.SetObject("cloud", pcd, point_size=0.001)
+
+            grasp_node.compute_candidate_grasps(pcd)
+            grasps = grasp_node.get_best_grasps(candidate_num=10)
+
+            print(grasps)
+            grasp_selector.pose_out = grasps[0] # lol i havent made this collision free traj yet
+
+        grasp_btn_presses = meshcat.GetButtonClicks("Compute Grasps")
     meshcat.DeleteButton("Stop Simulation")
 
 
@@ -294,4 +318,4 @@ if __name__ == "__main__":
     meshcat = StartMeshcat()
 
     save_dir_path = os.path.abspath(os.path.join(os.path.dirname( __file__ ), '..', 'tests', 'test_grasping'))
-    teleop_with_camera(save_dir_path)
+    start_scenario(save_dir_path)
