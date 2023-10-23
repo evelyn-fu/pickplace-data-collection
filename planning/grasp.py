@@ -13,7 +13,11 @@ from pydrake.all import (
     RigidTransform,
     RotationMatrix,
     RollPitchYaw,
+    DiagramBuilder,
+    AddMultibodyPlantSceneGraph,
+    Parser,
 )
+from manipulation.utils import ConfigureParser
 from scipy.spatial import KDTree
 from scipy.spatial.transform import Rotation as R
 from misc.sdf_tools import SignedDensityField
@@ -31,10 +35,23 @@ class GraspListener():
             hand_finger_path = os.path.abspath(os.path.join(os.path.dirname( __file__ ), 'misc', 'hand_finger.sdf'))
         self.hand_collision_model = SignedDensityField.from_sdf(hand_finger_path)
 
+        builder = DiagramBuilder()
+        self.plant, self.scene_graph = AddMultibodyPlantSceneGraph(builder, time_step=0.0005)
+        parser = Parser(self.plant)
+        ConfigureParser(parser)
+        parser.AddModelsFromUrl("package://manipulation/schunk_wsg_50_welded_fingers.sdf")
+        self.plant.Finalize()
+
+        diagram = builder.Build()
+        context = diagram.CreateDefaultContext()
+
+        self.plant_context = self.plant.GetMyContextFromRoot(context)
+        self.scene_graph_context = self.scene_graph.GetMyContextFromRoot(context)
+
     def check_collision(self, pcd, X_G, visualize=False):
         """Returns true if not in collision and false otherwise."""
         thre = 0.0
-        sdf = self.compute_sdf_fast(pcd, X_G, visualize)
+        sdf = self.compute_sdf(pcd, X_G, visualize)
         return sdf > thre
 
     def compute_darboux_frame(self, point, normal, pcd, kdtree, ball_radius=0.002, max_nn=50):
@@ -110,14 +127,13 @@ class GraspListener():
 
     def compute_sdf(self, pcd, X_G, visualize=False):
         """Computes the signed distance from scratch via Drake query_object."""
-
-        plant, scene_graph, diagram, context = self.drake_env.get_env_param()
-        plant_context = plant.GetMyContextFromRoot(context)
-        scene_graph_context = scene_graph.GetMyContextFromRoot(context)
+        #print("start compute sdf")
 
         # not a free body set freebody pose will fail
-        plant.SetFreeBodyPose(plant_context, plant.GetBodyByName("panda_hand"), X_G)
-        query_object = scene_graph.get_query_output_port().Eval(scene_graph_context)
+        X_WGfix = RigidTransform(RotationMatrix(RollPitchYaw(np.pi/2, 0, 0)))
+        print("pls fix it", X_G.multiply(X_WGfix))
+        self.plant.SetFreeBodyPose(self.plant_context, self.plant.GetBodyByName("body"), X_G.multiply(X_WGfix))
+        query_object = self.scene_graph.get_query_output_port().Eval(self.scene_graph_context)
         pcd_sdf = np.inf
 
         for pt in pcd.xyzs().T:
@@ -127,6 +143,7 @@ class GraspListener():
                 if distance < pcd_sdf:
                     pcd_sdf = distance
 
+        print("finish compute sdf", pcd_sdf)
         return pcd_sdf
 
     def compute_sdf_fast(self, pcd, X_G, visualize=False):
@@ -167,20 +184,31 @@ class GraspListener():
         signed_distance = -np.inf
         X_WGnew = RigidTransform()
 
+        # print("searching z grid")
         for z in z_grid:
             # Record the computed values using last z.
             last_signed_distance = signed_distance
             X_WGlast = X_WGnew
 
-            # Compute new values.
-            X_WGnew = X_WG.multiply(RigidTransform([0.0, 0, z]))
-            signed_distance = self.compute_sdf_fast(pcd, X_WGnew)
+            # Compute new values.)
+            X_WGnew = X_WG.multiply(RigidTransform([0.0, 0.0, z]))
+            print(z, X_WGnew)
+
+            # visualize 
+            manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
+            manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
+            viz_geoms = [manipuland_cloud]
+            viz_geoms.append(self.make_gripper_line_set(X_WGnew.GetAsMatrix4(), [0.0, 1.0, 0.0]))
+            o3d.visualization.draw_geometries(viz_geoms)
+
+            signed_distance = self.compute_sdf(pcd, X_WGnew)
 
             # If the value crossed for the first time, return.
             thre = 0.0
             if (last_signed_distance > thre) and (signed_distance < thre):
                 return last_signed_distance, X_WGlast
 
+        print("discarded")
         # If nothing is returned after line search, discard the sample by sending None.
         return np.nan, None
 
@@ -481,6 +509,29 @@ class GraspListener():
         line_set.colors = o3d.utility.Vector3dVector([color for _ in range(len(line_index))])
         line_set.transform(pose)
         return line_set
+    
+    @staticmethod
+    def make_triad_line_set(pose: np.ndarray, color=(1, 0, 0)):
+        """
+        Returns an Open3D LineSet for a triad.
+        :param pose: The homogenous pose of shape (4,4).
+        """
+        hand_anchor_points = np.array(
+            [
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+            ]
+        )
+        line_index = [[0, 1], [0, 2], [0, 3]]
+
+        line_set = o3d.geometry.LineSet()
+        line_set.points = o3d.utility.Vector3dVector(hand_anchor_points)
+        line_set.lines = o3d.utility.Vector2iVector(line_index)
+        line_set.colors = o3d.utility.Vector3dVector([color for _ in range(len(line_index))])
+        line_set.transform(pose)
+        return line_set
 
     def compute_candidate_grasps(
         self, pcd: PointCloud, candidate_num=30, num_samples=20, random_seed=5
@@ -566,6 +617,12 @@ class GraspListener():
                             # TODO: Explore whether it is faster to do this transform in numpy
                             X_PPnew = RigidTransform(RollPitchYaw(roll, 0.0, yaw), np.array([0, y, 0]))
                             X_WPnew = X_WP.multiply(X_PPnew)
+
+                            # visualize
+                            # manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
+                            # manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
+                            # o3d.visualization.draw_geometries([manipuland_cloud, self.make_triad_line_set(X_WP.GetAsMatrix4(), [0.0, 1.0, 0.0])])
+                            print("darboux frame", X_WP)
 
                             # Compute a new transform that minimizes y-direction distance without penetration
                             distance, X_WPnew = self.find_minimum_distance(pcd, X_WPnew)
