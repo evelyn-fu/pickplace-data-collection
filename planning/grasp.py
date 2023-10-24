@@ -130,7 +130,7 @@ class GraspListener():
         #print("start compute sdf")
 
         # not a free body set freebody pose will fail
-        X_WGfix = RigidTransform(RotationMatrix(RollPitchYaw(np.pi/2, 0, 0)))
+        X_WGfix = RigidTransform(RotationMatrix(RollPitchYaw(np.pi/2, 0, np.pi/2)))
         print("pls fix it", X_G.multiply(X_WGfix))
         self.plant.SetFreeBodyPose(self.plant_context, self.plant.GetBodyByName("body"), X_G.multiply(X_WGfix))
         query_object = self.scene_graph.get_query_output_port().Eval(self.scene_graph_context)
@@ -194,14 +194,15 @@ class GraspListener():
             X_WGnew = X_WG.multiply(RigidTransform([0.0, 0.0, z]))
             print(z, X_WGnew)
 
-            # visualize 
             manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
             manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
             viz_geoms = [manipuland_cloud]
             viz_geoms.append(self.make_gripper_line_set(X_WGnew.GetAsMatrix4(), [0.0, 1.0, 0.0]))
-            o3d.visualization.draw_geometries(viz_geoms)
 
             signed_distance = self.compute_sdf(pcd, X_WGnew)
+
+            # visualize 
+            # o3d.visualization.draw_geometries(viz_geoms)
 
             # If the value crossed for the first time, return.
             thre = 0.0

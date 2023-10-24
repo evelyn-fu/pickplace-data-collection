@@ -307,7 +307,14 @@ def start_scenario(dirstr = "test4"):
             grasps = grasp_node.get_best_grasps(candidate_num=10)
 
             print(grasps)
-            grasp_selector.pose_out = grasps[0] # lol i havent made this collision free traj yet
+            
+            # get end effector pose from grasp pose
+            X_GE = RigidTransform(RotationMatrix(RollPitchYaw(0, 0, 0)), [0, 0, -0.09])
+
+            ee_grasps = [X_WG.multiply(X_GE) for X_WG in grasps]
+
+            print("end effector poses:", ee_grasps)
+            grasp_selector.pose_out = ee_grasps[0] # lol i havent made this collision free traj yet
 
         grasp_btn_presses = meshcat.GetButtonClicks("Compute Grasps")
     meshcat.DeleteButton("Stop Simulation")
