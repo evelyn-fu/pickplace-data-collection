@@ -150,7 +150,7 @@ class Planner(LeafSystem):
             # Flip normals toward camera
             X_WC = body_poses[self._camera_body_indices[i]]
             pcd[i].FlipNormalsTowardPoint(X_WC.translation())
-        merged_pcd = Concatenate(pcd)[default_display_start_pose, default_display_1, default_display_2, default_display_3]
+        merged_pcd = Concatenate(pcd)
 
         down_sampled_pcd = merged_pcd.VoxelizedDownSample(voxel_size=0.005)
         meshcat.SetObject("cloud", down_sampled_pcd, point_size=0.001)
