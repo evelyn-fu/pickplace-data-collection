@@ -12,14 +12,13 @@ from pydrake.all import (
 
 def MakeGripperFrames(X_G, t0=0):
     """
-    Takes a partial specification with X_G["initial"], X_G["pick"], and
-    X_G["display_traj"] which is a list of poses of any size,
+    Takes a partial specification with X_G["initial"], X_G["pick"],
+    X_G["display_traj"] (a list of poses of any length), and X_G["end"],
     and returns a X_G and times with all of the pick and display
     frames populated.
     """
     # put down where it was picked up, return gripper to initial position
     X_G["place"] = X_G["pick"]
-    X_G["end"] = X_G["initial"]
 
     # pregrasp is negative z in the gripper frame
     X_GgraspGpregrasp = RigidTransform([0, 0.0, -0.09])

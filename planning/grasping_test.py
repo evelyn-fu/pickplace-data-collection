@@ -2,13 +2,13 @@ import numpy as np
 import os
 import copy
 from PIL import Image
+from scipy.spatial.transform import Rotation as R
 from grasp import GraspListener
 from trajectories import (
     MakeGripperCommandTrajectory,
     MakeGripperFrames,
     MakeGripperPoseTrajectory,
 )
-import matplotlib.pyplot as plt
 from pydrake.geometry import (
     StartMeshcat,
     RenderLabel,
@@ -16,9 +16,6 @@ from pydrake.geometry import (
 )
 from pydrake.systems.analysis import Simulator
 from pydrake.systems.framework import DiagramBuilder, LeafSystem
-from pydrake.visualization import (
-    MeshcatPoseSliders,
-)
 from pydrake.systems.sensors import (
     ImageRgba8U,
     ImageDepth16U,
@@ -44,7 +41,7 @@ from pydrake.trajectories import (
     PiecewisePolynomial
 )
 
-from manipulation.meshcat_utils import WsgButton
+from manipulation.meshcat_utils import AddMeshcatTriad
 from manipulation.scenarios import AddIiwaDifferentialIK, ExtractBodyPose
 from manipulation.station import MakeHardwareStation, load_scenario
 from enum import Enum
@@ -112,6 +109,7 @@ class Planner(LeafSystem):
         self.DeclarePeriodicUnrestrictedUpdateEvent(0.1, 0.0, self.Update)
 
         self.grasp_node = GraspListener()
+        self.meshcat = meshcat
 
     def Update(self, context, state):
         mode = context.get_abstract_state(int(self._mode_index)).get_value()
@@ -121,10 +119,20 @@ class Planner(LeafSystem):
 
         if mode == PlannerState.WAIT_FOR_OBJECTS_TO_SETTLE:
             if current_time - times["initial"] > 1.0:
-                self.Plan(context, state)
                 state.get_mutable_abstract_state(
                     int(self._mode_index)
                 ).set_value(PlannerState.GRASP1)
+                self.Plan(context, state)
+            return
+        if mode == PlannerState.GRASP1:
+            traj_X_G = context.get_abstract_state(
+                int(self._traj_X_G_index)
+            ).get_value()
+            if traj_X_G.get_number_of_segments() > 0 and (not traj_X_G.is_time_in_range(context.get_time())):
+                state.get_mutable_abstract_state(
+                    int(self._mode_index)
+                ).set_value(PlannerState.GRASP2)
+                self.Plan(context, state)
             return
 
     def Plan(self, context, state):
@@ -133,7 +141,8 @@ class Planner(LeafSystem):
         X_G = {
             "initial": self.get_input_port(3).Eval(context)[
                 int(self._gripper_body_index)
-            ]
+            ],
+            "end": default_home_pose
         }
 
         # Get pcd and select grasp
@@ -153,9 +162,26 @@ class Planner(LeafSystem):
         merged_pcd = Concatenate(pcd)
 
         down_sampled_pcd = merged_pcd.VoxelizedDownSample(voxel_size=0.005)
-        meshcat.SetObject("cloud", down_sampled_pcd, point_size=0.001)
+        self.meshcat.SetObject("cloud", down_sampled_pcd, point_size=0.001)
 
-        self.grasp_node.compute_candidate_grasps(down_sampled_pcd)
+        pcd_points = down_sampled_pcd.xyzs().T
+        principal_component, secondary_component, minor_component = compute_principal_minor_components(pcd_points)
+
+        # visualize axes, principal axis is z axis (blue), minor axis is x axis (red)
+        z_axis, x_axis = [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]
+        rot_principal_component_to_axes, _ = R.align_vectors(
+            np.array([z_axis, x_axis]), np.stack([principal_component, minor_component])
+        )
+        com = np.mean(pcd_points, axis=0)
+        AddMeshcatTriad(self.meshcat, "principal axis", 
+                        X_PT=RigidTransform(RotationMatrix(rot_principal_component_to_axes.as_matrix().T),
+                        [com[0], com[1], com[2]]))
+
+        if mode == PlannerState.WAIT_FOR_OBJECTS_TO_SETTLE:
+            self.grasp_node.compute_candidate_grasps(down_sampled_pcd, align_grasp_axis=principal_component)
+        else:
+            self.grasp_node.compute_candidate_grasps(down_sampled_pcd, align_grasp_axis=secondary_component)
+
         grasps = self.grasp_node.get_best_grasps(candidate_num=1)
 
         print(grasps)
@@ -177,10 +203,10 @@ class Planner(LeafSystem):
         )
 
         if False:  # Useful for debugging
-            AddMeshcatTriad(meshcat, "X_Oinitial", X_PT=X_O["initial"])
-            AddMeshcatTriad(meshcat, "X_Gprepick", X_PT=X_G["prepick"])
-            AddMeshcatTriad(meshcat, "X_Gpick", X_PT=X_G["pick"])
-            AddMeshcatTriad(meshcat, "X_Gplace", X_PT=X_G["place"])
+            AddMeshcatTriad(self.meshcat, "X_Oinitial", X_PT=X_O["initial"])
+            AddMeshcatTriad(self.meshcat, "X_Gprepick", X_PT=X_G["prepick"])
+            AddMeshcatTriad(self.meshcat, "X_Gpick", X_PT=X_G["pick"])
+            AddMeshcatTriad(self.meshcat, "X_Gplace", X_PT=X_G["place"])
 
         traj_X_G = MakeGripperPoseTrajectory(X_G, times)
         traj_wsg_command = MakeGripperCommandTrajectory(times)
@@ -328,6 +354,17 @@ def process_point_cloud(diagram, station, context, cameras):
 
     # Voxelize down-sample.  (Note that the normals still look reasonable)
     return merged_pcd.VoxelizedDownSample(voxel_size=0.005)
+
+def compute_principal_minor_components(pcd):
+    cov = np.cov(pcd.T)
+    eigval, eigvec = np.linalg.eig(cov)
+
+    order = eigval.argsort()
+    principal_component = eigvec[:, order[-1]]
+    secondary_component = eigvec[:, order[1]]
+    minor_component = eigvec[:, order[0]]
+
+    return principal_component, secondary_component, minor_component
 
 def start_scenario(dirstr = "test4"):
     meshcat.ResetRenderMode()
