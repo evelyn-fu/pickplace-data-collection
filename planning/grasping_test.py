@@ -3,6 +3,11 @@ import os
 import copy
 from PIL import Image
 from grasp import GraspListener
+from trajectories import (
+    MakeGripperCommandTrajectory,
+    MakeGripperFrames,
+    MakeGripperPoseTrajectory,
+)
 import matplotlib.pyplot as plt
 from pydrake.geometry import (
     StartMeshcat,
@@ -22,39 +27,226 @@ from pydrake.systems.sensors import (
 from pydrake.common.value import Value
 from pydrake.perception import (
     Concatenate,
-    DepthImageToPointCloud
+    DepthImageToPointCloud,
+    PointCloud
 )
 from pydrake.math import (
     RigidTransform,
     RotationMatrix,
     RollPitchYaw,
 )
-from pydrake.common.value import Value
+from pydrake.common.value import (
+    Value,
+    AbstractValue
+)
+from pydrake.trajectories import (
+    PiecewisePose,
+    PiecewisePolynomial
+)
 
 from manipulation.meshcat_utils import WsgButton
 from manipulation.scenarios import AddIiwaDifferentialIK, ExtractBodyPose
 from manipulation.station import MakeHardwareStation, load_scenario
+from enum import Enum
 
-default_start_pose = [0.0, -0.5, 0.5, np.pi/2, 0.0, np.pi, 3.0]
+class PlannerState(Enum):
+    WAIT_FOR_OBJECTS_TO_SETTLE = 1
+    GRASP1 = 2
+    GRASP2 = 3
 
-class GraspSelector(LeafSystem):
-    def __init__(self, start_pose=default_start_pose):
-        super().__init__()
+default_home_pose = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/2)), [0.0, -0.5, 0.5]) # arm out of the way of depth cameras
 
-        X = start_pose[0]
-        Y = start_pose[1]
-        Z = start_pose[2]
-        y = start_pose[3]
-        p = start_pose[4]
-        r = start_pose[5]
-        self.pose_out = RigidTransform(RotationMatrix(RollPitchYaw(r, p, y)), [X, Y, Z])
+default_display_traj = []
 
-        self.DeclareAbstractOutputPort(name="pose_out",
-                                        alloc=lambda: Value(RigidTransform()),
-                                        calc=self.PoseOut)
-    
-    def PoseOut(self, context, output):
-        output.set_value(self.pose_out)
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/2)), [0.0, -0.5, 0.4]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/4)), [0.0, -0.5, 0.4]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/2)), [0.0, -0.5, 0.4]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi)), [0.0, -0.5, 0.4]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 3 * np.pi / 2)), [0.0, -0.5, 0.4]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 7 * np.pi / 4)), [0.0, -0.5, 0.4]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 3 * np.pi / 2)), [0.0, -0.5, 0.4]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi)), [0.0, -0.5, 0.4]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/2)), [0.0, -0.5, 0.4]))
+
+
+class Planner(LeafSystem):
+    def __init__(
+            self, 
+            plant, 
+            camera_body_indices,
+            meshcat
+        ):
+        LeafSystem.__init__(self)
+
+        model_point_cloud = AbstractValue.Make(PointCloud(0))
+        self.DeclareAbstractInputPort("cloud0_W", model_point_cloud)
+        self.DeclareAbstractInputPort("cloud1_W", model_point_cloud)
+        self.DeclareAbstractInputPort("cloud2_W", model_point_cloud)
+        self._camera_body_indices = camera_body_indices
+
+        self._gripper_body_index = plant.GetBodyByName("body").index()
+        self.DeclareAbstractInputPort(
+            "body_poses", AbstractValue.Make([RigidTransform()])
+        )
+
+        self._mode_index = self.DeclareAbstractState(
+            AbstractValue.Make(PlannerState.WAIT_FOR_OBJECTS_TO_SETTLE)
+        )
+        self._traj_X_G_index = self.DeclareAbstractState(
+            AbstractValue.Make(PiecewisePose())
+        )
+        self._traj_wsg_index = self.DeclareAbstractState(
+            AbstractValue.Make(PiecewisePolynomial())
+        )
+        self._times_index = self.DeclareAbstractState(
+            AbstractValue.Make({"initial": 0.0})
+        )
+
+        self.DeclareAbstractOutputPort(
+            "X_WG",
+            lambda: AbstractValue.Make(RigidTransform()),
+            self.CalcGripperPose,
+        )
+        self.DeclareVectorOutputPort("wsg_position", 1, self.CalcWsgPosition)
+
+        self.DeclarePeriodicUnrestrictedUpdateEvent(0.1, 0.0, self.Update)
+
+        self.grasp_node = GraspListener()
+
+    def Update(self, context, state):
+        mode = context.get_abstract_state(int(self._mode_index)).get_value()
+
+        current_time = context.get_time()
+        times = context.get_abstract_state(int(self._times_index)).get_value()
+
+        if mode == PlannerState.WAIT_FOR_OBJECTS_TO_SETTLE:
+            if current_time - times["initial"] > 1.0:
+                self.Plan(context, state)
+                state.get_mutable_abstract_state(
+                    int(self._mode_index)
+                ).set_value(PlannerState.GRASP1)
+            return
+
+    def Plan(self, context, state):
+        mode = context.get_abstract_state(int(self._mode_index)).get_value()
+
+        X_G = {
+            "initial": self.get_input_port(3).Eval(context)[
+                int(self._gripper_body_index)
+            ]
+        }
+
+        # Get pcd and select grasp
+        body_poses = self.get_input_port(3).Eval(context)
+        pcd = []
+        for i in range(3):
+            cloud = self.get_input_port(i).Eval(context)
+
+            # Crop to region of interest.
+            pcd.append(cloud.Crop(lower_xyz=[-0.5, -1.0, 0.01], upper_xyz=[0.5, -0.3, 0.2]))
+            # Estimate normals
+            pcd[i].EstimateNormals(radius=0.1, num_closest=30)
+
+            # Flip normals toward camera
+            X_WC = body_poses[self._camera_body_indices[i]]
+            pcd[i].FlipNormalsTowardPoint(X_WC.translation())
+        merged_pcd = Concatenate(pcd)[default_display_start_pose, default_display_1, default_display_2, default_display_3]
+
+        down_sampled_pcd = merged_pcd.VoxelizedDownSample(voxel_size=0.005)
+        meshcat.SetObject("cloud", down_sampled_pcd, point_size=0.001)
+
+        self.grasp_node.compute_candidate_grasps(down_sampled_pcd)
+        grasps = self.grasp_node.get_best_grasps(candidate_num=1)
+
+        print(grasps)
+        
+        # get end effector pose from grasp pose
+        X_GE = RigidTransform(RotationMatrix(RollPitchYaw(0, 0, 0)), [0, 0, -0.09])
+
+        ee_grasps = [X_WG.multiply(X_GE) for X_WG in grasps]
+
+        X_G["pick"] = ee_grasps[0]
+
+        X_G["display_traj"] = default_display_traj
+        X_G, times = MakeGripperFrames(X_G, t0=context.get_time())
+        print(
+            f"Planned {times['postplace'] - times['initial']} second trajectory in mode {mode} at time {context.get_time()}."
+        )
+        state.get_mutable_abstract_state(int(self._times_index)).set_value(
+            times
+        )
+
+        if False:  # Useful for debugging
+            AddMeshcatTriad(meshcat, "X_Oinitial", X_PT=X_O["initial"])
+            AddMeshcatTriad(meshcat, "X_Gprepick", X_PT=X_G["prepick"])
+            AddMeshcatTriad(meshcat, "X_Gpick", X_PT=X_G["pick"])
+            AddMeshcatTriad(meshcat, "X_Gplace", X_PT=X_G["place"])
+
+        traj_X_G = MakeGripperPoseTrajectory(X_G, times)
+        traj_wsg_command = MakeGripperCommandTrajectory(times)
+
+        state.get_mutable_abstract_state(int(self._traj_X_G_index)).set_value(
+            traj_X_G
+        )
+        state.get_mutable_abstract_state(int(self._traj_wsg_index)).set_value(
+            traj_wsg_command
+        )
+
+    def start_time(self, context):
+        return (
+            context.get_abstract_state(int(self._traj_X_G_index))
+            .get_value()
+            .start_time()
+        )
+
+    def end_time(self, context):
+        return (
+            context.get_abstract_state(int(self._traj_X_G_index))
+            .get_value()
+            .end_time()
+        )
+
+    def CalcGripperPose(self, context, output):
+        context.get_abstract_state(int(self._mode_index)).get_value()
+
+        traj_X_G = context.get_abstract_state(
+            int(self._traj_X_G_index)
+        ).get_value()
+        if traj_X_G.get_number_of_segments() > 0 and traj_X_G.is_time_in_range(
+            context.get_time()
+        ):
+            # Evaluate the trajectory at the current time, and write it to the
+            # output port.
+            output.set_value(
+                context.get_abstract_state(int(self._traj_X_G_index))
+                .get_value()
+                .GetPose(context.get_time())
+            )
+            return
+
+        # Command the current position (note: this is not particularly good if the velocity is non-zero)
+        output.set_value(
+            default_home_pose
+        )
+
+    def CalcWsgPosition(self, context, output):
+        mode = context.get_abstract_state(int(self._mode_index)).get_value()
+        opened = np.array([0.107])
+        np.array([0.0])
+
+        traj_wsg = context.get_abstract_state(
+            int(self._traj_wsg_index)
+        ).get_value()
+        if traj_wsg.get_number_of_segments() > 0 and traj_wsg.is_time_in_range(
+            context.get_time()
+        ):
+            # Evaluate the trajectory at the current time, and write it to the
+            # output port.
+            output.SetFromVector(traj_wsg.value(context.get_time()))
+            return
+
+        # Command the open position
+        output.SetFromVector([opened])
 
 
 class ImageSaver(LeafSystem):
@@ -146,6 +338,7 @@ def start_scenario(dirstr = "test4"):
     filename = os.path.join(dir_path, "scenario_data_grasping.yml")
     scenario = load_scenario(filename=filename)
     station = builder.AddSystem(MakeHardwareStation(scenario, meshcat))
+    plant = station.GetSubsystemByName("plant")
 
     controller_plant = station.GetSubsystemByName(
         "iiwa.controller"
@@ -163,18 +356,6 @@ def start_scenario(dirstr = "test4"):
     builder.Connect(
         station.GetOutputPort("iiwa.state_estimated"),
         differential_ik.GetInputPort("robot_state"),
-    )
-
-    # Set up teleop widgets.
-    meshcat.DeleteAddedControls()
-    grasp_selector = builder.AddSystem(GraspSelector())
-    
-    builder.Connect(
-        grasp_selector.GetOutputPort("pose_out"), differential_ik.GetInputPort("X_WE_desired")
-    )
-    wsg_teleop = builder.AddSystem(WsgButton(meshcat))
-    builder.Connect(
-        wsg_teleop.get_output_port(0), station.GetInputPort("wsg.position")
     )
 
     # initialize image writer and save directories
@@ -198,7 +379,6 @@ def start_scenario(dirstr = "test4"):
     builder.Connect(station.GetOutputPort("camera0.depth_image_16u"), img_saver.GetInputPort("depth_in"))
     builder.Connect(station.GetOutputPort("camera0.label_image"), img_saver.GetInputPort("label_in"))
 
-    plant = station.GetSubsystemByName("plant")
     # initialize point cloud output ports
     camera0_pcd = builder.AddSystem(DepthImageToPointCloud(camera0.depth_camera_info()))
     camera1_pcd = builder.AddSystem(DepthImageToPointCloud(camera1.depth_camera_info()))
@@ -252,15 +432,42 @@ def start_scenario(dirstr = "test4"):
         camera2_pcd.GetInputPort("camera_pose"),
     )
 
-    # Expore point cloud output ports
-    builder.ExportOutput(
-        camera0_pcd.GetOutputPort("point_cloud"), "camera_main_point_cloud"
+    # Set up planner
+    planner = builder.AddSystem(Planner(
+            plant, 
+            camera_body_indices=[
+                plant.GetBodyIndices(plant.GetModelInstanceByName("camera_main"))[
+                    0
+                ],
+                plant.GetBodyIndices(plant.GetModelInstanceByName("camera_1"))[
+                    0
+                ],
+                plant.GetBodyIndices(plant.GetModelInstanceByName("camera_2"))[
+                    0
+                ]
+            ],
+            meshcat=meshcat,))
+    
+    builder.Connect(planner.GetOutputPort("X_WG"), differential_ik.get_input_port(0))
+    builder.Connect(
+        planner.GetOutputPort("wsg_position"),
+        station.GetInputPort("wsg.position"),
     )
-    builder.ExportOutput(
-        camera1_pcd.GetOutputPort("point_cloud"), "camera_1_point_cloud"
+    builder.Connect(
+        camera0_pcd.GetOutputPort("point_cloud"),
+        planner.GetInputPort("cloud0_W"),
     )
-    builder.ExportOutput(
-        camera1_pcd.GetOutputPort("point_cloud"), "camera_2_point_cloud"
+    builder.Connect(
+        camera1_pcd.GetOutputPort("point_cloud"),
+        planner.GetInputPort("cloud1_W"),
+    )
+    builder.Connect(
+        camera2_pcd.GetOutputPort("point_cloud"),
+        planner.GetInputPort("cloud2_W"),
+    )
+    builder.Connect(
+        station.GetOutputPort("body_poses"),
+        planner.GetInputPort("body_poses"),
     )
 
     # Build diagram
@@ -291,32 +498,11 @@ def start_scenario(dirstr = "test4"):
 
     simulator.set_target_realtime_rate(1.0)
 
-    grasp_btn_presses = 0
-    grasp_node = GraspListener()
     meshcat.AddButton("Stop Simulation", "Escape")
-    meshcat.AddButton("Compute Grasps")
     print("Press Escape to stop the simulation")
     while meshcat.GetButtonClicks("Stop Simulation") < 1:
         simulator.AdvanceTo(simulator.get_context().get_time() + 0.03)
-        
-        if (meshcat.GetButtonClicks("Compute Grasps") > grasp_btn_presses):
-            pcd = process_point_cloud(diagram, station, simulator_context, ["camera_main", "camera_1", "camera_2"])
-            meshcat.SetObject("cloud", pcd, point_size=0.001)
 
-            grasp_node.compute_candidate_grasps(pcd)
-            grasps = grasp_node.get_best_grasps(candidate_num=10)
-
-            print(grasps)
-            
-            # get end effector pose from grasp pose
-            X_GE = RigidTransform(RotationMatrix(RollPitchYaw(0, 0, 0)), [0, 0, -0.09])
-
-            ee_grasps = [X_WG.multiply(X_GE) for X_WG in grasps]
-
-            print("end effector poses:", ee_grasps)
-            grasp_selector.pose_out = ee_grasps[0] # lol i havent made this collision free traj yet
-
-        grasp_btn_presses = meshcat.GetButtonClicks("Compute Grasps")
     meshcat.DeleteButton("Stop Simulation")
 
 
