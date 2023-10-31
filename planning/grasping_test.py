@@ -15,12 +15,13 @@ from pydrake.geometry import (
     Role,
 )
 from pydrake.systems.analysis import Simulator
-from pydrake.systems.framework import DiagramBuilder, LeafSystem
+from pydrake.systems.framework import DiagramBuilder, LeafSystem, InputPortIndex
 from pydrake.systems.sensors import (
     ImageRgba8U,
     ImageDepth16U,
     ImageLabel16I,
 )
+from pydrake.systems.primitives import PortSwitch
 from pydrake.common.value import Value
 from pydrake.perception import (
     Concatenate,
@@ -49,6 +50,7 @@ from enum import Enum
 class PlannerState(Enum):
     WAIT_FOR_OBJECTS_TO_SETTLE = 1
     GRASP1 = 2
+    GO_HOME = 4
     GRASP2 = 3
 
 default_home_pose = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/2)), [0.0, -0.5, 0.5]) # arm out of the way of depth cameras
@@ -106,6 +108,30 @@ class Planner(LeafSystem):
         )
         self.DeclareVectorOutputPort("wsg_position", 1, self.CalcWsgPosition)
 
+        # For GoHome mode.
+        num_positions = 7
+        self._iiwa_position_index = self.DeclareVectorInputPort(
+            "iiwa_position", num_positions
+        ).get_index()
+        self.DeclareAbstractOutputPort(
+            "control_mode",
+            lambda: AbstractValue.Make(InputPortIndex(0)),
+            self.CalcControlMode,
+        )
+        self.DeclareAbstractOutputPort(
+            "reset_diff_ik",
+            lambda: AbstractValue.Make(False),
+            self.CalcDiffIKReset,
+        )
+        self._q0_index = self.DeclareDiscreteState(num_positions)  # for q0
+        self._traj_q_index = self.DeclareAbstractState(
+            AbstractValue.Make(PiecewisePolynomial())
+        )
+        self.DeclareVectorOutputPort(
+            "iiwa_position_command", num_positions, self.CalcIiwaPosition
+        )
+        self.DeclareInitializationDiscreteUpdateEvent(self.Initialize)
+
         self.DeclarePeriodicUnrestrictedUpdateEvent(0.1, 0.0, self.Update)
 
         self.grasp_node = GraspListener()
@@ -131,9 +157,35 @@ class Planner(LeafSystem):
             if traj_X_G.get_number_of_segments() > 0 and (not traj_X_G.is_time_in_range(context.get_time())):
                 state.get_mutable_abstract_state(
                     int(self._mode_index)
+                ).set_value(PlannerState.GO_HOME)
+                self.GoHome(context, state)
+            return
+        if mode == PlannerState.GO_HOME:
+            traj_q= context.get_abstract_state(
+                int(self._traj_q_index)
+            ).get_value()
+            if traj_q.get_number_of_segments() > 0 and (not traj_q.is_time_in_range(context.get_time())):
+                state.get_mutable_abstract_state(
+                    int(self._mode_index)
                 ).set_value(PlannerState.GRASP2)
                 self.Plan(context, state)
-            return
+
+
+    def GoHome(self, context, state):
+        state.get_mutable_abstract_state(int(self._mode_index)).set_value(
+            PlannerState.GO_HOME
+        )
+        q = self.get_input_port(self._iiwa_position_index).Eval(context)
+        q0 = context.get_discrete_state(self._q0_index).get_value().copy()
+        q0[0] = q[0]  # Safer to not reset the first joint.
+
+        current_time = context.get_time()
+        q_traj = PiecewisePolynomial.FirstOrderHold(
+            [current_time, current_time + 5.0], np.vstack((q, q0)).T
+        )
+        state.get_mutable_abstract_state(int(self._traj_q_index)).set_value(
+            q_traj
+        )
 
     def Plan(self, context, state):
         mode = context.get_abstract_state(int(self._mode_index)).get_value()
@@ -178,11 +230,30 @@ class Planner(LeafSystem):
                         [com[0], com[1], com[2]]))
 
         if mode == PlannerState.WAIT_FOR_OBJECTS_TO_SETTLE:
-            self.grasp_node.compute_candidate_grasps(down_sampled_pcd, align_grasp_axis=principal_component)
+            self.grasp_node.compute_candidate_grasps(down_sampled_pcd, align_grasp_axis=principal_component, split_axis=1)
         else:
-            self.grasp_node.compute_candidate_grasps(down_sampled_pcd, align_grasp_axis=secondary_component)
+            self.grasp_node.compute_candidate_grasps(down_sampled_pcd, align_grasp_axis=secondary_component, split_axis=2)
 
         grasps = self.grasp_node.get_best_grasps(candidate_num=1)
+
+        # if mode == PlannerState.WAIT_FOR_OBJECTS_TO_SETTLE:
+        #     grasps = [RigidTransform(
+        #         R=RotationMatrix([
+        #             [0.9851708753351496, 0.07610325475234271, 0.15377464357777887],
+        #             [0.09211359576448681, -0.9907326718825298, -0.09981912812601419],
+        #             [0.14475300296266577, 0.1125036331884485, -0.9830511180262639],
+        #         ]),
+        #         p=[-0.010136940999231608, -0.6151846605451443, 0.2312006797841878],
+        #         )]
+        # else:
+        #     grasps = [RigidTransform(
+        #     R=RotationMatrix([
+        #         [0.25697196293711333, 0.07194167257965783, -0.9637374154875835],
+        #         [-0.023704417223196172, 0.9973945650452304, 0.06813356164434906],
+        #         [0.9661281027215568, 0.005336418712677337, 0.25800777462504465],
+        #     ]),
+        #     p=[0.10788826655068096, -0.6714245962328041, 0.08747344141907686],
+        #     )]
 
         print(grasps)
         
@@ -273,6 +344,35 @@ class Planner(LeafSystem):
 
         # Command the open position
         output.SetFromVector([opened])
+
+    def CalcControlMode(self, context, output):
+        mode = context.get_abstract_state(int(self._mode_index)).get_value()
+
+        if mode == PlannerState.GO_HOME:
+            output.set_value(InputPortIndex(2))  # Go Home
+        else:
+            output.set_value(InputPortIndex(1))  # Diff IK
+
+    def CalcDiffIKReset(self, context, output):
+        mode = context.get_abstract_state(int(self._mode_index)).get_value()
+
+        if mode == PlannerState.GO_HOME:
+            output.set_value(True)
+        else:
+            output.set_value(False)
+
+    def Initialize(self, context, discrete_state):
+        discrete_state.set_value(
+            int(self._q0_index),
+            self.get_input_port(int(self._iiwa_position_index)).Eval(context),
+        )
+
+    def CalcIiwaPosition(self, context, output):
+        traj_q = context.get_mutable_abstract_state(
+            int(self._traj_q_index)
+        ).get_value()
+
+        output.SetFromVector(traj_q.value(context.get_time()))
 
 
 class ImageSaver(LeafSystem):
@@ -377,24 +477,6 @@ def start_scenario(dirstr = "test4"):
     station = builder.AddSystem(MakeHardwareStation(scenario, meshcat))
     plant = station.GetSubsystemByName("plant")
 
-    controller_plant = station.GetSubsystemByName(
-        "iiwa.controller"
-    ).get_multibody_plant_for_control()
-    # Set up differential inverse kinematics.
-    differential_ik = AddIiwaDifferentialIK(
-        builder,
-        controller_plant,
-        frame=controller_plant.GetFrameByName("iiwa_link_7"),
-    )
-    builder.Connect(
-        differential_ik.get_output_port(),
-        station.GetInputPort("iiwa.position"),
-    )
-    builder.Connect(
-        station.GetOutputPort("iiwa.state_estimated"),
-        differential_ik.GetInputPort("robot_state"),
-    )
-
     # initialize image writer and save directories
     camera0 = station.GetSubsystemByName("rgbd_sensor_camera0")
     camera1 = station.GetSubsystemByName("rgbd_sensor_camera1")
@@ -485,11 +567,53 @@ def start_scenario(dirstr = "test4"):
             ],
             meshcat=meshcat,))
     
+    builder.Connect(
+        station.GetOutputPort("iiwa.position_measured"),
+        planner.GetInputPort("iiwa_position"),
+    )
+
+    controller_plant = station.GetSubsystemByName(
+        "iiwa.controller"
+    ).get_multibody_plant_for_control()
+    # Set up differential inverse kinematics.
+    differential_ik = AddIiwaDifferentialIK(
+        builder,
+        controller_plant,
+        frame=controller_plant.GetFrameByName("iiwa_link_7"),
+    )
+
     builder.Connect(planner.GetOutputPort("X_WG"), differential_ik.get_input_port(0))
+    builder.Connect(
+        station.GetOutputPort("iiwa.state_estimated"),
+        differential_ik.GetInputPort("robot_state"),
+    )
+    builder.Connect(
+        planner.GetOutputPort("reset_diff_ik"),
+        differential_ik.GetInputPort("use_robot_state"),
+    )
+
     builder.Connect(
         planner.GetOutputPort("wsg_position"),
         station.GetInputPort("wsg.position"),
     )
+
+    # The DiffIK and the direct position-control modes go through a PortSwitch
+    switch = builder.AddSystem(PortSwitch(7))
+    builder.Connect(
+        differential_ik.get_output_port(), switch.DeclareInputPort("diff_ik")
+    )
+    builder.Connect(
+        planner.GetOutputPort("iiwa_position_command"),
+        switch.DeclareInputPort("position"),
+    )
+    builder.Connect(
+        switch.get_output_port(), station.GetInputPort("iiwa.position")
+    )
+    builder.Connect(
+        planner.GetOutputPort("control_mode"),
+        switch.get_port_selector_input_port(),
+    )
+
     builder.Connect(
         camera0_pcd.GetOutputPort("point_cloud"),
         planner.GetInputPort("cloud0_W"),

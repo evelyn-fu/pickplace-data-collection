@@ -131,7 +131,7 @@ class GraspListener():
 
         # not a free body set freebody pose will fail
         X_WGfix = RigidTransform(RotationMatrix(RollPitchYaw(np.pi/2, 0, np.pi/2)))
-        print("pls fix it", X_G.multiply(X_WGfix))
+        # print("pls fix it", X_G.multiply(X_WGfix))
         self.plant.SetFreeBodyPose(self.plant_context, self.plant.GetBodyByName("body"), X_G.multiply(X_WGfix))
         query_object = self.scene_graph.get_query_output_port().Eval(self.scene_graph_context)
         pcd_sdf = np.inf
@@ -143,7 +143,7 @@ class GraspListener():
                 if distance < pcd_sdf:
                     pcd_sdf = distance
 
-        print("finish compute sdf", pcd_sdf)
+        # print("finish compute sdf", pcd_sdf)
         return pcd_sdf
 
     def compute_sdf_fast(self, pcd, X_G, visualize=False):
@@ -192,12 +192,12 @@ class GraspListener():
 
             # Compute new values.)
             X_WGnew = X_WG.multiply(RigidTransform([0.0, 0.0, z]))
-            print(z, X_WGnew)
+            # print(z, X_WGnew)
 
-            manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
-            manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
-            viz_geoms = [manipuland_cloud]
-            viz_geoms.append(self.make_gripper_line_set(X_WGnew.GetAsMatrix4(), [0.0, 1.0, 0.0]))
+            # manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
+            # manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
+            # viz_geoms = [manipuland_cloud]
+            # viz_geoms.append(self.make_gripper_line_set(X_WGnew.GetAsMatrix4(), [0.0, 1.0, 0.0]))
 
             signed_distance = self.compute_sdf(pcd, X_WGnew)
 
@@ -209,7 +209,7 @@ class GraspListener():
             if (last_signed_distance > thre) and (signed_distance < thre):
                 return last_signed_distance, X_WGlast
 
-        print("discarded")
+        # print("discarded")
         # If nothing is returned after line search, discard the sample by sending None.
         return np.nan, None
 
@@ -353,7 +353,7 @@ class GraspListener():
 
         return is_nonempty, pcd_normals_G_np[:, indices]
 
-    def compute_costs(self, X_WG: RigidTransform, within_box_pt_normals: np.ndarray, split_ratios: float) -> float:
+    def compute_costs(self, X_WG: RigidTransform, within_box_pt_normals: np.ndarray, split_ratios: float, align_grasp_axis: List[float]=[0,0,1]) -> float:
         """
         Computes a grasp candidate cost based on a weighted sum of:
         - Antipodal (grasp normal) cost (prefer more antipodal)
@@ -372,7 +372,7 @@ class GraspListener():
         antipodal_cost = -np.sum(
             within_box_pt_normals[1, :] ** 2
         )  # along the y axis of the gripper, larger good (antipodal metric)
-        gripper_vertical_alignment_cost = eff_vertical_vec[2]  # want z axis of gripper to face down, larger worse
+        gripper_vertical_alignment_cost = eff_vertical_vec @ align_grasp_axis  # want z axis of gripper to face down, larger worse
         grasp_height_cost = -t[2]  # prefer higher position
         split_ratio_minor_axis_cost = -split_ratios[0]  # prefer higher split ratio
         split_ratio_major_axis_cost = -split_ratios[1]
@@ -385,7 +385,7 @@ class GraspListener():
         )
         return cost
 
-    def compute_costs_batch(self, X_WGs: np.ndarray, within_box_pt_normals: np.ndarray, split_ratios: float) -> float:
+    def compute_costs_batch(self, X_WGs: np.ndarray, within_box_pt_normals: np.ndarray, split_ratios: float, align_grasp_axis: List[float]=[0,0,1]) -> float:
         """
         Computes a grasp candidate cost based on a weighted sum of:
         - Antipodal (grasp normal) cost (prefer more antipodal)
@@ -404,7 +404,7 @@ class GraspListener():
 
         antipodal_cost = np.asarray([-np.sum(el[1, :] ** 2) for el in within_box_pt_normals])
         # along the y axis of the gripper, larger good (antipodal metric)
-        gripper_vertical_alignment_cost = eff_vertical_vec[:, 2]  # want z axis of gripper to face down, larger worse
+        gripper_vertical_alignment_cost = eff_vertical_vec @ align_grasp_axis  # want z axis of gripper to face down, larger worse
         grasp_height_cost = -t[:, 2]  # prefer higher position
         split_ratio_minor_axis_cost = -split_ratios[0]  # prefer higher split ratio
         split_ratio_major_axis_cost = -split_ratios[1]
@@ -485,6 +485,57 @@ class GraspListener():
         return split_ratio[:, [0, 2]]
 
     @staticmethod
+    def compute_pcd_split_ratio(pcd_points: np.ndarray, viz_split_ratio_axes: bool = False) -> np.ndarray:
+        """
+        Computes the split ratio of the major point cloud axis.
+        The split ratio has range [0,1] where 1 is best (most equal split) and 0 is worst (most unequal split).
+
+        :param pcd_points: Point cloud points of shape (N,3).
+        :param viz_major_axis: Whether to visualize the pcd with the principle and minor axes in open3d.
+        :return: Minor, secondary, and major point cloud split ratio for each point of shape (N,2) where the first entry is the
+            minor axis.
+        """
+        cov = np.cov(pcd_points.T)
+        eigval, eigvec = np.linalg.eig(cov)
+
+        order = eigval.argsort()
+        principal_component = eigvec[:, order[-1]]
+        secondary_component = eigvec[:, order[1]]
+        minor_component = eigvec[:, order[0]]
+
+        # Rotate point cloud to align the principal component with the z-axis and the minor component with the x-axis
+        z_axis, x_axis = [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]
+        rot_principal_component_to_axes, _ = R.align_vectors(
+            np.array([z_axis, x_axis]), np.stack([principal_component, minor_component])
+        )
+
+        pcd_points_axis_aligned = pcd_points @ rot_principal_component_to_axes.as_matrix().T
+
+        if viz_split_ratio_axes:
+            # Visualize the point cloud in blue, the principal axis in red, and the minor axis in green
+            pcd_points_axis_aligned_normalized = pcd_points_axis_aligned - np.mean(pcd_points_axis_aligned, axis=0)
+            pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd_points_axis_aligned_normalized))
+            pcd.paint_uniform_color([0.0, 0.0, 1.0])
+            principle_component_line = o3d.geometry.LineSet()
+            principle_component_line.points = o3d.utility.Vector3dVector(
+                np.array([[0.0, 0.0, -0.3], [0.0, 0.0, 0.3], [-0.1, 0.0, 0.0], [0.1, 0.0, 0.0]])
+            )
+            principle_component_line.lines = o3d.utility.Vector2iVector(np.array([[0, 1], [2, 3]]))
+            principle_component_line.colors = o3d.utility.Vector3dVector(np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]))
+            world_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.01)
+            o3d.visualization.draw_geometries([pcd, principle_component_line, world_frame])
+
+        # Min/max bounds for split ratio
+        min_point_vals = np.min(pcd_points_axis_aligned, axis=0)
+        max_point_vals = np.max(pcd_points_axis_aligned, axis=0)
+
+        # Compute split ratio
+        split = np.array([max_point_vals - pcd_points_axis_aligned, pcd_points_axis_aligned - min_point_vals])
+        split_ratio = np.min(split, axis=0) / np.max(split, axis=0)
+
+        return split_ratio[:, [0, 1, 2]]
+
+    @staticmethod
     def make_gripper_line_set(pose: np.ndarray, color=(1, 0, 0)):
         """
         Returns an Open3D LineSet for the panda gripper.
@@ -535,7 +586,7 @@ class GraspListener():
         return line_set
 
     def compute_candidate_grasps(
-        self, pcd: PointCloud, candidate_num=30, num_samples=20, random_seed=5
+        self, pcd: PointCloud, candidate_num=30, num_samples=20, random_seed=5, align_grasp_axis = [0, 0, 1], split_axis=2, minor_split_axis=0
     ):
         """
         Compute sorted candidate grasps.
@@ -546,9 +597,9 @@ class GraspListener():
             - candidate_num (int): number of desired candidates. The samples with the lowest cost are returned.
             - num_samples (int): number of point cloud points to sample for grasp candidates.
             - random_seed (int): seed for rng, used for grading.
-            - viz (bool): whether to visualize all candidate grasps in meshcat. If false, only the candidate with the
-                lowest cost will be visualized.
-            - o3d_viz (bool): whether to visualize all grasp candidates with open3d
+            - align_grasp_axis: axis for which we want to align grasps to
+            - split axis: main axis we care about for split ratio where 2 is the principal axis, 1 is the secondary, and 0 is the minor
+            - minor_split_axis: secondary axis we care about for split ratio
 
         Return:
             - candidate_lst (list of drake RigidTransforms): candidate list of
@@ -575,9 +626,9 @@ class GraspListener():
         pcd_points = pcd.xyzs().T
 
         # Filter pcd based on split ratio
-        split_ratios = self.compute_pcd_split_ratio_xy(pcd_points)
-        mask = (split_ratios[:, 0] > split_ratio_minor_axis_threshold) * (
-            split_ratios[:, 1] > split_ratio_major_axis_threshold
+        split_ratios = self.compute_pcd_split_ratio(pcd_points)
+        mask = (split_ratios[:, minor_split_axis] > split_ratio_minor_axis_threshold) * (
+            split_ratios[:, split_axis] > split_ratio_major_axis_threshold
         )
         split_ratio_filtered_points = pcd_points[mask]
         split_ratio_filtered_normals = pcd.normals()[:, mask].T
@@ -601,6 +652,10 @@ class GraspListener():
             kdtree,
         )
 
+        manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
+        manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
+        viz_geoms = [manipuland_cloud]
+
         PARALLEL = False
 
         start_time = time.time()
@@ -623,7 +678,7 @@ class GraspListener():
                             # manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
                             # manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
                             # o3d.visualization.draw_geometries([manipuland_cloud, self.make_triad_line_set(X_WP.GetAsMatrix4(), [0.0, 1.0, 0.0])])
-                            print("darboux frame", X_WP)
+                            # print("darboux frame", X_WP)
 
                             # Compute a new transform that minimizes y-direction distance without penetration
                             distance, X_WPnew = self.find_minimum_distance(pcd, X_WPnew)
@@ -636,9 +691,11 @@ class GraspListener():
                             is_nonempty, within_box_pt_normals = self.check_nonempty(pcd, X_WPnew)
                             if is_nonempty:
                                 candidate_lst.append(X_WPnew)
-                                candidate_costs.append(self.compute_costs(X_WPnew, within_box_pt_normals, split_ratio))
+                                viz_geoms.append(self.make_gripper_line_set(X_WPnew.GetAsMatrix4(), [0.0, 1.0, 0.0]))
+                                candidate_costs.append(self.compute_costs(X_WPnew, within_box_pt_normals, split_ratio, align_grasp_axis))
                             else:
                                 continue
+            # o3d.visualization.draw_geometries(viz_geoms)
             print("sequential antipodal grasp time: {:.3f}".format(time.time() - start_time))
 
         else:
@@ -676,7 +733,7 @@ class GraspListener():
                 if len(X_WPnew_batch_nonempty) == 0:
                     continue
 
-                grasp_costs = self.compute_costs_batch(X_WPnew_batch_no_penetration, within_box_pt_normals, split_ratio)
+                grasp_costs = self.compute_costs_batch(X_WPnew_batch_no_penetration, within_box_pt_normals, split_ratio, align_grasp_axis)
 
                 # Pick valid grasps and associated costs
                 candidate_lst.append(X_WPnew_batch_nonempty)

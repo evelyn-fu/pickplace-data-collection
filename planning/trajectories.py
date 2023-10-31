@@ -24,7 +24,6 @@ def MakeGripperFrames(X_G, t0=0):
     X_GgraspGpregrasp = RigidTransform([0, 0.0, -0.09])
 
     X_G["prepick"] = X_G["pick"] @ X_GgraspGpregrasp
-    X_G["preplace"] = X_G["place"] @ X_GgraspGpregrasp
 
     # I'll interpolate a halfway orientation by converting to axis angle and
     # halving the angle.
@@ -56,7 +55,7 @@ def MakeGripperFrames(X_G, t0=0):
     X_G["pick_start"] = X_G["pick"]
     X_G["pick_end"] = X_G["pick"]
     times["postpick"] = times["pick_end"] + 2.0
-    X_G["postpick"] = X_G["prepick"]
+    X_G["postpick"] = RigidTransform(X_G["pick"].rotation(), X_G["pick"].translation() + [0, 0, 0.09])
     time_to_predisplay = 10.0 * np.linalg.norm(
         X_GprepickGpredisplay.translation()
     )
@@ -65,6 +64,7 @@ def MakeGripperFrames(X_G, t0=0):
     for i in range(len(X_G["display_traj"])-1):
         times["display_traj"].append(times["display_traj"][-1] + 2.0)
 
+    X_G["preplace"] = X_G["postpick"]
     times["preplace"] = times["display_traj"][-1] + time_to_predisplay
     times["place_start"] = times["preplace"] + 2.0
     times["place_end"] = times["place_start"] + 2.0
