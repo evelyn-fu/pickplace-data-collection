@@ -15,7 +15,7 @@ directives:
     child: iiwa::iiwa_link_0
 - add_model:
     name: wsg
-    file: package://manipulation/hydro/schunk_wsg_50_with_tip.sdf
+    file: file://./home/evelyn/sources/Real2SimObjectManipulation/models/schunk_wsg_50_with_tip.sdf
 - add_weld:
     parent: iiwa::iiwa_link_7
     child: wsg::body
@@ -25,11 +25,11 @@ directives:
         
 - add_model:
     name: mustard_bottle
-    file: package://drake/manipulation/models/ycb/sdf/006_mustard_bottle.sdf
+    file: file://./home/evelyn/sources/Real2SimObjectManipulation/models/006_mustard_bottle.sdf
     default_free_body_pose:
         base_link_mustard:
             translation: [0, -0.6, 0.1]
-            rotation: !Rpy { deg: [-90, 0, 0] }
+            rotation: !Rpy { deg: [0, 0, 20] }
 - add_frame:
     name: table_origin
     X_PF:

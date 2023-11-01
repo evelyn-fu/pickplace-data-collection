@@ -671,5 +671,5 @@ if __name__ == "__main__":
     # Start the visualizer.
     meshcat = StartMeshcat()
 
-    save_dir_path = os.path.abspath(os.path.join(os.path.dirname( __file__ ), '..', 'tests', 'test_grasping'))
+    save_dir_path = os.path.abspath(os.path.join(os.path.dirname( __file__ ), '..', 'tests', 'test_grasping2'))
     start_scenario(save_dir_path)
