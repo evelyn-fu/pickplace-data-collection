@@ -24,10 +24,10 @@ directives:
         rotation: !Rpy { deg: [90, 0, 90]}
         
 - add_model:
-    name: mustard_bottle
-    file: file://./home/evelyn/sources/Real2SimObjectManipulation/models/006_mustard_bottle.sdf
+    name: tube
+    file: file://./home/evelyn/sources/Real2SimObjectManipulation/models/tube.sdf
     default_free_body_pose:
-        base_link_mustard:
+        tube_body:
             translation: [0, -0.5, 0.08]
             rotation: !Rpy { deg: [0, 0, 20] }
 - add_frame:

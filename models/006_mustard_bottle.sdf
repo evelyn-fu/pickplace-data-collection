@@ -35,18 +35,12 @@
             <uri>package://manipulation/hydro/ycb_mustard_bottle_mesh_pieces/mesh_piece_005.obj</uri>
           </mesh>
         </geometry>
-        <surface>
-          <friction>
-            <ode>
-              <mu>0.5</mu>
-              <mu2>0.5</mu2>
-            </ode>
-          </friction>
-        </surface>
 
         <drake:proximity_properties>
           <drake:compliant_hydroelastic/>
-          <drake:hydroelastic_modulus>1.0e8</drake:hydroelastic_modulus>
+          <drake:hydroelastic_modulus>1.0e7</drake:hydroelastic_modulus>
+          <drake:mu_static>100.0</drake:mu_static>
+          <drake:mu_dynamic>1.0</drake:mu_dynamic>
         </drake:proximity_properties>
       </collision>
 
@@ -57,18 +51,12 @@
             <uri>package://manipulation/hydro/ycb_mustard_bottle_mesh_pieces/mesh_piece_008.obj</uri>
           </mesh>
         </geometry>
-        <surface>
-          <friction>
-            <ode>
-              <mu>0.5</mu>
-              <mu2>0.5</mu2>
-            </ode>
-          </friction>
-        </surface>
 
         <drake:proximity_properties>
           <drake:compliant_hydroelastic/>
-          <drake:hydroelastic_modulus>1.0e8</drake:hydroelastic_modulus>
+          <drake:hydroelastic_modulus>1.0e7</drake:hydroelastic_modulus>
+          <drake:mu_static>100.0</drake:mu_static>
+          <drake:mu_dynamic>1.0</drake:mu_dynamic>
         </drake:proximity_properties>
       </collision>
 
@@ -79,18 +67,12 @@
                 <uri>package://manipulation/hydro/ycb_mustard_bottle_mesh_pieces/mesh_piece_006.obj</uri>
             </mesh>
           </geometry>
-          <surface>
-            <friction>
-              <ode>
-                <mu>0.5</mu>
-                <mu2>0.5</mu2>
-              </ode>
-            </friction>
-          </surface>
 
         <drake:proximity_properties>
             <drake:compliant_hydroelastic/>
-            <drake:hydroelastic_modulus>1.0e8</drake:hydroelastic_modulus>
+            <drake:hydroelastic_modulus>1.0e7</drake:hydroelastic_modulus>
+          <drake:mu_static>100.0</drake:mu_static>
+          <drake:mu_dynamic>100.0</drake:mu_dynamic>
         </drake:proximity_properties>
       </collision>
 
@@ -101,18 +83,12 @@
             <uri>package://manipulation/hydro/ycb_mustard_bottle_mesh_pieces/mesh_piece_004.obj</uri>
           </mesh>
         </geometry>
-        <surface>
-          <friction>
-            <ode>
-              <mu>0.5</mu>
-              <mu2>0.5</mu2>
-            </ode>
-          </friction>
-        </surface>
 
         <drake:proximity_properties>
           <drake:compliant_hydroelastic/>
-          <drake:hydroelastic_modulus>1.0e8</drake:hydroelastic_modulus>
+          <drake:hydroelastic_modulus>1.0e7</drake:hydroelastic_modulus>
+          <drake:mu_static>100.0</drake:mu_static>
+          <drake:mu_dynamic>1.0</drake:mu_dynamic>
         </drake:proximity_properties>
       </collision>
 
@@ -123,18 +99,12 @@
             <uri>package://manipulation/hydro/ycb_mustard_bottle_mesh_pieces/mesh_piece_003.obj</uri>
           </mesh>
         </geometry>
-        <surface>
-          <friction>
-            <ode>
-              <mu>0.5</mu>
-              <mu2>0.5</mu2>
-            </ode>
-          </friction>
-        </surface>
 
         <drake:proximity_properties>
           <drake:compliant_hydroelastic/>
-          <drake:hydroelastic_modulus>1.0e8</drake:hydroelastic_modulus>
+          <drake:hydroelastic_modulus>1.0e7</drake:hydroelastic_modulus>
+          <drake:mu_static>100.0</drake:mu_static>
+          <drake:mu_dynamic>1.0</drake:mu_dynamic>
         </drake:proximity_properties>
       </collision>
 
@@ -145,18 +115,12 @@
             <uri>package://manipulation/hydro/ycb_mustard_bottle_mesh_pieces/mesh_piece_001.obj</uri>
           </mesh>
         </geometry>
-        <surface>
-          <friction>
-            <ode>
-              <mu>0.5</mu>
-              <mu2>0.5</mu2>
-            </ode>
-          </friction>
-        </surface>
 
         <drake:proximity_properties>
           <drake:compliant_hydroelastic/>
-          <drake:hydroelastic_modulus>1.0e8</drake:hydroelastic_modulus>
+          <drake:hydroelastic_modulus>1.0e7</drake:hydroelastic_modulus>
+          <drake:mu_static>100.0</drake:mu_static>
+          <drake:mu_dynamic>1.0</drake:mu_dynamic>
         </drake:proximity_properties>
       </collision>
 
@@ -167,18 +131,12 @@
             <uri>package://manipulation/hydro/ycb_mustard_bottle_mesh_pieces/mesh_piece_000.obj</uri>
           </mesh>
         </geometry>
-        <surface>
-          <friction>
-            <ode>
-              <mu>0.5</mu>
-              <mu2>0.5</mu2>
-            </ode>
-          </friction>
-        </surface>
 
         <drake:proximity_properties>
           <drake:compliant_hydroelastic/>
-          <drake:hydroelastic_modulus>1.0e8</drake:hydroelastic_modulus>
+          <drake:hydroelastic_modulus>1.0e7</drake:hydroelastic_modulus>
+          <drake:mu_static>100.0</drake:mu_static>
+          <drake:mu_dynamic>1.0</drake:mu_dynamic>
         </drake:proximity_properties>
       </collision>
 
@@ -189,18 +147,12 @@
             <uri>package://manipulation/hydro/ycb_mustard_bottle_mesh_pieces/mesh_piece_002.obj</uri>
           </mesh>
         </geometry>
-        <surface>
-          <friction>
-            <ode>
-              <mu>0.5</mu>
-              <mu2>0.5</mu2>
-            </ode>
-          </friction>
-        </surface>
 
         <drake:proximity_properties>
           <drake:compliant_hydroelastic/>
-          <drake:hydroelastic_modulus>1.0e8</drake:hydroelastic_modulus>
+          <drake:hydroelastic_modulus>1.0e7</drake:hydroelastic_modulus>
+          <drake:mu_static>100.0</drake:mu_static>
+          <drake:mu_dynamic>1.0</drake:mu_dynamic>
         </drake:proximity_properties>
       </collision>
 
@@ -211,18 +163,12 @@
             <uri>package://manipulation/hydro/ycb_mustard_bottle_mesh_pieces/mesh_piece_007.obj</uri>
           </mesh>
         </geometry>
-        <surface>
-          <friction>
-            <ode>
-              <mu>0.5</mu>
-              <mu2>0.5</mu2>
-            </ode>
-          </friction>
-        </surface>
 
         <drake:proximity_properties>
           <drake:compliant_hydroelastic/>
-          <drake:hydroelastic_modulus>1.0e8</drake:hydroelastic_modulus>
+          <drake:hydroelastic_modulus>1.0e7</drake:hydroelastic_modulus>
+          <drake:mu_static>100.0</drake:mu_static>
+          <drake:mu_dynamic>1.0</drake:mu_dynamic>
         </drake:proximity_properties>
       </collision>
 

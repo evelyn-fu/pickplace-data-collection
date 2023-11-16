@@ -21,7 +21,7 @@ def MakeGripperFrames(X_G, t0=0):
     X_G["place"] = X_G["pick"]
 
     # pregrasp is negative z in the gripper frame
-    X_GgraspGpregrasp = RigidTransform([0, 0.0, -0.09])
+    X_GgraspGpregrasp = RigidTransform([0, 0.0, -0.15])
 
     X_G["prepick"] = X_G["pick"] @ X_GgraspGpregrasp
 

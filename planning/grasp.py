@@ -131,7 +131,6 @@ class GraspListener():
 
         # not a free body set freebody pose will fail
         X_WGfix = RigidTransform(RotationMatrix(RollPitchYaw(np.pi/2, 0, np.pi/2)))
-        # print("pls fix it", X_G.multiply(X_WGfix))
         self.plant.SetFreeBodyPose(self.plant_context, self.plant.GetBodyByName("body"), X_G.multiply(X_WGfix))
         query_object = self.scene_graph.get_query_output_port().Eval(self.scene_graph_context)
         pcd_sdf = np.inf
@@ -143,7 +142,6 @@ class GraspListener():
                 if distance < pcd_sdf:
                     pcd_sdf = distance
 
-        # print("finish compute sdf", pcd_sdf)
         return pcd_sdf
 
     def compute_sdf_fast(self, pcd, X_G, visualize=False):
@@ -372,13 +370,13 @@ class GraspListener():
         antipodal_cost = -np.sum(
             within_box_pt_normals[1, :] ** 2
         )  # along the y axis of the gripper, larger good (antipodal metric)
-        gripper_vertical_alignment_cost = eff_vertical_vec @ align_grasp_axis  # want z axis of gripper to face down, larger worse
+        gripper_axis_alignment_cost = eff_vertical_vec @ align_grasp_axis  # want z axis of gripper to face down, larger worse
         grasp_height_cost = -t[2]  # prefer higher position
         split_ratio_minor_axis_cost = -split_ratios[0]  # prefer higher split ratio
-        split_ratio_major_axis_cost = -split_ratios[1]
+        split_ratio_major_axis_cost = -split_ratios[2]
         cost = (
             antipodal_cost
-            + 100.0 * gripper_vertical_alignment_cost
+            + 100.0 * gripper_axis_alignment_cost
             + 10.0 * grasp_height_cost
             + 1.0 * split_ratio_minor_axis_cost
             + 10.0 * split_ratio_major_axis_cost
@@ -626,7 +624,9 @@ class GraspListener():
         pcd_points = pcd.xyzs().T
 
         # Filter pcd based on split ratio
-        split_ratios = self.compute_pcd_split_ratio(pcd_points)
+        split_ratios = self.compute_pcd_split_ratio(pcd_points, viz_split_ratio_axes=True)
+        print(split_ratios[:, minor_split_axis])
+        print(split_ratios[:, split_axis])
         mask = (split_ratios[:, minor_split_axis] > split_ratio_minor_axis_threshold) * (
             split_ratios[:, split_axis] > split_ratio_major_axis_threshold
         )
@@ -638,11 +638,14 @@ class GraspListener():
 
         # Sample random points to compute darboux frames for
         num_split_ratio_filtered_points = len(split_ratio_filtered_points)
+        print("num_split_ratio_filtered_points", num_split_ratio_filtered_points)
         darboux_frame_sample_indices = np.random.choice(
             np.arange(num_split_ratio_filtered_points),
             int(min(num_samples, num_split_ratio_filtered_points)),
             replace=False,
         )
+
+        print("len sample indicies", darboux_frame_sample_indices)
 
         # Compute darboux frames at samples
         X_WPs = self.compute_darboux_frames(
@@ -651,6 +654,8 @@ class GraspListener():
             pcd,
             kdtree,
         )
+
+        print("Num X_WPs", len(X_WPs))
 
         manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
         manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])

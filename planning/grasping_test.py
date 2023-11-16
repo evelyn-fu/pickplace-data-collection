@@ -57,15 +57,15 @@ default_home_pose = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi
 
 default_display_traj = []
 
-default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/2)), [0.0, -0.5, 0.4]))
-default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/4)), [0.0, -0.5, 0.4]))
-default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/2)), [0.0, -0.5, 0.4]))
-default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi)), [0.0, -0.5, 0.4]))
-default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 3 * np.pi / 2)), [0.0, -0.5, 0.4]))
-default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 7 * np.pi / 4)), [0.0, -0.5, 0.4]))
-default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 3 * np.pi / 2)), [0.0, -0.5, 0.4]))
-default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi)), [0.0, -0.5, 0.4]))
-default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/2)), [0.0, -0.5, 0.4]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/2)), [0.0, -0.5, 0.5]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/4)), [0.0, -0.5, 0.5]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/2)), [0.0, -0.5, 0.5]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi)), [0.0, -0.5, 0.5]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 3 * np.pi / 2)), [0.0, -0.5, 0.5]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 7 * np.pi / 4)), [0.0, -0.5, 0.5]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 3 * np.pi / 2)), [0.0, -0.5, 0.5]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi)), [0.0, -0.5, 0.5]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/2)), [0.0, -0.5, 0.5]))
 
 
 class Planner(LeafSystem):
@@ -177,7 +177,7 @@ class Planner(LeafSystem):
         )
         q = self.get_input_port(self._iiwa_position_index).Eval(context)
         q0 = context.get_discrete_state(self._q0_index).get_value().copy()
-        q0[0] = q[0]  # Safer to not reset the first joint.
+        # q0[0] = q[0]  # Safer to not reset the first joint.
 
         current_time = context.get_time()
         q_traj = PiecewisePolynomial.FirstOrderHold(
@@ -204,7 +204,7 @@ class Planner(LeafSystem):
             cloud = self.get_input_port(i).Eval(context)
 
             # Crop to region of interest.
-            pcd.append(cloud.Crop(lower_xyz=[-0.5, -1.0, 0.01], upper_xyz=[0.5, -0.3, 0.2]))
+            pcd.append(cloud.Crop(lower_xyz=[-0.5, -1.0, 0.04], upper_xyz=[0.5, -0.3, 0.25]))
             # Estimate normals
             pcd[i].EstimateNormals(radius=0.1, num_closest=30)
 
@@ -230,30 +230,31 @@ class Planner(LeafSystem):
                         [com[0], com[1], com[2]]))
 
         if mode == PlannerState.WAIT_FOR_OBJECTS_TO_SETTLE:
-            self.grasp_node.compute_candidate_grasps(down_sampled_pcd, align_grasp_axis=principal_component, split_axis=1)
+            # self.grasp_node.compute_candidate_grasps(down_sampled_pcd, random_seed=5, align_grasp_axis=secondary_component, split_axis=2, minor_split_axis=0)
+            self.grasp_node.compute_candidate_grasps(down_sampled_pcd, random_seed=5, align_grasp_axis=principal_component, split_axis=1, minor_split_axis=0)
         else:
-            self.grasp_node.compute_candidate_grasps(down_sampled_pcd, align_grasp_axis=secondary_component, split_axis=2)
-
+            self.grasp_node.compute_candidate_grasps(down_sampled_pcd, random_seed=5, align_grasp_axis=secondary_component, split_axis=2, minor_split_axis=0)
+        
         grasps = self.grasp_node.get_best_grasps(candidate_num=1)
 
         # if mode == PlannerState.WAIT_FOR_OBJECTS_TO_SETTLE:
         #     grasps = [RigidTransform(
         #         R=RotationMatrix([
-        #             [0.9851708753351496, 0.07610325475234271, 0.15377464357777887],
-        #             [0.09211359576448681, -0.9907326718825298, -0.09981912812601419],
-        #             [0.14475300296266577, 0.1125036331884485, -0.9830511180262639],
+        #             [0.011147439613729979, -0.3863269038241303, 0.9222945613911638],
+        #             [0.56176077239957, -0.7606200311709403, -0.32539514866475155],
+        #             [0.8272246183371821, 0.5217362279573633, 0.20854433402450645],
         #         ]),
-        #         p=[-0.010136940999231608, -0.6151846605451443, 0.2312006797841878],
+        #         p=[-0.08389991997537999, -0.49296369217808256, 0.12468823818533292],
         #         )]
         # else:
         #     grasps = [RigidTransform(
-        #     R=RotationMatrix([
-        #         [0.25697196293711333, 0.07194167257965783, -0.9637374154875835],
-        #         [-0.023704417223196172, 0.9973945650452304, 0.06813356164434906],
-        #         [0.9661281027215568, 0.005336418712677337, 0.25800777462504465],
-        #     ]),
-        #     p=[0.10788826655068096, -0.6714245962328041, 0.08747344141907686],
-        #     )]
+        #         R=RotationMatrix([
+        #             [0.011147439613729979, -0.3863269038241303, 0.9222945613911638],
+        #             [0.56176077239957, -0.7606200311709403, -0.32539514866475155],
+        #             [0.8272246183371821, 0.5217362279573633, 0.20854433402450645],
+        #         ]),
+        #         p=[-0.08389991997537999, -0.49296369217808256, 0.12468823818533292],
+        #         )]
 
         print(grasps)
         
@@ -472,7 +473,7 @@ def start_scenario(dirstr = "test4"):
     builder = DiagramBuilder()
 
     dir_path = os.path.dirname(os.path.realpath(__file__))
-    filename = os.path.join(dir_path, "scenario_data_grasping.yml")
+    filename = os.path.join(dir_path, "scenario_data_grasping_tube.yml")
     scenario = load_scenario(filename=filename)
     station = builder.AddSystem(MakeHardwareStation(scenario, meshcat))
     plant = station.GetSubsystemByName("plant")
@@ -650,7 +651,7 @@ def start_scenario(dirstr = "test4"):
             continue
         frame_id = inspector.GetFrameId(geometry_id)
         body = plant.GetBodyFromFrameId(frame_id)
-        if body.model_instance() == plant.GetModelInstanceByName("mustard_bottle"):
+        if body.model_instance() == plant.GetModelInstanceByName("tube"):
             properties.UpdateProperty("label", "id", RenderLabel(0)) # Make mustard label 0
         else:
             properties.UpdateProperty("label", "id", RenderLabel.kDontCare)
@@ -671,5 +672,5 @@ if __name__ == "__main__":
     # Start the visualizer.
     meshcat = StartMeshcat()
 
-    save_dir_path = os.path.abspath(os.path.join(os.path.dirname( __file__ ), '..', 'tests', 'test_grasping2'))
+    save_dir_path = os.path.abspath(os.path.join(os.path.dirname( __file__ ), '..', 'tests', 'test_grasping_tube'))
     start_scenario(save_dir_path)
