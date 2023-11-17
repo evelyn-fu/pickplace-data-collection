@@ -237,25 +237,6 @@ class Planner(LeafSystem):
         
         grasps = self.grasp_node.get_best_grasps(candidate_num=1)
 
-        # if mode == PlannerState.WAIT_FOR_OBJECTS_TO_SETTLE:
-        #     grasps = [RigidTransform(
-        #         R=RotationMatrix([
-        #             [0.011147439613729979, -0.3863269038241303, 0.9222945613911638],
-        #             [0.56176077239957, -0.7606200311709403, -0.32539514866475155],
-        #             [0.8272246183371821, 0.5217362279573633, 0.20854433402450645],
-        #         ]),
-        #         p=[-0.08389991997537999, -0.49296369217808256, 0.12468823818533292],
-        #         )]
-        # else:
-        #     grasps = [RigidTransform(
-        #         R=RotationMatrix([
-        #             [0.011147439613729979, -0.3863269038241303, 0.9222945613911638],
-        #             [0.56176077239957, -0.7606200311709403, -0.32539514866475155],
-        #             [0.8272246183371821, 0.5217362279573633, 0.20854433402450645],
-        #         ]),
-        #         p=[-0.08389991997537999, -0.49296369217808256, 0.12468823818533292],
-        #         )]
-
         print(grasps)
         
         # get end effector pose from grasp pose
@@ -473,7 +454,7 @@ def start_scenario(dirstr = "test4"):
     builder = DiagramBuilder()
 
     dir_path = os.path.dirname(os.path.realpath(__file__))
-    filename = os.path.join(dir_path, "scenario_data_grasping_tube.yml")
+    filename = os.path.join(dir_path, "scenario_data_grasping_spatula.yml")
     scenario = load_scenario(filename=filename)
     station = builder.AddSystem(MakeHardwareStation(scenario, meshcat))
     plant = station.GetSubsystemByName("plant")
@@ -651,7 +632,7 @@ def start_scenario(dirstr = "test4"):
             continue
         frame_id = inspector.GetFrameId(geometry_id)
         body = plant.GetBodyFromFrameId(frame_id)
-        if body.model_instance() == plant.GetModelInstanceByName("tube"):
+        if body.model_instance() == plant.GetModelInstanceByName("spatula"):
             properties.UpdateProperty("label", "id", RenderLabel(0)) # Make mustard label 0
         else:
             properties.UpdateProperty("label", "id", RenderLabel.kDontCare)
@@ -672,5 +653,5 @@ if __name__ == "__main__":
     # Start the visualizer.
     meshcat = StartMeshcat()
 
-    save_dir_path = os.path.abspath(os.path.join(os.path.dirname( __file__ ), '..', 'tests', 'test_grasping_tube'))
+    save_dir_path = os.path.abspath(os.path.join(os.path.dirname( __file__ ), '..', 'tests', 'test_grasping_spatula'))
     start_scenario(save_dir_path)

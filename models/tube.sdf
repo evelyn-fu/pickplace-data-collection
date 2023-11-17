@@ -9,6 +9,9 @@
             <size>0.02 0.08 0.1</size>
           </box>
         </geometry>
+        <material>  
+          <color rgba="0 0 1 0" />
+        </material>
       </visual>
       <visual name="side2">
         <pose> -0.04 0 0.05 0 0 0</pose>
@@ -17,6 +20,9 @@
             <size>0.02 0.08 0.1</size>
           </box>
         </geometry>
+        <material>
+          <color rgba="0 0 1 0" />
+        </material>
       </visual>
       <visual name="side3">
         <pose> 0 0.04 0.05 0 0 0</pose>
@@ -25,6 +31,9 @@
             <size>0.08 0.02 0.1</size>
           </box>
         </geometry>
+        <material>
+          <color rgba="0 0 1 0" />
+        </material>
       </visual>
       <visual name="side4">
         <pose> 0 -0.04 0.05 0 0 0</pose>
@@ -33,6 +42,9 @@
             <size>0.08 0.02 0.1</size>
           </box>
         </geometry>
+        <material>
+          <color rgba="0 0 1 0" />
+        </material>
       </visual>
 
       <collision name="side1">
