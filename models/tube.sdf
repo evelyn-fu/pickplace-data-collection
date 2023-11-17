@@ -6,7 +6,7 @@
         <pose> 0.04 0 0.05 0 0 0</pose>
         <geometry>
           <box>
-            <size>0.005 0.08 0.1</size>
+            <size>0.02 0.08 0.1</size>
           </box>
         </geometry>
       </visual>
@@ -14,7 +14,7 @@
         <pose> -0.04 0 0.05 0 0 0</pose>
         <geometry>
           <box>
-            <size>0.005 0.08 0.1</size>
+            <size>0.02 0.08 0.1</size>
           </box>
         </geometry>
       </visual>
@@ -22,7 +22,7 @@
         <pose> 0 0.04 0.05 0 0 0</pose>
         <geometry>
           <box>
-            <size>0.08 0.005 0.1</size>
+            <size>0.08 0.02 0.1</size>
           </box>
         </geometry>
       </visual>
@@ -30,7 +30,7 @@
         <pose> 0 -0.04 0.05 0 0 0</pose>
         <geometry>
           <box>
-            <size>0.08 0.005 0.1</size>
+            <size>0.08 0.02 0.1</size>
           </box>
         </geometry>
       </visual>
@@ -39,7 +39,7 @@
         <pose> 0.04 0 0.05 0 0 0</pose>
         <geometry>
           <box>
-            <size>0.005 0.08 0.1</size>
+            <size>0.02 0.08 0.1</size>
           </box>
         </geometry>
         <drake:proximity_properties>
@@ -54,7 +54,7 @@
         <pose> -0.04 0 0.05 0 0 0</pose>
         <geometry>
           <box>
-            <size>0.005 0.08 0.1</size>
+            <size>0.02 0.08 0.1</size>
           </box>
         </geometry>
         <drake:proximity_properties>
@@ -69,7 +69,7 @@
         <pose> 0 0.04 0.05 0 0 0</pose>
         <geometry>
           <box>
-            <size>0.08 0.005 0.1</size>
+            <size>0.08 0.02 0.1</size>
           </box>
         </geometry>
         <drake:proximity_properties>
@@ -84,7 +84,7 @@
         <pose> 0 -0.04 0.05 0 0 0</pose>
         <geometry>
           <box>
-            <size>0.08 0.005 0.1</size>
+            <size>0.08 0.02 0.1</size>
           </box>
         </geometry>
         <drake:proximity_properties>

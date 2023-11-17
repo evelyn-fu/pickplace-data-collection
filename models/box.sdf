@@ -3,18 +3,18 @@
   <model name="box">
     <link name="box_body">
       <visual name="box_visual">
-        <pose> 0 0 0.015 0 0 0</pose>
+        <pose> 0 0 0.025 0 0 0</pose>
         <geometry>
           <box>
-            <size>0.3 0.3 0.03</size>
+            <size>0.3 0.3 0.05</size>
           </box>
         </geometry>
       </visual>
       <collision name="box">
-        <pose> 0 0 0.015 0 0 0</pose>
+        <pose> 0 0 0.025 0 0 0</pose>
         <geometry>
           <box>
-            <size>0.3 0.3 0.03</size>
+            <size>0.3 0.3 0.05</size>
           </box>
         </geometry>
         <drake:proximity_properties>

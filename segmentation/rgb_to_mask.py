@@ -19,10 +19,10 @@ def main(argv):
 
     text_prompt = argv[0]
     rgb_directory = os.fsencode(argv[1])
+    rgb_path = Path(argv[1])
     
     # determine path to save masks
     if len(argv) < 3:
-        rgb_path = Path(argv[1])
         parent_path =  rgb_path.parent.absolute()
         mask_dir_path = os.path.join(parent_path, "masks_sam")
     else:
@@ -33,8 +33,9 @@ def main(argv):
 
     for file in os.listdir(rgb_directory):
         filename = os.fsdecode(file)
-        if filename.endswith(".png"): 
-            image_pil = Image.open(filename).convert("RGB")
+        if filename.endswith(".png"):
+            print("RGB file:", filename)
+            image_pil = Image.open(os.path.join(rgb_path, filename)).convert("RGB")
             masks, boxes, phrases, logits = model.predict(image_pil, text_prompt)
             if len(masks) == 0:
                 raise Exception(f"No objects of the '{text_prompt}' prompt detected in the image {filename}.")

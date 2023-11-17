@@ -409,7 +409,7 @@ class GraspListener():
         cost = (
             antipodal_cost
             + 100.0 * gripper_vertical_alignment_cost
-            + 10.0 * grasp_height_cost
+            # + 10.0 * grasp_height_cost
             + 1.0 * split_ratio_minor_axis_cost
             + 10.0 * split_ratio_major_axis_cost
         )
@@ -604,8 +604,8 @@ class GraspListener():
               grasps, sorted based on cost.
         """
 
-        split_ratio_major_axis_threshold = 0.6  # Axis of biggest pcd variation
-        split_ratio_minor_axis_threshold = 0.6  # Axis of smallest pcd variation
+        split_ratio_major_axis_threshold = 0.0  # Axis of biggest pcd variation
+        split_ratio_minor_axis_threshold = 0.0  # Axis of smallest pcd variation
 
         # NOTE: All num_samples should be odd numbers
         y_min = -0.01
