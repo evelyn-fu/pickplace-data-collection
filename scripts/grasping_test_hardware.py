@@ -9,7 +9,11 @@ from pydrake.geometry import (
 )
 from pydrake.systems.analysis import Simulator
 from pydrake.systems.framework import DiagramBuilder
-from pydrake.systems.primitives import PortSwitch
+from pydrake.systems.primitives import (
+    PortSwitch,
+    Multiplexer,
+    Demultiplexer
+)
 from pydrake.perception import (
     DepthImageToPointCloud
 )
@@ -21,7 +25,7 @@ from planning.two_grasp_display_planner import TwoGraspPlanner
 from perception.image_saver import ImageSaver
 
 
-def start_scenario(dirstr = "test4", scenario_path="scenario_data_grasping.yml"):
+def start_scenario(dirstr = "test4", scenario_path="scenario_data_grasping.yml", use_hardware=False):
     meshcat.ResetRenderMode()
 
     builder = DiagramBuilder()
@@ -30,6 +34,8 @@ def start_scenario(dirstr = "test4", scenario_path="scenario_data_grasping.yml")
     filename = os.path.join(dir_path, os.path.join("scenario_datas", scenario_path))
     scenario = load_scenario(filename=filename)
     station = builder.AddSystem(MakeHardwareStation(scenario, meshcat, hardware=False))
+    if use_hardware:
+        external_station = builder.AddSystem(MakeHardwareStation(scenario, meshcat, hardware=True))
     plant = station.GetSubsystemByName("plant")
 
     # initialize image writer and save directories
@@ -121,11 +127,34 @@ def start_scenario(dirstr = "test4", scenario_path="scenario_data_grasping.yml")
                 ]
             ],
             meshcat=meshcat,))
+
+    if use_hardware:
+        # Connect the output of external station to the input of internal station
+        builder.Connect(
+            external_station.GetOutputPort("iiwa.position_commanded"),
+            station.GetInputPort("iiwa.position"),
+        )
+
+        wsg_state_demux: Demultiplexer = builder.AddSystem(Demultiplexer(2, 1))
+        builder.Connect(
+            external_station.GetOutputPort("wsg.state_measured"),
+            wsg_state_demux.get_input_port(),
+        )
+        builder.Connect(
+            wsg_state_demux.get_output_port(0),
+            station.GetInputPort("wsg.position"),
+        )
     
-    builder.Connect(
-        station.GetOutputPort("iiwa.position_measured"),
-        planner.GetInputPort("iiwa_position"),
-    )
+    if not use_hardware:
+        builder.Connect(
+            station.GetOutputPort("iiwa.position_measured"),
+            planner.GetInputPort("iiwa_position"),
+        )
+    else:
+        builder.Connect(
+            external_station.GetOutputPort("iiwa.position_measured"),
+            planner.GetInputPort("iiwa_position"),
+        )
 
     controller_plant = station.GetSubsystemByName(
         "iiwa.controller"
@@ -138,19 +167,43 @@ def start_scenario(dirstr = "test4", scenario_path="scenario_data_grasping.yml")
     )
 
     builder.Connect(planner.GetOutputPort("X_WG"), differential_ik.get_input_port(0))
-    builder.Connect(
-        station.GetOutputPort("iiwa.state_estimated"),
-        differential_ik.GetInputPort("robot_state"),
-    )
+
+    if not use_hardware:
+        builder.Connect(
+            station.GetOutputPort("iiwa.state_estimated"),
+            differential_ik.GetInputPort("robot_state"),
+        )
+    else:
+        # Export external state output
+        iiwa_state_mux: Multiplexer = builder.AddSystem(Multiplexer([7, 7]))
+        builder.Connect(
+            external_station.GetOutputPort("iiwa.position_measured"),
+            iiwa_state_mux.get_input_port(0),
+        )
+        builder.Connect(
+            external_station.GetOutputPort("iiwa.velocity_estimated"),
+            iiwa_state_mux.get_input_port(1),
+        )
+        builder.Connect(
+            iiwa_state_mux.get_output_port(),
+            differential_ik.GetInputPort("robot_state"),
+        )
+
     builder.Connect(
         planner.GetOutputPort("reset_diff_ik"),
         differential_ik.GetInputPort("use_robot_state"),
     )
 
-    builder.Connect(
-        planner.GetOutputPort("wsg_position"),
-        station.GetInputPort("wsg.position"),
-    )
+    if use_hardware:
+        builder.Connect(
+            planner.GetOutputPort("wsg_position"),
+            external_station.GetInputPort("wsg.position"),
+        )
+    else:
+        builder.Connect(
+            planner.GetOutputPort("wsg_position"),
+            station.GetInputPort("wsg.position"),
+        )
 
     # The DiffIK and the direct position-control modes go through a PortSwitch
     switch = builder.AddSystem(PortSwitch(7))
@@ -161,9 +214,14 @@ def start_scenario(dirstr = "test4", scenario_path="scenario_data_grasping.yml")
         planner.GetOutputPort("iiwa_position_command"),
         switch.DeclareInputPort("position"),
     )
-    builder.Connect(
-        switch.get_output_port(), station.GetInputPort("iiwa.position")
-    )
+    if use_hardware:
+        builder.Connect(
+            switch.get_output_port(), external_station.GetInputPort("iiwa.position")
+        )
+    else:
+        builder.Connect(
+            switch.get_output_port(), station.GetInputPort("iiwa.position")
+        )
     builder.Connect(
         planner.GetOutputPort("control_mode"),
         switch.get_port_selector_input_port(),
@@ -188,6 +246,7 @@ def start_scenario(dirstr = "test4", scenario_path="scenario_data_grasping.yml")
 
     # Build diagram
     diagram = builder.Build()
+    context = diagram.CreateDefaultContext()
 
     # Simulate
     simulator = Simulator(diagram)
@@ -234,10 +293,15 @@ if __name__ == "__main__":
         default="scenario_data_grasping.yml",
         help="yaml file with scenario",
     )
+    parser.add_argument(
+        "--use_hardware",
+        action="store_true",
+        help="Whether to use real world hardware.",
+    )
     args = parser.parse_args()
 
     # Start the visualizer.
     meshcat = StartMeshcat()
 
     save_dir_path = os.path.abspath(os.path.join(os.path.dirname( __file__ ), '..', 'tests', args.save_dir))
-    start_scenario(save_dir_path, scenario_path= args.scenario_path)
+    start_scenario(save_dir_path, scenario_path= args.scenario_path, use_hardware=args.use_hardware)
