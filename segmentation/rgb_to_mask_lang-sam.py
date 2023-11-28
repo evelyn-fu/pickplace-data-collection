@@ -15,9 +15,10 @@ def main(argv):
     optionally takes in path to put masked images as third argument.
     If the third argument is not given, creates a masks directory in the parent directory of the RGB images directory
     '''
+    text_prompt = argv[0]
+    print("text prompt:", text_prompt)
     model = LangSAM()
 
-    text_prompt = argv[0]
     rgb_directory = os.fsencode(argv[1])
     rgb_path = Path(argv[1])
     
