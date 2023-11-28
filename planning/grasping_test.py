@@ -1,3 +1,4 @@
+import argparse
 import numpy as np
 import os
 import copy
@@ -448,15 +449,15 @@ def compute_principal_minor_components(pcd):
 
     return principal_component, secondary_component, minor_component
 
-def start_scenario(dirstr = "test4"):
+def start_scenario(dirstr = "test4", scenario_path="scenario_data_grasping.yml", use_hardware=False):
     meshcat.ResetRenderMode()
 
     builder = DiagramBuilder()
 
     dir_path = os.path.dirname(os.path.realpath(__file__))
-    filename = os.path.join(dir_path, "scenario_data_grasping_spatula.yml")
+    filename = os.path.join(dir_path, scenario_path)
     scenario = load_scenario(filename=filename)
-    station = builder.AddSystem(MakeHardwareStation(scenario, meshcat))
+    station = builder.AddSystem(MakeHardwareStation(scenario, meshcat, hardware=use_hardware))
     plant = station.GetSubsystemByName("plant")
 
     # initialize image writer and save directories
@@ -474,7 +475,7 @@ def start_scenario(dirstr = "test4"):
         os.makedirs(dirstr+"/masks/")
     np.savetxt(dirstr+"/cam_K.txt", K)
 
-    
+    # save drake simulated images
     img_saver = builder.AddSystem(ImageSaver(dirstr))
     builder.Connect(station.GetOutputPort("camera0.rgb_image"), img_saver.GetInputPort("rgb_in"))
     builder.Connect(station.GetOutputPort("camera0.depth_image_16u"), img_saver.GetInputPort("depth_in"))
@@ -632,7 +633,7 @@ def start_scenario(dirstr = "test4"):
             continue
         frame_id = inspector.GetFrameId(geometry_id)
         body = plant.GetBodyFromFrameId(frame_id)
-        if body.model_instance() == plant.GetModelInstanceByName("spatula"):
+        if body.model_instance() == plant.GetModelInstanceByName("mustard_bottle"):
             properties.UpdateProperty("label", "id", RenderLabel(0)) # Make mustard label 0
         else:
             properties.UpdateProperty("label", "id", RenderLabel.kDontCare)
@@ -650,8 +651,26 @@ def start_scenario(dirstr = "test4"):
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "save_dir",
+        default="temp",
+        help="directory to save images in",
+    )
+    parser.add_argument(
+        "scenario_path",
+        default="scenario_data_grasping.yml",
+        help="yaml file with scenario",
+    )
+    parser.add_argument(
+        "--use_hardware",
+        action="store_true",
+        help="Whether to use real world hardware.",
+    )
+    args = parser.parse_args()
+
     # Start the visualizer.
     meshcat = StartMeshcat()
 
-    save_dir_path = os.path.abspath(os.path.join(os.path.dirname( __file__ ), '..', 'tests', 'test_grasping_spatula'))
-    start_scenario(save_dir_path)
+    save_dir_path = os.path.abspath(os.path.join(os.path.dirname( __file__ ), '..', 'tests', args.save_dir))
+    start_scenario(save_dir_path, scenario_path= args.scenario_path, use_hardware=args.use_hardware)
