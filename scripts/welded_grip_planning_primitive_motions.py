@@ -165,8 +165,8 @@ def motion_primitives_with_camera(dirstr = "test3", scenario_data_filename="scen
 
     builder = DiagramBuilder()
 
-    cwd = os.path.abspath(os.path.dirname(__file__))
-    full_file_path = os.path.join(cwd, scenario_data_filename)
+    dir_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    full_file_path = os.path.join(dir_path, os.path.join("scenario_datas", scenario_data_filename))
     scenario = load_scenario(filename=full_file_path)
     station = builder.AddSystem(MakeHardwareStation(scenario, meshcat))
 
@@ -257,4 +257,4 @@ def motion_primitives_with_camera(dirstr = "test3", scenario_data_filename="scen
 if __name__ == "__main__":
     # Start the visualizer.
     meshcat = StartMeshcat()
-    motion_primitives_with_camera(dirstr="test_welded_short_grip", scenario_data_filename="scenario_data_welded_short_axis_grip.yml")
+    motion_primitives_with_camera(dirstr="tests/test_welded_short_grip", scenario_data_filename="scenario_data_welded_short_axis_grip.yml")

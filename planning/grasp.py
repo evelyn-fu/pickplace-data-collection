@@ -5,9 +5,9 @@ import open3d as o3d
 import numpy as np
 import threading
 from typing import List
-import utils.utils as utils
+import planning.utils.utils as utils
 import os
-from utils.geometry import to_rotation_matrices, se3_inverse_batch
+from planning.utils.geometry import to_rotation_matrices, se3_inverse_batch
 from pydrake.all import (
     PointCloud,
     RigidTransform,
@@ -20,7 +20,7 @@ from pydrake.all import (
 from manipulation.utils import ConfigureParser
 from scipy.spatial import KDTree
 from scipy.spatial.transform import Rotation as R
-from misc.sdf_tools import SignedDensityField
+from planning.misc.sdf_tools import SignedDensityField
 import time
 import torch
 
