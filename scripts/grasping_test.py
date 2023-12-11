@@ -151,7 +151,7 @@ def start_scenario(dirstr = "test4", scenario_path="scenario_data_grasping.yml")
         joint_traj_source.GetInputPort("trajectory"),
     )
     builder.Connect(
-        station.GetOutputPort("position_measured"),
+        station.GetOutputPort("iiwa.position_measured"),
         joint_traj_source.GetInputPort("current_cmd"),
     )
 

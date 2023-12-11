@@ -2,7 +2,7 @@ import numpy as np
 
 from pydrake.all import AbstractValue, BasicVector, Context, LeafSystem, RigidTransform
 
-from dataclasses.trajectories import (
+from iiwa_setup_dataclasses.trajectories import (
     PiecewisePoseWithTimingInformation,
     TrajectoryWithTimingInformation,
 )

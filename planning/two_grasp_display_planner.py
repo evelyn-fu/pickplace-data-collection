@@ -11,7 +11,7 @@ from planning.trajectories import (
 from planning.trajectory_sources import TrajectoryWithTimingInformationSource
 from planning.gcs import plan_unconstrained_gcs_path_start_to_goal
 from planning.inverse_kinematics import solve_global_inverse_kinematics
-from dataclasses.trajectories import TrajectoryWithTimingInformation
+from iiwa_setup_dataclasses.trajectories import TrajectoryWithTimingInformation
 from pydrake.systems.framework import LeafSystem, InputPortIndex
 from pydrake.perception import (
     Concatenate,
