@@ -9,7 +9,6 @@ from pydrake.all import (
     RigidTransform,
 )
 
-
 def MakeGripperFrames(X_G, t0=0):
     """
     Takes a partial specification with X_G["initial"], X_G["pick"],

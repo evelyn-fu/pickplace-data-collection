@@ -1,11 +1,17 @@
 import numpy as np
+import logging
 from scipy.spatial.transform import Rotation as R
 from planning.grasp import GraspListener
+from planning.toppra import reparameterize_with_toppra
 from planning.trajectories import (
     MakeGripperCommandTrajectory,
     MakeGripperFrames,
     MakeGripperPoseTrajectory,
 )
+from planning.trajectory_sources import TrajectoryWithTimingInformationSource
+from planning.gcs import plan_unconstrained_gcs_path_start_to_goal
+from planning.inverse_kinematics import solve_global_inverse_kinematics
+from dataclasses.trajectories import TrajectoryWithTimingInformation
 from pydrake.systems.framework import LeafSystem, InputPortIndex
 from pydrake.perception import (
     Concatenate,
@@ -41,9 +47,11 @@ def compute_principal_minor_components(pcd):
 
 class PlannerState(Enum):
     WAIT_FOR_OBJECTS_TO_SETTLE = 1
-    GRASP1 = 2
+    GO_TO_START1 = 2
+    GRASP1 = 3
     GO_HOME = 4
-    GRASP2 = 3
+    GO_TO_START2 = 5
+    GRASP2 = 6
 
 default_home_pose = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/2)), [0.0, -0.5, 0.5]) # arm out of the way of depth cameras
 
@@ -92,6 +100,9 @@ class TwoGraspPlanner(LeafSystem):
         self._times_index = self.DeclareAbstractState(
             AbstractValue.Make({"initial": 0.0})
         )
+        self._current_joint_traj_idx = self.DeclareAbstractState(
+            AbstractValue.Make(TrajectoryWithTimingInformation())
+        )
 
         self.DeclareAbstractOutputPort(
             "X_WG",
@@ -100,7 +111,13 @@ class TwoGraspPlanner(LeafSystem):
         )
         self.DeclareVectorOutputPort("wsg_position", 1, self.CalcWsgPosition)
 
-        # For GoHome mode.
+        self.DeclareAbstractOutputPort(
+            "joint_position_trajectory",
+            lambda: AbstractValue.Make(TrajectoryWithTimingInformation()),
+            self.GetCurrentJointPositionTrajectory,
+        )
+
+        # For iiwa position control modes.
         num_positions = 7
         self._iiwa_position_index = self.DeclareVectorInputPort(
             "iiwa_position", num_positions
@@ -116,11 +133,8 @@ class TwoGraspPlanner(LeafSystem):
             self.CalcDiffIKReset,
         )
         self._q0_index = self.DeclareDiscreteState(num_positions)  # for q0
-        self._traj_q_index = self.DeclareAbstractState(
-            AbstractValue.Make(PiecewisePolynomial())
-        )
-        self.DeclareVectorOutputPort(
-            "iiwa_position_command", num_positions, self.CalcIiwaPosition
+        self._X_G_init_index = self.DeclareAbstractState(
+            AbstractValue.Make(RigidTransform())
         )
         self.DeclareInitializationDiscreteUpdateEvent(self.Initialize)
 
@@ -128,6 +142,9 @@ class TwoGraspPlanner(LeafSystem):
 
         self.grasp_node = GraspListener()
         self.meshcat = meshcat
+        self.plant = plant
+        self.velocity_limits = 0.1 * np.ones(7),
+        self.acceleration_limits = 0.1 * np.ones(7),
 
     def Update(self, context, state):
         mode = context.get_abstract_state(int(self._mode_index)).get_value()
@@ -139,9 +156,18 @@ class TwoGraspPlanner(LeafSystem):
             if current_time - times["initial"] > 1.0:
                 state.get_mutable_abstract_state(
                     int(self._mode_index)
+                ).set_value(PlannerState.GO_TO_START1)
+                self.PlanToStart(context, state)
+            return
+        if mode == PlannerState.GO_TO_START1:
+            traj_q= context.get_abstract_state(
+                int(self._current_joint_traj_idx)
+            ).get_value()
+            if traj_q.get_number_of_segments() > 0 and (not traj_q.is_time_in_range(context.get_time())):
+                state.get_mutable_abstract_state(
+                    int(self._mode_index)
                 ).set_value(PlannerState.GRASP1)
                 self.Plan(context, state)
-            return
         if mode == PlannerState.GRASP1:
             traj_X_G = context.get_abstract_state(
                 int(self._traj_X_G_index)
@@ -154,7 +180,16 @@ class TwoGraspPlanner(LeafSystem):
             return
         if mode == PlannerState.GO_HOME:
             traj_q= context.get_abstract_state(
-                int(self._traj_q_index)
+                int(self._current_joint_traj_idx)
+            ).get_value()
+            if traj_q.get_number_of_segments() > 0 and (not traj_q.is_time_in_range(context.get_time())):
+                state.get_mutable_abstract_state(
+                    int(self._mode_index)
+                ).set_value(PlannerState.GO_TO_START2)
+                self.PlanToStart(context, state)
+        if mode == PlannerState.GO_TO_START2:
+            traj_q= context.get_abstract_state(
+                int(self._current_joint_traj_idx)
             ).get_value()
             if traj_q.get_number_of_segments() > 0 and (not traj_q.is_time_in_range(context.get_time())):
                 state.get_mutable_abstract_state(
@@ -171,21 +206,81 @@ class TwoGraspPlanner(LeafSystem):
         q0 = context.get_discrete_state(self._q0_index).get_value().copy()
         # q0[0] = q[0]  # Safer to not reset the first joint.
 
+        traj = plan_unconstrained_gcs_path_start_to_goal(
+            plant=self._iiwa_controller_plant, q_start=q, q_goal=q0
+        )
+        if traj is None:
+            logging.error("Failed to find a path to the home positions.")
+            exit(1)
+
+        toppra_traj = reparameterize_with_toppra(
+            trajectory=traj,
+            plant=self.plant,
+            velocity_limits=self._move_to_start_velocity_limits,
+            acceleration_limits=self._move_to_start_acceleration_limits,
+        )
+
         current_time = context.get_time()
-        q_traj = PiecewisePolynomial.FirstOrderHold(
-            [current_time, current_time + 5.0], np.vstack((q, q0)).T
+        state.get_mutable_abstract_state(self._current_joint_traj_idx).set_value(
+            TrajectoryWithTimingInformation(
+                trajectory=toppra_traj,
+                start_time_s=current_time,
+            )
         )
-        state.get_mutable_abstract_state(int(self._traj_q_index)).set_value(
-            q_traj
+
+    def PlanToStart(self, context, state):
+        X_G_init = self.get_input_port(3).Eval(context)[int(self._gripper_body_index)]
+        state.get_mutable_abstract_state(int(self._X_G_init_index)).set_value(
+            X_G_init
         )
+
+        q = self.get_input_port(self._iiwa_position_index).Eval(context)
+        q_goal = solve_global_inverse_kinematics(
+            plant=self.plant,
+            X_G=X_G_init,
+            initial_guess=q,
+            position_tolerance=0.0,
+            orientation_tolerance=0.0,
+            gripper_frame_name="body",
+        )
+        if q_goal is None:
+            logging.error(
+                "Failed to solve inverse kinematics for the grasping start pose."
+            )
+            exit(1)
+
+        traj = plan_unconstrained_gcs_path_start_to_goal(
+            plant=self.plant, q_start=q, q_goal=q_goal
+        )
+        if traj is None:
+            logging.error("Failed to find a path to the grasping start positions.")
+            exit(1)
+
+        toppra_traj = reparameterize_with_toppra(
+            trajectory=traj,
+            plant=self.plant,
+            velocity_limits=self.velocity_limits,
+            acceleration_limits=self.acceleration_limits,
+        )
+
+        current_time = context.get_time()
+        state.get_mutable_abstract_state(self._current_joint_traj_idx).set_value(
+            TrajectoryWithTimingInformation(
+                trajectory=toppra_traj,
+                start_time_s=current_time,
+            )
+        )
+
 
     def Plan(self, context, state):
         mode = context.get_abstract_state(int(self._mode_index)).get_value()
 
+        X_G_init= context.get_abstract_state(
+            int(self._X_G_init_index)
+        ).get_value()
+
         X_G = {
-            "initial": self.get_input_port(3).Eval(context)[
-                int(self._gripper_body_index)
-            ],
+            "initial": X_G_init,
             "end": default_home_pose
         }
 
@@ -299,6 +394,12 @@ class TwoGraspPlanner(LeafSystem):
         output.set_value(
             default_home_pose
         )
+    
+    def GetCurrentJointPositionTrajectory(self, context, output):
+        current_joint_traj = context.get_abstract_state(
+            self._current_joint_traj_idx
+        ).get_value()
+        output.set_value(current_joint_traj)
 
     def CalcWsgPosition(self, context, output):
         mode = context.get_abstract_state(int(self._mode_index)).get_value()
@@ -340,10 +441,3 @@ class TwoGraspPlanner(LeafSystem):
             int(self._q0_index),
             self.get_input_port(int(self._iiwa_position_index)).Eval(context),
         )
-
-    def CalcIiwaPosition(self, context, output):
-        traj_q = context.get_mutable_abstract_state(
-            int(self._traj_q_index)
-        ).get_value()
-
-        output.SetFromVector(traj_q.value(context.get_time()))

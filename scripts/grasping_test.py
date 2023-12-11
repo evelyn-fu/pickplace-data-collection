@@ -19,6 +19,7 @@ from manipulation.station import MakeHardwareStation, load_scenario
 
 from planning.two_grasp_display_planner import TwoGraspPlanner
 from perception.image_saver import ImageSaver
+from planning.trajectory_sources import TrajectoryWithTimingInformationSource
 
 
 def start_scenario(dirstr = "test4", scenario_path="scenario_data_grasping.yml"):
@@ -137,6 +138,23 @@ def start_scenario(dirstr = "test4", scenario_path="scenario_data_grasping.yml")
         frame=controller_plant.GetFrameByName("iiwa_link_7"),
     )
 
+    joint_traj_source: TrajectoryWithTimingInformationSource = (
+        builder.AddNamedSystem(
+            "joint_traj_source",
+            TrajectoryWithTimingInformationSource(
+                trajectory_size=7
+            ),
+        )
+    )
+    builder.Connect(
+        planner.GetOutputPort("joint_position_trajectory"),
+        joint_traj_source.GetInputPort("trajectory"),
+    )
+    builder.Connect(
+        station.GetOutputPort("position_measured"),
+        joint_traj_source.GetInputPort("current_cmd"),
+    )
+
     builder.Connect(planner.GetOutputPort("X_WG"), differential_ik.get_input_port(0))
     builder.Connect(
         station.GetOutputPort("iiwa.state_estimated"),
@@ -158,7 +176,7 @@ def start_scenario(dirstr = "test4", scenario_path="scenario_data_grasping.yml")
         differential_ik.get_output_port(), switch.DeclareInputPort("diff_ik")
     )
     builder.Connect(
-        planner.GetOutputPort("iiwa_position_command"),
+        joint_traj_source.get_output_port(),
         switch.DeclareInputPort("position"),
     )
     builder.Connect(
