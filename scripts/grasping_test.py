@@ -22,7 +22,7 @@ from perception.image_saver import ImageSaver
 from planning.trajectory_sources import TrajectoryWithTimingInformationSource
 
 
-def start_scenario(dirstr = "test4", scenario_path="scenario_data_grasping.yml"):
+def start_scenario(dirstr = "test4", scenario_path="scenario_data_grasping.yml", save_imgs=False):
     meshcat.ResetRenderMode()
 
     builder = DiagramBuilder()
@@ -33,26 +33,27 @@ def start_scenario(dirstr = "test4", scenario_path="scenario_data_grasping.yml")
     station = builder.AddSystem(MakeHardwareStation(scenario, meshcat, hardware=False))
     plant = station.GetSubsystemByName("plant")
 
-    # initialize image writer and save directories
     camera0 = station.GetSubsystemByName("rgbd_sensor_camera0")
     camera1 = station.GetSubsystemByName("rgbd_sensor_camera1")
     camera2 = station.GetSubsystemByName("rgbd_sensor_camera2")
     K = camera0.color_camera_info().intrinsic_matrix()
-    if not os.path.exists(dirstr):
-        os.makedirs(dirstr)
-    if not os.path.exists(dirstr+"/rgb/"):
-        os.makedirs(dirstr+"/rgb/")
-    if not os.path.exists(dirstr+"/depth/"):
-        os.makedirs(dirstr+"/depth/")
-    if not os.path.exists(dirstr+"/masks/"):
-        os.makedirs(dirstr+"/masks/")
-    np.savetxt(dirstr+"/cam_K.txt", K)
 
-    # save drake simulated images
-    img_saver = builder.AddSystem(ImageSaver(dirstr))
-    builder.Connect(station.GetOutputPort("camera0.rgb_image"), img_saver.GetInputPort("rgb_in"))
-    builder.Connect(station.GetOutputPort("camera0.depth_image_16u"), img_saver.GetInputPort("depth_in"))
-    builder.Connect(station.GetOutputPort("camera0.label_image"), img_saver.GetInputPort("label_in"))
+    # initialize image writer and save directories if we are saving images
+    if (save_imgs):
+        if not os.path.exists(dirstr):
+            os.makedirs(dirstr)
+        if not os.path.exists(dirstr+"/rgb/"):
+            os.makedirs(dirstr+"/rgb/")
+        if not os.path.exists(dirstr+"/depth/"):
+            os.makedirs(dirstr+"/depth/")
+        if not os.path.exists(dirstr+"/masks/"):
+            os.makedirs(dirstr+"/masks/")
+        np.savetxt(dirstr+"/cam_K.txt", K)
+
+        img_saver = builder.AddSystem(ImageSaver(dirstr))
+        builder.Connect(station.GetOutputPort("camera0.rgb_image"), img_saver.GetInputPort("rgb_in"))
+        builder.Connect(station.GetOutputPort("camera0.depth_image_16u"), img_saver.GetInputPort("depth_in"))
+        builder.Connect(station.GetOutputPort("camera0.label_image"), img_saver.GetInputPort("label_in"))
 
     # initialize point cloud output ports
     camera0_pcd = builder.AddSystem(DepthImageToPointCloud(camera0.depth_camera_info()))
@@ -107,9 +108,14 @@ def start_scenario(dirstr = "test4", scenario_path="scenario_data_grasping.yml")
         camera2_pcd.GetInputPort("camera_pose"),
     )
 
+    controller_plant = station.GetSubsystemByName(
+        "iiwa.controller"
+    ).get_multibody_plant_for_control()
+
     # Set up planner
     planner = builder.AddSystem(TwoGraspPlanner(
             plant, 
+            controller_plant,
             camera_body_indices=[
                 plant.GetBodyIndices(plant.GetModelInstanceByName("camera_main"))[
                     0
@@ -128,9 +134,6 @@ def start_scenario(dirstr = "test4", scenario_path="scenario_data_grasping.yml")
         planner.GetInputPort("iiwa_position"),
     )
 
-    controller_plant = station.GetSubsystemByName(
-        "iiwa.controller"
-    ).get_multibody_plant_for_control()
     # Set up differential inverse kinematics.
     differential_ik = AddIiwaDifferentialIK(
         builder,
@@ -243,13 +246,19 @@ def start_scenario(dirstr = "test4", scenario_path="scenario_data_grasping.yml")
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
+        "scenario_path",
+        default="scenario_data_grasping.yml",
+        help="yaml file with scenario",
+    )
+    parser.add_argument(
         "save_dir",
         default="temp",
         help="directory to save images in",
+        nargs='?',
     )
     parser.add_argument(
-        "scenario_path",
-        default="scenario_data_grasping.yml",
+        "--save_imgs",
+        action='store_true',
         help="yaml file with scenario",
     )
     args = parser.parse_args()
@@ -258,4 +267,4 @@ if __name__ == "__main__":
     meshcat = StartMeshcat()
 
     save_dir_path = os.path.abspath(os.path.join(os.path.dirname( __file__ ), '..', 'tests', args.save_dir))
-    start_scenario(save_dir_path, scenario_path= args.scenario_path)
+    start_scenario(save_dir_path, scenario_path= args.scenario_path, save_imgs=args.save_imgs)
