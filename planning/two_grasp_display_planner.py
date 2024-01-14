@@ -434,7 +434,7 @@ class TwoGraspPlanner(LeafSystem):
     def CalcWsgPosition(self, context, output):
         mode = context.get_abstract_state(int(self._mode_index)).get_value()
         opened = np.array([0.107])
-        np.array([0.0])
+        closed = np.array([0.0])
 
         traj_wsg = context.get_abstract_state(
             int(self._traj_wsg_index)

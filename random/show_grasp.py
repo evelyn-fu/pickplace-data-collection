@@ -67,14 +67,14 @@ diagram = builder.Build()
 
 X_G = RigidTransform(
   R=RotationMatrix([
-    [0.8188679939606756, -0.5637148170083663, -0.10807781248732035],
-    [-0.44155552482788624, -0.7389773043171849, 0.5088627144899484],
-    [-0.3667205025094598, -0.3689690350006792, -0.8540362546460644],
+    [-0.07171543024864271, -0.13913770084176022, -0.9876728189378914],
+    [-0.5678576027163053, 0.8197709146975448, -0.07425220840648862],
+    [0.8199967317627198, 0.5555324901573431, -0.1378006251003182],
   ]),
-  p=[-0.018216715965074702, -0.6753436812132769, 0.21746884951860282],
+  p=[0.08388419605067596, -0.5091254865817005, 0.09650784033171803],
 )
 
-X_mustard = RigidTransform(RotationMatrix(RollPitchYaw(-np.pi/2, 0, 0)), [0, -0.6, 0.1])
+X_mustard = RigidTransform(RotationMatrix(RollPitchYaw(-np.pi/2, 0, 0)), [0, -0.5, 0.08])
 # X_WGfix = RigidTransform(RotationMatrix(RollPitchYaw(np.pi/2, 0, 0))).multiply(RigidTransform([0, -0.049133, 0]))
 X_WGfix = RigidTransform(RotationMatrix(RollPitchYaw(np.pi/2, 0, np.pi/2)))
 context = diagram.CreateDefaultContext()

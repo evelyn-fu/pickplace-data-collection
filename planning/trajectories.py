@@ -123,4 +123,5 @@ def MakeGripperCommandTrajectory(times):
     traj_wsg_command.AppendFirstOrderSegment(times["place_start"], closed)
     traj_wsg_command.AppendFirstOrderSegment(times["place_end"], opened)
     traj_wsg_command.AppendFirstOrderSegment(times["postplace"], opened)
+    traj_wsg_command.AppendFirstOrderSegment(times["end"], opened)
     return traj_wsg_command

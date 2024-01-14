@@ -409,7 +409,7 @@ class GraspListener():
         cost = (
             antipodal_cost
             + 100.0 * gripper_vertical_alignment_cost
-            # + 10.0 * grasp_height_cost
+            + 10.0 * grasp_height_cost
             + 1.0 * split_ratio_minor_axis_cost
             + 10.0 * split_ratio_major_axis_cost
         )
@@ -490,8 +490,8 @@ class GraspListener():
 
         :param pcd_points: Point cloud points of shape (N,3).
         :param viz_major_axis: Whether to visualize the pcd with the principle and minor axes in open3d.
-        :return: Minor, secondary, and major point cloud split ratio for each point of shape (N,2) where the first entry is the
-            minor axis.
+        :return: Minor, secondary, and major point cloud split ratio for each point of shape (N,3) where the first entry is the
+            minor axis, second is the secondary, and last is the major axis.
         """
         cov = np.cov(pcd_points.T)
         eigval, eigvec = np.linalg.eig(cov)
@@ -532,6 +532,59 @@ class GraspListener():
         split_ratio = np.min(split, axis=0) / np.max(split, axis=0)
 
         return split_ratio[:, [0, 1, 2]]
+
+
+    @staticmethod
+    def compute_pcd_point_locations(pcd_points: np.ndarray, viz_split_ratio_axes: bool = False) -> np.ndarray:
+        """
+        Computes the relative location of each point in pcd. Using (minor, secondary, major) axes as (x, y, z)
+        The relative location has range [0,1] where 10 is the farthest point in the negative direction of the axis
+        and 1 is the farthest point in the positive direction of the axis
+
+        :param pcd_points: Point cloud points of shape (N,3).
+        :param viz_major_axis: Whether to visualize the pcd with the principle and minor axes in open3d.
+        :return: Minor, secondary, and major point cloud locations for each point of shape (N,3) where the first entry is the
+            minor axis, second is the secondary, and last is the major axis.
+        """
+        cov = np.cov(pcd_points.T)
+        eigval, eigvec = np.linalg.eig(cov)
+
+        order = eigval.argsort()
+        principal_component = eigvec[:, order[-1]]
+        secondary_component = eigvec[:, order[1]]
+        minor_component = eigvec[:, order[0]]
+
+        # Rotate point cloud to align the principal component with the z-axis and the minor component with the x-axis
+        z_axis, x_axis = [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]
+        rot_principal_component_to_axes, _ = R.align_vectors(
+            np.array([z_axis, x_axis]), np.stack([principal_component, minor_component])
+        )
+
+        pcd_points_axis_aligned = pcd_points @ rot_principal_component_to_axes.as_matrix().T
+
+        if viz_split_ratio_axes:
+            # Visualize the point cloud in blue, the principal axis in red, and the minor axis in green
+            pcd_points_axis_aligned_normalized = pcd_points_axis_aligned - np.mean(pcd_points_axis_aligned, axis=0)
+            pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd_points_axis_aligned_normalized))
+            pcd.paint_uniform_color([0.0, 0.0, 1.0])
+            principle_component_line = o3d.geometry.LineSet()
+            principle_component_line.points = o3d.utility.Vector3dVector(
+                np.array([[0.0, 0.0, -0.3], [0.0, 0.0, 0.3], [-0.1, 0.0, 0.0], [0.1, 0.0, 0.0]])
+            )
+            principle_component_line.lines = o3d.utility.Vector2iVector(np.array([[0, 1], [2, 3]]))
+            principle_component_line.colors = o3d.utility.Vector3dVector(np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]))
+            world_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.01)
+            o3d.visualization.draw_geometries([pcd, principle_component_line, world_frame])
+
+        # Min/max bounds for location
+        min_point_vals = np.min(pcd_points_axis_aligned, axis=0)
+        max_point_vals = np.max(pcd_points_axis_aligned, axis=0)
+        point_vals_range = max_point_vals - min_point_vals
+
+        # Compute location
+        location = (max_point_vals - pcd_points_axis_aligned) / point_vals_range
+
+        return location
 
     @staticmethod
     def make_gripper_line_set(pose: np.ndarray, color=(1, 0, 0)):
@@ -604,8 +657,8 @@ class GraspListener():
               grasps, sorted based on cost.
         """
 
-        split_ratio_major_axis_threshold = 0.0  # Axis of biggest pcd variation
-        split_ratio_minor_axis_threshold = 0.0  # Axis of smallest pcd variation
+        split_ratio_major_axis_threshold = 0.6  # Axis of biggest pcd variation
+        split_ratio_minor_axis_threshold = 0.6  # Axis of smallest pcd variation
 
         # NOTE: All num_samples should be odd numbers
         y_min = -0.01
