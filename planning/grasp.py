@@ -405,7 +405,7 @@ class GraspListener():
         gripper_vertical_alignment_cost = eff_vertical_vec @ align_grasp_axis  # want z axis of gripper to face down, larger worse
         grasp_height_cost = -t[:, 2]  # prefer higher position
         split_ratio_minor_axis_cost = -split_ratios[0]  # prefer higher split ratio
-        split_ratio_major_axis_cost = -split_ratios[1]
+        split_ratio_major_axis_cost = -split_ratios[2]
         cost = (
             antipodal_cost
             + 100.0 * gripper_vertical_alignment_cost

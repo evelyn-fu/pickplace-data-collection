@@ -25,7 +25,7 @@ from planning.two_grasp_display_planner import TwoGraspPlanner
 from perception.image_saver import ImageSaver
 
 
-def start_scenario(dirstr = "test4", scenario_path="scenario_data_grasping.yml", use_hardware=False):
+def start_scenario(dirstr = "test4", scenario_path="scenario_data_grasping.yml", use_hardware=False, save_imgs=False):
     meshcat.ResetRenderMode()
 
     builder = DiagramBuilder()
@@ -43,21 +43,23 @@ def start_scenario(dirstr = "test4", scenario_path="scenario_data_grasping.yml",
     camera1 = station.GetSubsystemByName("rgbd_sensor_camera1")
     camera2 = station.GetSubsystemByName("rgbd_sensor_camera2")
     K = camera0.color_camera_info().intrinsic_matrix()
-    if not os.path.exists(dirstr):
-        os.makedirs(dirstr)
-    if not os.path.exists(dirstr+"/rgb/"):
-        os.makedirs(dirstr+"/rgb/")
-    if not os.path.exists(dirstr+"/depth/"):
-        os.makedirs(dirstr+"/depth/")
-    if not os.path.exists(dirstr+"/masks/"):
-        os.makedirs(dirstr+"/masks/")
-    np.savetxt(dirstr+"/cam_K.txt", K)
 
-    # save drake simulated images
-    img_saver = builder.AddSystem(ImageSaver(dirstr))
-    builder.Connect(station.GetOutputPort("camera0.rgb_image"), img_saver.GetInputPort("rgb_in"))
-    builder.Connect(station.GetOutputPort("camera0.depth_image_16u"), img_saver.GetInputPort("depth_in"))
-    builder.Connect(station.GetOutputPort("camera0.label_image"), img_saver.GetInputPort("label_in"))
+    if save_imgs:
+        if not os.path.exists(dirstr):
+            os.makedirs(dirstr)
+        if not os.path.exists(dirstr+"/rgb/"):
+            os.makedirs(dirstr+"/rgb/")
+        if not os.path.exists(dirstr+"/depth/"):
+            os.makedirs(dirstr+"/depth/")
+        if not os.path.exists(dirstr+"/masks/"):
+            os.makedirs(dirstr+"/masks/")
+        np.savetxt(dirstr+"/cam_K.txt", K)
+
+        # save drake simulated images
+        img_saver = builder.AddSystem(ImageSaver(dirstr))
+        builder.Connect(station.GetOutputPort("camera0.rgb_image"), img_saver.GetInputPort("rgb_in"))
+        builder.Connect(station.GetOutputPort("camera0.depth_image_16u"), img_saver.GetInputPort("depth_in"))
+        builder.Connect(station.GetOutputPort("camera0.label_image"), img_saver.GetInputPort("label_in"))
 
     # initialize point cloud output ports
     camera0_pcd = builder.AddSystem(DepthImageToPointCloud(camera0.depth_camera_info()))
@@ -112,9 +114,14 @@ def start_scenario(dirstr = "test4", scenario_path="scenario_data_grasping.yml",
         camera2_pcd.GetInputPort("camera_pose"),
     )
 
+    controller_plant = station.GetSubsystemByName(
+        "iiwa.controller"
+    ).get_multibody_plant_for_control()
+
     # Set up planner
     planner = builder.AddSystem(TwoGraspPlanner(
             plant, 
+            controller_plant,
             camera_body_indices=[
                 plant.GetBodyIndices(plant.GetModelInstanceByName("camera_main"))[
                     0
@@ -156,9 +163,6 @@ def start_scenario(dirstr = "test4", scenario_path="scenario_data_grasping.yml",
             planner.GetInputPort("iiwa_position"),
         )
 
-    controller_plant = station.GetSubsystemByName(
-        "iiwa.controller"
-    ).get_multibody_plant_for_control()
     # Set up differential inverse kinematics.
     differential_ik = AddIiwaDifferentialIK(
         builder,
@@ -298,10 +302,15 @@ if __name__ == "__main__":
         action="store_true",
         help="Whether to use real world hardware.",
     )
+    parser.add_argument(
+        "--save_imgs",
+        action='store_true',
+        help="yaml file with scenario",
+    )
     args = parser.parse_args()
 
     # Start the visualizer.
     meshcat = StartMeshcat()
 
     save_dir_path = os.path.abspath(os.path.join(os.path.dirname( __file__ ), '..', 'tests', args.save_dir))
-    start_scenario(save_dir_path, scenario_path= args.scenario_path, use_hardware=args.use_hardware)
+    start_scenario(save_dir_path, scenario_path= args.scenario_path, use_hardware=args.use_hardware, save_imgs=args.save_imgs)
