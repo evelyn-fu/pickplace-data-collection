@@ -182,7 +182,6 @@ class GraspListener():
         signed_distance = -np.inf
         X_WGnew = RigidTransform()
 
-        # print("searching z grid")
         for z in z_grid:
             # Record the computed values using last z.
             last_signed_distance = signed_distance
@@ -207,7 +206,6 @@ class GraspListener():
             if (last_signed_distance > thre) and (signed_distance < thre):
                 return last_signed_distance, X_WGlast
 
-        # print("discarded")
         # If nothing is returned after line search, discard the sample by sending None.
         return np.nan, None
 

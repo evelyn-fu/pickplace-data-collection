@@ -236,8 +236,11 @@ class TwoGraspPlanner(LeafSystem):
             logging.error("Failed to find a path to the home positions.")
             exit(1)
 
+        breaks = np.linspace(0, traj.end_time(), int(1e3), endpoint=False)
+        knots = traj.vector_values(breaks)
+
         toppra_traj = reparameterize_with_toppra(
-            trajectory=traj,
+            trajectory=knots.T,
             plant=self._iiwa_controller_plant,
             velocity_limits=self.velocity_limits,
             acceleration_limits=self.acceleration_limits,

@@ -306,14 +306,14 @@ def start_scenario(dirstr = "test4", scenario_path="scenario_data_grasping.yml",
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "save_dir",
-        default="temp",
-        help="directory to save images in",
-    )
-    parser.add_argument(
         "scenario_path",
         default="scenario_data_grasping.yml",
         help="yaml file with scenario",
+    )
+    parser.add_argument(
+        "save_dir",
+        default="temp",
+        help="directory to save images in",
     )
     parser.add_argument(
         "--use_hardware",
