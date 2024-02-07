@@ -675,7 +675,7 @@ class GraspListener():
         pcd_points = pcd.xyzs().T
 
         # Filter pcd based on split ratio
-        split_ratios = self.compute_pcd_split_ratio(pcd_points, viz_split_ratio_axes=True)
+        split_ratios = self.compute_pcd_split_ratio(pcd_points, viz_split_ratio_axes=False)
         print(split_ratios[:, minor_split_axis])
         print(split_ratios[:, split_axis])
         mask = (split_ratios[:, minor_split_axis] > split_ratio_minor_axis_threshold) * (

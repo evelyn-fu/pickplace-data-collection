@@ -18,8 +18,9 @@ from pydrake.perception import (
     DepthImageToPointCloud
 )
 
-from manipulation.scenarios import AddIiwaDifferentialIK, ExtractBodyPose
-from manipulation.station import MakeHardwareStation, load_scenario
+from manipulation.scenarios import AddIiwaDifferentialIK
+from manipulation.systems import ExtractPose
+from manipulation.station import MakeHardwareStation, LoadScenario
 
 from planning.two_grasp_display_planner import TwoGraspPlanner
 from perception.image_saver import ImageSaver
@@ -33,7 +34,7 @@ def start_scenario(dirstr = "test4", scenario_path="scenario_data_grasping.yml",
 
     dir_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     filename = os.path.join(dir_path, os.path.join("scenario_datas", scenario_path))
-    scenario = load_scenario(filename=filename)
+    scenario = LoadScenario(filename=filename)
     station = builder.AddSystem(MakeHardwareStation(scenario, meshcat, hardware=False))
     if use_hardware:
         external_station = builder.AddSystem(MakeHardwareStation(scenario, meshcat, hardware=True))
@@ -70,8 +71,8 @@ def start_scenario(dirstr = "test4", scenario_path="scenario_data_grasping.yml",
     builder.Connect(station.GetOutputPort("camera0.depth_image"), camera0_pcd.GetInputPort("depth_image"))
     # builder.Connect(station.GetOutputPort("camera0.rgb_image"), camera0_pcd.color_image_input_port())
     camera_pose0 = builder.AddSystem(
-        ExtractBodyPose(
-            plant.get_body_poses_output_port(), plant.GetBodyIndices(plant.GetModelInstanceByName("camera_main"))[0]
+        ExtractPose(
+            plant.GetBodyIndices(plant.GetModelInstanceByName("camera_main"))[0]
         )
     )
     builder.Connect(
@@ -86,8 +87,8 @@ def start_scenario(dirstr = "test4", scenario_path="scenario_data_grasping.yml",
     builder.Connect(station.GetOutputPort("camera1.depth_image"), camera1_pcd.GetInputPort("depth_image"))
     # builder.Connect(station.GetOutputPort("camera1.rgb_image"), camera1_pcd.color_image_input_port())
     camera_pose1 = builder.AddSystem(
-        ExtractBodyPose(
-            plant.get_body_poses_output_port(), plant.GetBodyIndices(plant.GetModelInstanceByName("camera_1"))[0]
+        ExtractPose(
+            plant.GetBodyIndices(plant.GetModelInstanceByName("camera_1"))[0]
         )
     )
     builder.Connect(
@@ -102,8 +103,8 @@ def start_scenario(dirstr = "test4", scenario_path="scenario_data_grasping.yml",
     builder.Connect(station.GetOutputPort("camera2.depth_image"), camera2_pcd.GetInputPort("depth_image"))
     # builder.Connect(station.GetOutputPort("camera2.rgb_image"), camera2_pcd.color_image_input_port())
     camera_pose2 = builder.AddSystem(
-        ExtractBodyPose(
-            plant.get_body_poses_output_port(), plant.GetBodyIndices(plant.GetModelInstanceByName("camera_2"))[0]
+        ExtractPose(
+            plant.GetBodyIndices(plant.GetModelInstanceByName("camera_2"))[0]
         )
     )
     builder.Connect(
