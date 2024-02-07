@@ -322,7 +322,7 @@ class TwoGraspPlanner(LeafSystem):
             cloud = self.get_input_port(i).Eval(context)
 
             # Crop to region of interest.
-            pcd.append(cloud.Crop(lower_xyz=[-0.5, -1.0, 0.051], upper_xyz=[0.5, -0.3, 0.25]))
+            pcd.append(cloud.Crop(lower_xyz=[0.3, -0.5, 0.051], upper_xyz=[1.0, 0.5, 0.25]))
             # Estimate normals
             pcd[i].EstimateNormals(radius=0.1, num_closest=30)
 

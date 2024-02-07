@@ -7,7 +7,7 @@ def make_pl_traj(path, speed=0.1, startup_time=0.5):
     t_breaks = [startup_time]
     movement_between_segment = np.linalg.norm(path[1:,:] - path[:-1,:], axis=1, ord=np.inf)
     for s, next_config in zip(movement_between_segment/speed, path[1:]):
-        if s + t_breaks[-1] > t_breaks[-1]:
+        if s + t_breaks[-1] > t_breaks[-1] + 2.220446049250313e-16:
             t_breaks += [s + t_breaks[-1]]
             cleaned_path.append(next_config)
     if startup_time > 0:
