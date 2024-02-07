@@ -54,19 +54,19 @@ class PlannerState(Enum):
     GRASP2 = 6
     DONE = 7
 
-default_home_pose = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/2)), [0.5, 0.0, 0.5]) # arm out of the way of depth cameras
+default_home_pose = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0)), [0.5, 0.0, 0.5]) # arm out of the way of depth cameras
 
 default_display_traj = []
 
-default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/2)), [0.0, -0.5, 0.5]))
-default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/4)), [0.0, -0.5, 0.5]))
-default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/2)), [0.0, -0.5, 0.5]))
-default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi)), [0.0, -0.5, 0.5]))
-default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 3 * np.pi / 2)), [0.0, -0.5, 0.5]))
-default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 7 * np.pi / 4)), [0.0, -0.5, 0.5]))
-default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 3 * np.pi / 2)), [0.0, -0.5, 0.5]))
-default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi)), [0.0, -0.5, 0.5]))
-default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/2)), [0.0, -0.5, 0.5]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0)), [0.5, 0.0, 0.5]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi/4)), [0.5, 0.0, 0.5]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0)), [0.5, 0.0, 0.5]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/2)), [0.5, 0.0, 0.5]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi / 2)), [0.5, 0.0, 0.5]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 5 * np.pi / 4)), [0.5, 0.0, 0.5]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi / 2)), [0.5, 0.0, 0.5]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/2)), [0.5, 0.0, 0.5]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0)), [0.5, 0.0, 0.5]))
 
 
 class TwoGraspPlanner(LeafSystem):
