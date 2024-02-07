@@ -3,13 +3,13 @@ directives:
     name: iiwa
     file: package://drake/manipulation/models/iiwa_description/iiwa7/iiwa7_no_collision.sdf
     default_joint_positions:
-        iiwa_joint_1: [-1.57]
+        iiwa_joint_1: [0.0]
         iiwa_joint_2: [0.4]
         iiwa_joint_3: [0]
         iiwa_joint_4: [-1.2]
         iiwa_joint_5: [0]
         iiwa_joint_6: [1.0]
-        iiwa_joint_7: [0]
+        iiwa_joint_7: [1.57]
 - add_weld:
     parent: world
     child: iiwa::iiwa_link_0

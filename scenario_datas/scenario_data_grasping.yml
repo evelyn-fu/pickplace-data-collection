@@ -3,13 +3,13 @@ directives:
     name: iiwa
     file: package://drake/manipulation/models/iiwa_description/iiwa7/iiwa7_no_collision.sdf
     default_joint_positions:
-        iiwa_joint_1: [-1.57]
+        iiwa_joint_1: [0.0]
         iiwa_joint_2: [0.4]
         iiwa_joint_3: [0]
         iiwa_joint_4: [-1.2]
         iiwa_joint_5: [0]
         iiwa_joint_6: [1.0]
-        iiwa_joint_7: [0]
+        iiwa_joint_7: [1.57]
 - add_weld:
     parent: world
     child: iiwa::iiwa_link_0
@@ -28,13 +28,13 @@ directives:
     file: file://./home/evelyn/sources/Real2SimObjectManipulation/models/006_mustard_bottle.sdf
     default_free_body_pose:
         base_link_mustard:
-            translation: [0, -0.5, 0.08]
-            rotation: !Rpy { deg: [0, 0, 20] }
+            translation: [0.5, 0.0, 0.08]
+            rotation: !Rpy { deg: [0, 0, 110] }
 - add_frame:
     name: table_origin
     X_PF:
         base_frame: world
-        rotation: !Rpy { deg: [0.0, 0.0, 0.0 ]}
+        rotation: !Rpy { deg: [0.0, 0.0, 90.0 ]}
         translation: [0, 0, 0]
 
 - add_model:
@@ -50,7 +50,7 @@ directives:
     X_PF:
         base_frame: world
         rotation: !Rpy { deg: [0.0, 0.0, 0.0]}
-        translation: [0, -0.5, 0]
+        translation: [0.5, 0.0, 0]
 
 - add_model:
     name: box
@@ -82,8 +82,8 @@ directives:
     name: camera0_origin
     X_PF:
         base_frame: camera0_staging
-        rotation: !Rpy { deg: [-110, 0, 0]}
-        translation: [0, -1.1, 0.5]
+        rotation: !Rpy { deg: [-110, 0, 90]}
+        translation: [1.1, 0.0, 0.5]
 
 - add_model:
     name: camera_main
@@ -97,8 +97,8 @@ directives:
     name: camera1_origin
     X_PF:
         base_frame: camera1_staging
-        rotation: !Rpy { deg: [-100.0, 0, 90.0]}
-        translation: [.3, 0.3, .2]
+        rotation: !Rpy { deg: [-100.0, 0, 180.0]}
+        translation: [-.3, 0.3, .2]
 
 - add_model:
     name: camera_1
@@ -112,8 +112,8 @@ directives:
     name: camera2_origin
     X_PF:
         base_frame: camera2_staging
-        rotation: !Rpy { deg: [-100.0, 0, 90.0]}
-        translation: [.3, -0.3, .2]
+        rotation: !Rpy { deg: [-100.0, 0, 180.0]}
+        translation: [.3, 0.3, .2]
 
 - add_model:
     name: camera_2
@@ -122,6 +122,10 @@ directives:
 - add_weld:
     parent: camera2_origin
     child: camera_2::base
+
+lcm_buses:
+    default:
+        lcm_url: udpm://239.255.76.67:7667?ttl=0
 
 cameras:
     main_camera:
@@ -139,11 +143,6 @@ cameras:
         depth: True
         X_PB:
             base_frame: camera_2::base
-
-plant_config:
-    time_step: 0.001
-    contact_model: "hydroelastic"
-    discrete_contact_solver: "sap"
 
 model_drivers:
     iiwa: !IiwaDriver

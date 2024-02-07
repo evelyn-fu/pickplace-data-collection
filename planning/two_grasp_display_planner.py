@@ -54,7 +54,7 @@ class PlannerState(Enum):
     GRASP2 = 6
     DONE = 7
 
-default_home_pose = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/2)), [0.0, -0.5, 0.5]) # arm out of the way of depth cameras
+default_home_pose = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/2)), [0.5, 0.0, 0.5]) # arm out of the way of depth cameras
 
 default_display_traj = []
 
