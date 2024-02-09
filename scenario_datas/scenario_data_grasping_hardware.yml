@@ -123,10 +123,6 @@ directives:
     parent: camera2_origin
     child: camera_2::base
 
-lcm_buses:
-    default:
-        lcm_url: udpm://239.255.76.67:7667?ttl=0
-
 cameras:
     main_camera:
         name: camera0
@@ -146,5 +142,6 @@ cameras:
 
 model_drivers:
     iiwa: !IiwaDriver
+      lcm_bus: "default"
       hand_model_name: wsg
     wsg: !SchunkWsgDriver {}

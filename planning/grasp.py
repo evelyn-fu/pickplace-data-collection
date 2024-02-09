@@ -751,7 +751,7 @@ class GraspListener():
                                 candidate_costs.append(self.compute_costs(X_WPnew, within_box_pt_normals, split_ratio, align_grasp_axis))
                             else:
                                 continue
-            # o3d.visualization.draw_geometries(viz_geoms)
+            o3d.visualization.draw_geometries(viz_geoms)
             print("sequential antipodal grasp time: {:.3f}".format(time.time() - start_time))
 
         else:
