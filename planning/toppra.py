@@ -94,7 +94,8 @@ def reparameterize_concatenated_with_toppra(
     Returns:
         PathParameterizedTrajectory: The reparameterized trajectory.
     """
-    pl_trajectory = make_concatenated_pl_traj(trajectories)
+    speed_lim = np.linalg.norm(velocity_limits)
+    pl_trajectory = make_concatenated_pl_traj(trajectories, speed=speed_lim)
     toppra = Toppra(
         path=pl_trajectory,
         plant=plant,
