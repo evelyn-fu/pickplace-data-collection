@@ -62,15 +62,15 @@ X_GgraspGpregrasp = RigidTransform([0, 0.0, -0.15])
 
 default_display_traj = []
 
-default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0)), [0.5, 0.0, 0.5]))
-default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi/4)), [0.5, 0.0, 0.5]))
-default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0)), [0.5, 0.0, 0.5]))
-default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/2)), [0.5, 0.0, 0.5]))
-default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi / 2)), [0.5, 0.0, 0.5]))
-default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 5 * np.pi / 4)), [0.5, 0.0, 0.5]))
-default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi / 2)), [0.5, 0.0, 0.5]))
-default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/2)), [0.5, 0.0, 0.5]))
-default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0)), [0.5, 0.0, 0.5]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0)), [0.6, 0.0, 0.5]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi/4)), [0.6, 0.0, 0.5]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0)), [0.6, 0.0, 0.5]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/2)), [0.6, 0.0, 0.5]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi / 2)), [0.6, 0.0, 0.5]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 5 * np.pi / 4)), [0.6, 0.0, 0.5]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi / 2)), [0.6, 0.0, 0.5]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/2)), [0.6, 0.0, 0.5]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0)), [0.6, 0.0, 0.5]))
 
 
 class TwoGraspPlanner(LeafSystem):
@@ -172,7 +172,7 @@ class TwoGraspPlanner(LeafSystem):
         times = context.get_abstract_state(int(self._times_index)).get_value()
 
         if mode == PlannerState.WAIT_FOR_OBJECTS_TO_SETTLE:
-            if current_time - times["initial"] > 1.0:
+            if current_time - times["initial"] > 10.0:
                 state.get_mutable_abstract_state(
                     int(self._mode_index)
                 ).set_value(PlannerState.GO_TO_PREGRASP1)
@@ -290,8 +290,9 @@ class TwoGraspPlanner(LeafSystem):
             initial_guess=q,
             position_tolerance=0.0,
             orientation_tolerance=0.0,
-            gripper_frame_name="body",
+            gripper_frame_name="iiwa_link_7",
         )
+        print(q_goal)
         if q_goal is None:
             logging.error(
                 "Failed to solve inverse kinematics for the grasping start pose."
@@ -362,24 +363,15 @@ class TwoGraspPlanner(LeafSystem):
                         X_PT=RigidTransform(RotationMatrix(rot_principal_component_to_axes.as_matrix().T),
                         [com[0], com[1], com[2]]))
 
-        # if mode == PlannerState.WAIT_FOR_OBJECTS_TO_SETTLE:
-        #     # Planning first grasping trajectory
-        #     # self.grasp_node.compute_candidate_grasps(down_sampled_pcd, random_seed=5, align_grasp_axis=secondary_component, split_axis=2, minor_split_axis=0)
-        #     self.grasp_node.compute_candidate_grasps(down_sampled_pcd, random_seed=5, align_grasp_axis=principal_component, split_axis=1, minor_split_axis=0)
-        # else:
-        #     # Planning second grasping trajectory
-        #     self.grasp_node.compute_candidate_grasps(down_sampled_pcd, random_seed=5, align_grasp_axis=secondary_component, split_axis=2, minor_split_axis=0)
+        if mode == PlannerState.WAIT_FOR_OBJECTS_TO_SETTLE:
+            # Planning first grasping trajectory
+            # self.grasp_node.compute_candidate_grasps(down_sampled_pcd, random_seed=5, align_grasp_axis=secondary_component, split_axis=2, minor_split_axis=0)
+            self.grasp_node.compute_candidate_grasps(down_sampled_pcd, random_seed=5, align_grasp_axis=principal_component, split_axis=1, minor_split_axis=0)
+        else:
+            # Planning second grasping trajectory
+            self.grasp_node.compute_candidate_grasps(down_sampled_pcd, random_seed=5, align_grasp_axis=secondary_component, split_axis=2, minor_split_axis=0)
         
-        # grasps = self.grasp_node.get_best_grasps(candidate_num=1)
-
-        grasps = [RigidTransform(
-            R=RotationMatrix([
-                [0.3107252766435573, 0.9478457803191421, -0.07098013233280487],
-                [0.9501638206650431, -0.3117334204461474, -0.003314887050161988],
-                [-0.025268881138556104, -0.0664127345329445, -0.9974722213364458],
-            ]),
-            p=[0.6302492295015113, -0.0074317699693182675, 0.2834767828082438],
-            )]
+        grasps = self.grasp_node.get_best_grasps(candidate_num=1)
 
         print(grasps)
         

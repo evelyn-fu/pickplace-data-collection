@@ -28,7 +28,7 @@ def MakePickAndDisplayGripperFrames(X_G, t0=0):
     # Allow some time for the gripper to close.
     X_G["pick_start"] = X_G["pick"]
     X_G["pick_end"] = X_G["pick"]
-    times["pick_start"] = times["prepick"] + 2.0
+    times["pick_start"] = times["prepick"] + 5.0
     times["pick_end"] = times["pick_start"] + 2.0
 
     # raise object off surface
