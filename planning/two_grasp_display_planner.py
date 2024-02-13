@@ -62,15 +62,15 @@ X_GgraspGpregrasp = RigidTransform([0, 0.0, -0.15])
 
 default_display_traj = []
 
-default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0)), [0.6, 0.0, 0.5]))
-default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi/4)), [0.6, 0.0, 0.5]))
-default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0)), [0.6, 0.0, 0.5]))
-default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/2)), [0.6, 0.0, 0.5]))
-default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi / 2)), [0.6, 0.0, 0.5]))
-default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 5 * np.pi / 4)), [0.6, 0.0, 0.5]))
-default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi / 2)), [0.6, 0.0, 0.5]))
-default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/2)), [0.6, 0.0, 0.5]))
-default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0)), [0.6, 0.0, 0.5]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0)), [0.6, 0.0, 0.54]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi/4)), [0.6, 0.0, 0.54]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0)), [0.6, 0.0, 0.54]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/2)), [0.6, 0.0, 0.54]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi / 2)), [0.6, 0.0, 0.54]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 5 * np.pi / 4)), [0.6, 0.0, 0.54]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi / 2)), [0.6, 0.0, 0.54]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/2)), [0.6, 0.0, 0.54]))
+default_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0)), [0.6, 0.0, 0.54]))
 
 
 class TwoGraspPlanner(LeafSystem):
@@ -90,8 +90,8 @@ class TwoGraspPlanner(LeafSystem):
         self.DeclareAbstractInputPort("cloud2_W", model_point_cloud)
         self._camera_body_indices = camera_body_indices
 
-        # for setting default iiwa position values
-        self._gripper_body_index = plant.GetBodyByName("body").index()
+        # for getting current positions
+        self._ee_index = plant.GetBodyByName("iiwa_link_7").index()
         self.DeclareAbstractInputPort(
             "body_poses", AbstractValue.Make([RigidTransform()])
         )
@@ -172,7 +172,7 @@ class TwoGraspPlanner(LeafSystem):
         times = context.get_abstract_state(int(self._times_index)).get_value()
 
         if mode == PlannerState.WAIT_FOR_OBJECTS_TO_SETTLE:
-            if current_time - times["initial"] > 10.0:
+            if current_time - times["initial"] > 1.0:
                 state.get_mutable_abstract_state(
                     int(self._mode_index)
                 ).set_value(PlannerState.GO_TO_PREGRASP1)
@@ -241,15 +241,22 @@ class TwoGraspPlanner(LeafSystem):
 
     def GoHome(self, context, state):
         '''
-        Reset to original joint positions to avoid starting on edge of config space
-        and to move arm out of the way of the camera
+        Reset to default home position to move arm out of the way of the camera
         '''
 
         q = self.get_input_port(self._iiwa_position_index).Eval(context)
-        q0 = context.get_discrete_state(self._q0_index).get_value().copy()
+        q_goal = solve_global_inverse_kinematics(
+            plant=self._iiwa_controller_plant,
+            X_G=default_home_pose,
+            initial_guess=q,
+            position_tolerance=0.0,
+            orientation_tolerance=0.0,
+            gripper_frame_name="iiwa_link_7",
+        )
+        # q0 = context.get_discrete_state(self._q0_index).get_value().copy()
 
         traj = plan_unconstrained_gcs_path_start_to_goal(
-            plant=self._iiwa_controller_plant, q_start=q, q_goal=q0
+            plant=self._iiwa_controller_plant, q_start=q, q_goal=q_goal
         )
         if traj is None:
             logging.error("Failed to find a path to the home positions.")
@@ -338,7 +345,7 @@ class TwoGraspPlanner(LeafSystem):
             cloud = self.get_input_port(i).Eval(context)
 
             # Crop to region of interest.
-            pcd.append(cloud.Crop(lower_xyz=[0.3, -0.5, 0.051], upper_xyz=[1.0, 0.5, 0.25]))
+            pcd.append(cloud.Crop(lower_xyz=[0.3, -0.5, 0.121], upper_xyz=[1.0, 0.5, 0.32]))
             # Estimate normals
             pcd[i].EstimateNormals(radius=0.1, num_closest=30)
 
@@ -391,7 +398,7 @@ class TwoGraspPlanner(LeafSystem):
         X_G_pick = context.get_abstract_state(
             int(self._grasp_X_G_index)
         ).get_value()
-        X_G_prepick = X_G_pick @ X_GgraspGpregrasp
+        X_G_prepick = self.get_input_port(3).Eval(context)[int(self._ee_index)]
 
         X_G = {
             "pick": X_G_pick,
@@ -452,7 +459,7 @@ class TwoGraspPlanner(LeafSystem):
 
         # Command the current position (note: this is not particularly good if the velocity is non-zero)
         output.set_value(
-            default_home_pose
+            self.get_input_port(3).Eval(context)[int(self._ee_index)]
         )
     
     def GetCurrentJointPositionTrajectory(self, context, output):

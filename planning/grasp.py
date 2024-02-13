@@ -349,7 +349,15 @@ class GraspListener():
 
         return is_nonempty, pcd_normals_G_np[:, indices]
 
-    def compute_costs(self, X_WG: RigidTransform, within_box_pt_normals: np.ndarray, split_ratios: float, align_grasp_axis: List[float]=[0,0,1]) -> float:
+    def compute_costs(
+            self, 
+            X_WG: RigidTransform, 
+            within_box_pt_normals: np.ndarray, 
+            split_ratios: float, 
+            major_split_axis: int,
+            minor_split_axis: int,
+            align_grasp_axis: List[float]=[0,0,1],
+            ) -> float:
         """
         Computes a grasp candidate cost based on a weighted sum of:
         - Antipodal (grasp normal) cost (prefer more antipodal)
@@ -370,12 +378,12 @@ class GraspListener():
         )  # along the y axis of the gripper, larger good (antipodal metric)
         gripper_axis_alignment_cost = eff_vertical_vec @ align_grasp_axis  # want z axis of gripper to face down, larger worse
         grasp_height_cost = -t[2]  # prefer higher position
-        split_ratio_minor_axis_cost = -split_ratios[0]  # prefer higher split ratio
-        split_ratio_major_axis_cost = -split_ratios[2]
+        split_ratio_minor_axis_cost = -split_ratios[minor_split_axis]  # prefer higher split ratio
+        split_ratio_major_axis_cost = -split_ratios[major_split_axis]
         cost = (
             antipodal_cost
             + 100.0 * gripper_axis_alignment_cost
-            + 10.0 * grasp_height_cost
+            # + 10.0 * grasp_height_cost
             + 1.0 * split_ratio_minor_axis_cost
             + 10.0 * split_ratio_major_axis_cost
         )
@@ -664,10 +672,10 @@ class GraspListener():
         num_y_samples = 3
         roll_min = -np.pi / 8
         roll_max = np.pi / 8
-        num_roll_samples = 5
+        num_roll_samples = 10
         # TODO: Look into exploiting Panda gripper symmetry (grasps rotated by n*pi should be equivalent)
-        yaw_min = -np.pi / 4
-        yaw_max = np.pi / 4
+        yaw_min = -np.pi / 2
+        yaw_max = np.pi / 2
         num_yaw_samples = 5
 
         np.random.seed(random_seed)
@@ -748,7 +756,7 @@ class GraspListener():
                             if is_nonempty:
                                 candidate_lst.append(X_WPnew)
                                 viz_geoms.append(self.make_gripper_line_set(X_WPnew.GetAsMatrix4(), [0.0, 1.0, 0.0]))
-                                candidate_costs.append(self.compute_costs(X_WPnew, within_box_pt_normals, split_ratio, align_grasp_axis))
+                                candidate_costs.append(self.compute_costs(X_WPnew, within_box_pt_normals, split_ratio, split_axis, minor_split_axis, align_grasp_axis))
                             else:
                                 continue
             o3d.visualization.draw_geometries(viz_geoms)

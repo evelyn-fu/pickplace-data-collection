@@ -28,7 +28,7 @@ directives:
     file: file://./home/evelyn/sources/Real2SimObjectManipulation/models/006_mustard_bottle.sdf
     default_free_body_pose:
         base_link_mustard:
-            translation: [0.6, 0.0, 0.08]
+            translation: [0.6, 0.0, 0.12]
             rotation: !Rpy { deg: [0, 0, 110] }
 - add_frame:
     name: table_origin
@@ -83,7 +83,7 @@ directives:
     X_PF:
         base_frame: camera0_staging
         rotation: !Rpy { deg: [-110, 0, 90]}
-        translation: [1.2, 0.0, 0.5]
+        translation: [1.2, 0.0, 0.54]
 
 - add_model:
     name: camera_main
@@ -98,7 +98,7 @@ directives:
     X_PF:
         base_frame: camera1_staging
         rotation: !Rpy { deg: [-100.0, 0, 180.0]}
-        translation: [-.3, 0.3, .2]
+        translation: [-.3, 0.3, .24]
 
 - add_model:
     name: camera_1
@@ -113,7 +113,7 @@ directives:
     X_PF:
         base_frame: camera2_staging
         rotation: !Rpy { deg: [-100.0, 0, 180.0]}
-        translation: [.3, 0.3, .2]
+        translation: [.3, 0.3, .24]
 
 - add_model:
     name: camera_2
@@ -139,6 +139,11 @@ cameras:
         depth: True
         X_PB:
             base_frame: camera_2::base
+
+plant_config:
+    time_step: 0.001
+    contact_model: "hydroelastic"
+    discrete_contact_approximation: "sap"
 
 model_drivers:
     iiwa: !IiwaDriver

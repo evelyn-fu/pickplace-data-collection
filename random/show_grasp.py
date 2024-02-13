@@ -47,15 +47,15 @@ visualizer = MeshcatVisualizer.AddToBuilder(
 diagram = builder.Build()
 
 X_G = RigidTransform(
-            R=RotationMatrix([
-                [0.3107252766435573, 0.9478457803191421, -0.07098013233280487],
-                [0.9501638206650431, -0.3117334204461474, -0.003314887050161988],
-                [-0.025268881138556104, -0.0664127345329445, -0.9974722213364458],
-            ]),
-            p=[0.6302492295015113, -0.0074317699693182675, 0.2834767828082438],
-            )
+  R=RotationMatrix([
+    [-0.024862600566131942, 0.6118970944790467, 0.7905465178350922],
+    [-0.2599776962763316, 0.7596246248145511, -0.5961392679686555],
+    [-0.9652944879838184, -0.22034603500733402, 0.1401933533538813],
+  ]),
+  p=[0.568112593281828, 0.0371661061349634, 0.17595490100665073],
+)
 
-X_mustard = RigidTransform(RotationMatrix(RollPitchYaw(-np.pi/2, 0, np.pi/2)), [0.5, 0.0, 0.08])
+X_mustard = RigidTransform(RotationMatrix(RollPitchYaw(-np.pi/2, 0, np.pi/2)), [0.6, 0.0, 0.16])
 X_WGfix = RigidTransform(RotationMatrix(RollPitchYaw(np.pi/2, 0, np.pi/2)))
 context = diagram.CreateDefaultContext()
 plant_context = plant.GetMyContextFromRoot(context)
@@ -66,7 +66,7 @@ X_iiwa_base = RigidTransform(RotationMatrix())
 plant.SetFreeBodyPose(plant_context, plant.GetBodyByName("iiwa_link_0"), X_iiwa_base)
 new_positions = plant.GetPositions(plant_context)
 print(new_positions)
-new_positions[-7:] = [ 0.034 , 0.782 ,-0.077, -1.232 , 0.053 , 1.201 , 1.845]
+new_positions[-7:] = [ 0.723 , 1.531 ,-0.257, -0.88 , -1.148 , 1.894,  2.533]
 plant.SetPositions(plant_context, new_positions)
 print(new_positions)
 
