@@ -140,7 +140,7 @@ def start_scenario(dirstr = "test4", scenario_path="scenario_data_grasping.yml",
     if use_hardware:
         # Connect the output of external station to the input of internal station
         builder.Connect(
-            external_station.GetOutputPort("iiwa.position_commanded"),
+            external_station.GetOutputPort("iiwa.position_measured"),
             station.GetInputPort("iiwa.position"),
         )
 
@@ -184,10 +184,16 @@ def start_scenario(dirstr = "test4", scenario_path="scenario_data_grasping.yml",
         planner.GetOutputPort("joint_position_trajectory"),
         joint_traj_source.GetInputPort("trajectory"),
     )
-    builder.Connect(
-        station.GetOutputPort("iiwa.position_measured"),
-        joint_traj_source.GetInputPort("current_cmd"),
-    )
+    if use_hardware:
+        builder.Connect(
+            external_station.GetOutputPort("iiwa.position_measured"),
+            joint_traj_source.GetInputPort("current_cmd"),
+        )
+    else:
+        builder.Connect(
+            station.GetOutputPort("iiwa.position_measured"),
+            joint_traj_source.GetInputPort("current_cmd"),
+        )
 
     builder.Connect(planner.GetOutputPort("X_WG"), differential_ik.get_input_port(0))
 

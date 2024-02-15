@@ -370,15 +370,24 @@ class TwoGraspPlanner(LeafSystem):
                         X_PT=RigidTransform(RotationMatrix(rot_principal_component_to_axes.as_matrix().T),
                         [com[0], com[1], com[2]]))
 
-        if mode == PlannerState.WAIT_FOR_OBJECTS_TO_SETTLE:
-            # Planning first grasping trajectory
-            # self.grasp_node.compute_candidate_grasps(down_sampled_pcd, random_seed=5, align_grasp_axis=secondary_component, split_axis=2, minor_split_axis=0)
-            self.grasp_node.compute_candidate_grasps(down_sampled_pcd, random_seed=5, align_grasp_axis=principal_component, split_axis=1, minor_split_axis=0)
-        else:
-            # Planning second grasping trajectory
-            self.grasp_node.compute_candidate_grasps(down_sampled_pcd, random_seed=5, align_grasp_axis=secondary_component, split_axis=2, minor_split_axis=0)
+        # if mode == PlannerState.WAIT_FOR_OBJECTS_TO_SETTLE:
+        #     # Planning first grasping trajectory
+        #     # self.grasp_node.compute_candidate_grasps(down_sampled_pcd, random_seed=5, align_grasp_axis=secondary_component, split_axis=2, minor_split_axis=0)
+        #     self.grasp_node.compute_candidate_grasps(down_sampled_pcd, random_seed=5, align_grasp_axis=principal_component, split_axis=1, minor_split_axis=0)
+        # else:
+        #     # Planning second grasping trajectory
+        #     self.grasp_node.compute_candidate_grasps(down_sampled_pcd, random_seed=5, align_grasp_axis=secondary_component, split_axis=2, minor_split_axis=0)
         
-        grasps = self.grasp_node.get_best_grasps(candidate_num=1)
+        # grasps = self.grasp_node.get_best_grasps(candidate_num=1)
+
+        grasps = [RigidTransform(
+            R=RotationMatrix([
+                [0.20844051413239315, 0.9779921162174786, 0.0091636610958972],
+                [0.9669276371194906, -0.20747230186329707, 0.14834482981911887],
+                [0.14698127990578308, -0.022060475425560073, -0.9888932393242741],
+            ]),
+            p=[0.6073802570605941, -0.016139619320196967, 0.35155900135407614],
+        )]
 
         print(grasps)
         

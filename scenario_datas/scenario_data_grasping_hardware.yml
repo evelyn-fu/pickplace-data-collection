@@ -28,7 +28,7 @@ directives:
     file: file://./home/real2sim/src/Real2SimObjectManipulation/models/006_mustard_bottle.sdf
     default_free_body_pose:
         base_link_mustard:
-            translation: [0.5, 0.0, 0.08]
+            translation: [0.6, 0.0, 0.12]
             rotation: !Rpy { deg: [0, 0, 110] }
 - add_frame:
     name: table_origin
@@ -50,7 +50,7 @@ directives:
     X_PF:
         base_frame: world
         rotation: !Rpy { deg: [0.0, 0.0, 0.0]}
-        translation: [0.5, 0.0, 0]
+        translation: [0.6, 0.0, 0]
 
 - add_model:
     name: box
@@ -83,7 +83,7 @@ directives:
     X_PF:
         base_frame: camera0_staging
         rotation: !Rpy { deg: [-110, 0, 90]}
-        translation: [1.1, 0.0, 0.5]
+        translation: [1.2, 0.0, 0.54]
 
 - add_model:
     name: camera_main
@@ -98,7 +98,7 @@ directives:
     X_PF:
         base_frame: camera1_staging
         rotation: !Rpy { deg: [-100.0, 0, 180.0]}
-        translation: [-.3, 0.3, .2]
+        translation: [-.3, 0.3, .24]
 
 - add_model:
     name: camera_1
@@ -113,7 +113,7 @@ directives:
     X_PF:
         base_frame: camera2_staging
         rotation: !Rpy { deg: [-100.0, 0, 180.0]}
-        translation: [.3, 0.3, .2]
+        translation: [.3, 0.3, .24]
 
 - add_model:
     name: camera_2
@@ -122,6 +122,11 @@ directives:
 - add_weld:
     parent: camera2_origin
     child: camera_2::base
+
+lcm_buses:
+    driver_traffic:
+        # Use a non-default LCM url to communicate with the robot.
+        lcm_url: udpm://239.255.76.67:7667?ttl=0
 
 cameras:
     main_camera:
@@ -142,6 +147,7 @@ cameras:
 
 model_drivers:
     iiwa: !IiwaDriver
-      lcm_bus: "default"
+      lcm_bus: driver_traffic
       hand_model_name: wsg
-    wsg: !SchunkWsgDriver {}
+    wsg: !SchunkWsgDriver
+      lcm_bus: driver_traffic
