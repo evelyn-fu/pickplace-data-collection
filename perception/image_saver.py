@@ -6,6 +6,8 @@ from pydrake.systems.sensors import (
     ImageRgba8U,
     ImageDepth16U,
     ImageLabel16I,
+    ImageDepth32F,
+    ConvertDepth32FTo16U
 )
 from pydrake.common.value import Value
 from pydrake.common.value import (
@@ -20,7 +22,7 @@ class ImageSaver(LeafSystem):
         self.DeclareAbstractInputPort(name="rgb_in",
                                       model_value=Value(ImageRgba8U()))
         self.DeclareAbstractInputPort(name="depth_in",
-                                      model_value=Value(ImageDepth16U()))
+                                      model_value=Value(ImageDepth32F()))
         self.DeclareAbstractInputPort(name="label_in",
                                       model_value=Value(ImageLabel16I()))
 
@@ -38,9 +40,12 @@ class ImageSaver(LeafSystem):
         
         color = self.GetInputPort("rgb_in").Eval(context).data
 
-        depth = copy.deepcopy(
-            self.GetInputPort("depth_in").Eval(context).data.squeeze()
-        )
+        depth_32f = self.GetInputPort("depth_in").Eval(context)
+
+        depth_16u = ImageDepth16U()
+        ConvertDepth32FTo16U(depth_32f, depth_16u)
+
+        depth = copy.deepcopy(depth_16u.data.squeeze())
 
         label_image = copy.deepcopy(
             self.GetInputPort("label_in").Eval(context).data.squeeze()

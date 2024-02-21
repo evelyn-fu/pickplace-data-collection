@@ -2,6 +2,8 @@ import argparse
 import numpy as np
 import os
 import copy
+import pickle
+import datetime
 from pydrake.geometry import (
     StartMeshcat,
     RenderLabel,
@@ -22,12 +24,56 @@ from manipulation.scenarios import AddIiwaDifferentialIK
 from manipulation.systems import ExtractPose
 from manipulation.station import MakeHardwareStation, LoadScenario
 
+import pydrake.planning as mut
+from pydrake.common import RandomGenerator, Parallelism, use_native_cpp_logging
+from pydrake.planning import (RobotDiagramBuilder,
+                              SceneGraphCollisionChecker,
+                              CollisionCheckerParams)
+from pydrake.solvers import MosekSolver, GurobiSolver
+
 from planning.two_grasp_display_planner import TwoGraspPlanner
 from perception.image_saver import ImageSaver
 from planning.trajectory_sources import TrajectoryWithTimingInformationSource
 
+def get_regions(scenario_path, dirstr):
+    use_native_cpp_logging()
+    params = dict(edge_step_size=0.125)
+    builder = RobotDiagramBuilder()
+    builder.parser().AddModels(scenario_path)
+    iiwa_model_instance_index = builder.plant().GetModelInstanceByName("iiwa")
+    gripper_model_instance_index = builder.plant().GetModelInstanceByName("wsg")
+    params["robot_model_instances"] = [iiwa_model_instance_index, gripper_model_instance_index]
+    params["model"] = builder.Build()
+    checker = SceneGraphCollisionChecker(**params)
 
-def start_scenario(dirstr = "test4", scenario_path="scenario_data_grasping.yml", use_hardware=False, save_imgs=False):
+    options = mut.IrisFromCliqueCoverOptions()
+    options.parallelism = Parallelism(3)
+    options.num_points_per_coverage_check = 10
+    options.num_points_per_visibility_round = 10
+    options.coverage_termination_threshold = 0.999
+
+    generator = RandomGenerator(0)
+
+    if (MosekSolver().available() and MosekSolver().enabled()) or (
+            GurobiSolver().available() and GurobiSolver().enabled()):
+        # We need a MIP solver to be available to run this method.
+        sets = mut.IrisInConfigurationSpaceFromCliqueCover(
+            checker=checker, options=options, generator=generator,
+            sets=[]
+        )
+
+        if len(sets) < 1:
+            raise("No regions found")
+        
+        time_str = datetime.datetime.now().strftime('%d%m%y_%H%M%S')
+        with open(dirstr+f'/{scenario_path.split("/")[-1]}_{time_str}_regions.pkl', 'wb') as f:
+            pickle.dump(sets, f)
+
+        return sets
+    else:
+        print("No solvers available")
+
+def start_scenario(dirstr = "temp", scenario_path="scenario_data_grasping.yml", models_path="scenario_data_grasping.dmd.yaml", use_hardware=False, save_imgs=False):
     meshcat.ResetRenderMode()
 
     builder = DiagramBuilder()
@@ -60,7 +106,7 @@ def start_scenario(dirstr = "test4", scenario_path="scenario_data_grasping.yml",
         # save drake simulated images
         img_saver = builder.AddSystem(ImageSaver(dirstr))
         builder.Connect(station.GetOutputPort("camera0.rgb_image"), img_saver.GetInputPort("rgb_in"))
-        builder.Connect(station.GetOutputPort("camera0.depth_image_16u"), img_saver.GetInputPort("depth_in"))
+        builder.Connect(station.GetOutputPort("camera0.depth_image"), img_saver.GetInputPort("depth_in"))
         builder.Connect(station.GetOutputPort("camera0.label_image"), img_saver.GetInputPort("label_in"))
 
     # initialize point cloud output ports
@@ -120,6 +166,8 @@ def start_scenario(dirstr = "test4", scenario_path="scenario_data_grasping.yml",
         "iiwa.controller"
     ).get_multibody_plant_for_control()
 
+    iris_regions = get_regions(os.path.join(dir_path, os.path.join("scenario_datas", models_path)), dirstr)
+
     # Set up planner
     planner = builder.AddSystem(TwoGraspPlanner(
             plant, 
@@ -135,7 +183,8 @@ def start_scenario(dirstr = "test4", scenario_path="scenario_data_grasping.yml",
                     0
                 ]
             ],
-            meshcat=meshcat,))
+            meshcat=meshcat,
+            regions=iris_regions))
 
     if use_hardware:
         # Connect the output of external station to the input of internal station
@@ -304,7 +353,7 @@ def start_scenario(dirstr = "test4", scenario_path="scenario_data_grasping.yml",
 
     meshcat.AddButton("Stop Simulation", "Escape")
     print("Press Escape to stop the simulation")
-    while meshcat.GetButtonClicks("Stop Simulation") < 1:
+    while meshcat.GetButtonClicks("Stop Simulation") < 1 and not planner.done:
         simulator.AdvanceTo(simulator.get_context().get_time() + 0.03)
 
     meshcat.DeleteButton("Stop Simulation")
@@ -315,6 +364,11 @@ if __name__ == "__main__":
     parser.add_argument(
         "scenario_path",
         default="scenario_data_grasping.yml",
+        help="yaml file with scenario",
+    )
+    parser.add_argument(
+        "models_path",
+        default="scenario_data_grasping.dmd.yaml",
         help="yaml file with scenario",
     )
     parser.add_argument(
@@ -339,4 +393,4 @@ if __name__ == "__main__":
     meshcat = StartMeshcat()
 
     save_dir_path = os.path.abspath(os.path.join(os.path.dirname( __file__ ), '..', 'tests', args.save_dir))
-    start_scenario(save_dir_path, scenario_path= args.scenario_path, use_hardware=args.use_hardware, save_imgs=args.save_imgs)
+    start_scenario(save_dir_path, scenario_path= args.scenario_path, models_path=args.models_path, use_hardware=args.use_hardware, save_imgs=args.save_imgs)

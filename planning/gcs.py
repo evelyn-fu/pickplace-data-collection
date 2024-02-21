@@ -1,6 +1,6 @@
 import logging
 
-from typing import Optional, Union
+from typing import Optional, Union, List
 
 import numpy as np
 
@@ -10,6 +10,7 @@ from pydrake.all import (
     MultibodyPlant,
     Point,
     Trajectory,
+    ConvexSet,
 )
 
 
@@ -18,6 +19,7 @@ def plan_unconstrained_gcs_path_start_to_goal(
     q_goal: np.ndarray,
     q_start: np.ndarray,
     velocity_limits: Optional[np.ndarray] = None,
+    regions: List[ConvexSet] = None,
 ) -> Union[Trajectory, None]:
     """Plan an unconstrained trajectory from a start to a goal in joint space using GCS.
 
@@ -36,16 +38,20 @@ def plan_unconstrained_gcs_path_start_to_goal(
     gcs = GcsTrajectoryOptimization(num_positions)
 
     # Ignore obstacles
-    workspace = gcs.AddRegions(
-        regions=[
-            HPolyhedron.MakeBox(
-                plant.GetPositionLowerLimits(), plant.GetPositionUpperLimits()
-            )
-        ],
-        order=5,
-        h_min=1,
-        h_max=60,
-    )
+    if regions is None or len(regions) == 0:
+        workspace = gcs.AddRegions(
+            regions=[
+                HPolyhedron.MakeBox(
+                    plant.GetPositionLowerLimits(), plant.GetPositionUpperLimits()
+                )
+            ],
+            order=5,
+            h_min=1,
+            h_max=60,
+        )
+    else:
+        workspace = gcs.AddRegions(regions, order=1, h_min=0.1)
+
     # Set non-zero h_min for start and goal to enforce zero velocity
     start = gcs.AddRegions([Point(q_start)], order=1, h_min=0.1)
     goal = gcs.AddRegions([Point(q_goal)], order=1, h_min=0.1)

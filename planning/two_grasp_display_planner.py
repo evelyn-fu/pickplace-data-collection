@@ -79,7 +79,8 @@ class TwoGraspPlanner(LeafSystem):
             plant,
             controller_plant, 
             camera_body_indices,
-            meshcat
+            meshcat, 
+            regions
         ):
         LeafSystem.__init__(self)
 
@@ -164,6 +165,8 @@ class TwoGraspPlanner(LeafSystem):
         self._iiwa_controller_plant = controller_plant
         self.velocity_limits = 0.1 * np.ones(7)
         self.acceleration_limits = 0.1 * np.ones(7)
+        self.regions = regions
+        self.done = False
 
     def Update(self, context, state):
         mode = context.get_abstract_state(int(self._mode_index)).get_value()
@@ -236,6 +239,7 @@ class TwoGraspPlanner(LeafSystem):
                 state.get_mutable_abstract_state(
                     int(self._mode_index)
                 ).set_value(PlannerState.DONE)
+                self.done = True
             return
 
 
@@ -256,7 +260,7 @@ class TwoGraspPlanner(LeafSystem):
         # q0 = context.get_discrete_state(self._q0_index).get_value().copy()
 
         traj = plan_unconstrained_gcs_path_start_to_goal(
-            plant=self._iiwa_controller_plant, q_start=q, q_goal=q_goal
+            plant=self._iiwa_controller_plant, q_start=q, q_goal=q_goal, regions=self.regions
         )
         if traj is None:
             logging.error("Failed to find a path to the home positions.")
@@ -308,7 +312,7 @@ class TwoGraspPlanner(LeafSystem):
 
         # Plan trajectory to saved start position to ensure we start grasp traj at consistent position
         traj = plan_unconstrained_gcs_path_start_to_goal(
-            plant=self._iiwa_controller_plant, q_start=q, q_goal=q_goal
+            plant=self._iiwa_controller_plant, q_start=q, q_goal=q_goal, regions=self.regions
         )
         if traj is None:
             logging.error("Failed to find a path to the grasping start positions.")
