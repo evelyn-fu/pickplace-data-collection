@@ -46,10 +46,9 @@ def get_regions_static(scenario_path, dirstr):
     checker = SceneGraphCollisionChecker(**params)
 
     options = mut.IrisFromCliqueCoverOptions()
-    options.parallelism = Parallelism(3)
-    options.num_points_per_coverage_check = 10
-    options.num_points_per_visibility_round = 10
-    options.coverage_termination_threshold = 0.999
+    options.num_points_per_coverage_check = 5000
+    options.num_points_per_visibility_round = 500
+    options.coverage_termination_threshold = 0.9
 
     generator = RandomGenerator(0)
 
