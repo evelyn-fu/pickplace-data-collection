@@ -35,7 +35,7 @@ builder = DiagramBuilder()
 plant, scene_graph = AddMultibodyPlantSceneGraph(builder, time_step=0.0005)
 parser = Parser(plant)
 ConfigureParser(parser)
-parser.AddModelsFromUrl("package://manipulation/schunk_wsg_50_welded_fingers.sdf")
+parser.AddModelsFromUrl("package://manipulation/iiwa_and_wsg.dmd.yaml")
 parser.AddModelsFromUrl("package://drake/manipulation/models/ycb/sdf/006_mustard_bottle.sdf")
 plant.Finalize()
 
@@ -48,15 +48,6 @@ diagram = builder.Build()
 
 X_GgraspGpregrasp = RigidTransform([0, 0.0, -0.15])
 
-X_G = RigidTransform(
-  R=RotationMatrix([
-    [-0.03442034895124868, 0.9994073003679098, 0.0005362363300874173],
-    [-0.04829586151222898, -0.002199273198199581, 0.9988306527926499],
-    [0.9982398255624083, 0.0343542016167908, 0.04834293632380032],
-  ]),
-  p=[0.6597679659224048, -0.10382563627445854, 0.22689332681875962],
-)
-
 align_grasp_axis = [-0.109,  0.994, -0.002]
 z_axis, x_axis = [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]
 rot_to_axes, _ = R.align_vectors(
@@ -67,11 +58,18 @@ AddMeshcatTriad(meshcat, "align_grasp_axis", X_PT=RigidTransform(RotationMatrix(
                         [0.6, 0.0, 0.12]))
 
 X_mustard = RigidTransform(RotationMatrix(RollPitchYaw(-np.pi/2, 0, np.pi/2)), [0.6, 0.0, 0.12])
+X_box = RigidTransform(RotationMatrix(), [0.15, 0.0, 0.0])
 X_WGfix = RigidTransform(RotationMatrix(RollPitchYaw(np.pi/2, 0, np.pi/2)))
 context = diagram.CreateDefaultContext()
 plant_context = plant.GetMyContextFromRoot(context)
-plant.SetFreeBodyPose(plant_context, plant.GetBodyByName("body"), X_G.multiply(X_WGfix))
 plant.SetFreeBodyPose(plant_context, plant.GetBodyByName("base_link_mustard"), X_mustard)
+
+X_iiwa_base = RigidTransform(RotationMatrix())
+new_positions = plant.GetPositions(plant_context)
+print(new_positions)
+new_positions[:9] = [-0.337,  0.575 , 0.414, -1.054, -0.072 , 1.541, -1.343, -0.05, 0.05 ]
+plant.SetPositions(plant_context, new_positions)
+print(new_positions)
 
 diagram.ForcedPublish(context)
 

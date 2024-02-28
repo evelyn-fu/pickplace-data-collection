@@ -357,11 +357,12 @@ class GraspListener():
             major_split_axis: int,
             minor_split_axis: int,
             align_grasp_axis: List[float]=[0,0,1],
+            align_secondary_axis: List[float]=[1,0,0],
             ) -> float:
         """
         Computes a grasp candidate cost based on a weighted sum of:
         - Antipodal (grasp normal) cost (prefer more antipodal)
-        - Gripper vertical alignment cost (prefer more aligned with world z-axis)
+        - Gripper axis alignment cost (prefer more aligned with given axes)
         - Vertical position cost (prefer higher grasps)
 
         :param X_WG: The grasp candidate to compute the cost for.
@@ -372,17 +373,20 @@ class GraspListener():
         R = X_WG.GetAsMatrix4()[:3, :3]
         t = X_WG.GetAsMatrix4()[:3, 3]
         eff_vertical_vec = R.dot(np.array([0, 0, 1]))
+        eff_horizontal_vec = R.dot(np.array([1, 0, 0]))
 
         antipodal_cost = -np.sum(
             within_box_pt_normals[1, :] ** 2
         )  # along the y axis of the gripper, larger good (antipodal metric)
-        gripper_axis_alignment_cost = eff_vertical_vec @ align_grasp_axis  # want z axis of gripper to face down, larger worse
+        gripper_axis_alignment_cost = eff_vertical_vec @ align_grasp_axis  # want z axis of gripper to face towards desired axis, larger worse
+        gripper_secondary_alignment_cost = np.abs(eff_horizontal_vec @ align_secondary_axis) # want x axis of gripper to face towards secondary axis (or 180 from)
         grasp_height_cost = -t[2]  # prefer higher position
         split_ratio_minor_axis_cost = -split_ratios[minor_split_axis]  # prefer higher split ratio
         split_ratio_major_axis_cost = -split_ratios[major_split_axis]
         cost = (
             antipodal_cost
-            + 100.0 * gripper_axis_alignment_cost
+            + 80.0 * gripper_axis_alignment_cost
+            + 20.0 * gripper_secondary_alignment_cost
             # + 10.0 * grasp_height_cost
             + 1.0 * split_ratio_minor_axis_cost
             + 10.0 * split_ratio_major_axis_cost
@@ -643,7 +647,7 @@ class GraspListener():
         return line_set
 
     def compute_candidate_grasps(
-        self, pcd: PointCloud, candidate_num=30, num_samples=20, random_seed=5, align_grasp_axis = [0, 0, 1], split_axis=2, minor_split_axis=0
+        self, pcd: PointCloud, candidate_num=30, num_samples=20, random_seed=5, align_grasp_axis = [0, 0, 1], align_secondary_axis = [1, 0, 0], split_axis=2, minor_split_axis=0
     ):
         """
         Compute sorted candidate grasps.
@@ -676,7 +680,7 @@ class GraspListener():
         # TODO: Look into exploiting Panda gripper symmetry (grasps rotated by n*pi should be equivalent)
         yaw_min = -np.pi / 2
         yaw_max = np.pi / 2
-        num_yaw_samples = 5
+        num_yaw_samples = 11
 
         np.random.seed(random_seed)
 
@@ -756,7 +760,17 @@ class GraspListener():
                             if is_nonempty:
                                 candidate_lst.append(X_WPnew)
                                 viz_geoms.append(self.make_gripper_line_set(X_WPnew.GetAsMatrix4(), [0.0, 1.0, 0.0]))
-                                candidate_costs.append(self.compute_costs(X_WPnew, within_box_pt_normals, split_ratio, split_axis, minor_split_axis, align_grasp_axis))
+                                candidate_costs.append(
+                                    self.compute_costs(
+                                        X_WPnew, 
+                                        within_box_pt_normals, 
+                                        split_ratio, 
+                                        split_axis, 
+                                        minor_split_axis, 
+                                        align_grasp_axis, 
+                                        align_secondary_axis
+                                    )
+                                )
                             else:
                                 continue
             o3d.visualization.draw_geometries(viz_geoms)

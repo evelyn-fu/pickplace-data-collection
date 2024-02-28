@@ -1,5 +1,7 @@
 import numpy as np
 import logging
+import pickle
+import datetime
 from scipy.spatial.transform import Rotation as R
 from planning.grasp import GraspListener
 from planning.toppra import reparameterize_with_toppra
@@ -30,9 +32,73 @@ from pydrake.trajectories import (
     PiecewisePolynomial
 )
 
+import pydrake.planning as mut
+from pydrake.common import RandomGenerator, Parallelism, use_native_cpp_logging
+from pydrake.planning import (RobotDiagramBuilder,
+                              SceneGraphCollisionChecker,
+                              CollisionCheckerParams)
+from pydrake.solvers import MosekSolver, GurobiSolver
+
 from manipulation.meshcat_utils import AddMeshcatTriad
 from enum import Enum
 
+def get_regions(scenario_path, dirstr, com, rot, dims):
+    # Get bounding box of object
+    rpy = rot.ToRollPitchYaw().vector()
+    bounding_box_urdf = """<?xml version="1.0"?>
+<robot name="bounding_box">
+  <link name="bounding_box">
+    <collision name="bounding_box">
+        <origin rpy="%f %f %f" xyz="%f %f %f"/>
+      <geometry>
+        <box size="%f %f %f"/>
+      </geometry>
+    </collision>
+  </link>
+    <joint name="fixed_link_weld" type="fixed">
+    <parent link="world"/>
+    <child link="bounding_box"/>
+    </joint>
+</robot>
+    """ % (rpy[0], rpy[1], rpy[2], com[0], com[1], com[2], dims[0], dims[1], dims[2])
+    print(bounding_box_urdf)
+
+    use_native_cpp_logging()
+    params = dict(edge_step_size=0.125)
+    builder = RobotDiagramBuilder()
+    builder.parser().AddModels(scenario_path)
+    builder.parser().AddModelsFromString(bounding_box_urdf, "urdf")
+    iiwa_model_instance_index = builder.plant().GetModelInstanceByName("iiwa")
+    wsg_model_instance_index = builder.plant().GetModelInstanceByName("wsg")
+    params["robot_model_instances"] = [iiwa_model_instance_index, wsg_model_instance_index]
+    params["model"] = builder.Build()
+    checker = SceneGraphCollisionChecker(**params)
+
+    options = mut.IrisFromCliqueCoverOptions()
+    options.num_points_per_coverage_check = 5000
+    options.num_points_per_visibility_round = 500
+    options.coverage_termination_threshold = 0.9
+
+    generator = RandomGenerator(0)
+
+    if (MosekSolver().available() and MosekSolver().enabled()) or (
+            GurobiSolver().available() and GurobiSolver().enabled()):
+        # We need a MIP solver to be available to run this method.
+        sets = mut.IrisInConfigurationSpaceFromCliqueCover(
+            checker=checker, options=options, generator=generator,
+            sets=[]
+        )
+
+        if len(sets) < 1:
+            raise("No regions found")
+        
+        time_str = datetime.datetime.now().strftime('%d%m%y_%H%M%S')
+        with open(dirstr+f'/{scenario_path.split("/")[-1]}_{time_str}_regions.pkl', 'wb') as f:
+            pickle.dump(sets, f)
+
+        return sets
+    else:
+        print("No solvers available")
 
 def compute_principal_minor_components(pcd):
     cov = np.cov(pcd.T)
@@ -80,7 +146,9 @@ class TwoGraspPlanner(LeafSystem):
             controller_plant, 
             camera_body_indices,
             meshcat, 
-            regions
+            # regions,
+            scenario_path,
+            dirstr,
         ):
         LeafSystem.__init__(self)
 
@@ -165,7 +233,9 @@ class TwoGraspPlanner(LeafSystem):
         self._iiwa_controller_plant = controller_plant
         self.velocity_limits = 0.1 * np.ones(7)
         self.acceleration_limits = 0.1 * np.ones(7)
-        self.regions = regions
+        self.regions = None #regions
+        self.scenario_path = scenario_path
+        self.dirstr = dirstr
         self.done = False
 
     def Update(self, context, state):
@@ -370,28 +440,61 @@ class TwoGraspPlanner(LeafSystem):
             np.array([z_axis, x_axis]), np.stack([principal_component, minor_component])
         )
         com = np.mean(pcd_points, axis=0)
+        pcd_points_axis_aligned = pcd_points @ rot_principal_component_to_axes.as_matrix().T
+        dims = np.max(pcd_points_axis_aligned, axis=0) - np.min(pcd_points_axis_aligned, axis=0)
+        rot = RotationMatrix(rot_principal_component_to_axes.as_matrix().T)
         AddMeshcatTriad(self.meshcat, "principal axis", 
-                        X_PT=RigidTransform(RotationMatrix(rot_principal_component_to_axes.as_matrix().T),
+                        X_PT=RigidTransform(rot,
                         [com[0], com[1], com[2]]))
-
-        # if mode == PlannerState.WAIT_FOR_OBJECTS_TO_SETTLE:
-        #     # Planning first grasping trajectory
-        #     # self.grasp_node.compute_candidate_grasps(down_sampled_pcd, random_seed=5, align_grasp_axis=secondary_component, split_axis=2, minor_split_axis=0)
-        #     self.grasp_node.compute_candidate_grasps(down_sampled_pcd, random_seed=5, align_grasp_axis=principal_component, split_axis=1, minor_split_axis=0)
-        # else:
-        #     # Planning second grasping trajectory
-        #     self.grasp_node.compute_candidate_grasps(down_sampled_pcd, random_seed=5, align_grasp_axis=secondary_component, split_axis=2, minor_split_axis=0)
         
-        # grasps = self.grasp_node.get_best_grasps(candidate_num=1)
+        self.regions = get_regions(self.scenario_path, self.dirstr, com, rot, dims)
 
-        grasps = [RigidTransform(
+        if mode == PlannerState.WAIT_FOR_OBJECTS_TO_SETTLE:
+            # Planning first grasping trajectory
+            # self.grasp_node.compute_candidate_grasps(
+            #     down_sampled_pcd, 
+            #     random_seed=5, 
+            #     align_grasp_axis=principal_component,  
+            #     align_secondary_axis=minor_component,
+            #     split_axis=1, 
+            #     minor_split_axis=0
+            # )
+            grasps = [RigidTransform(
+                R=RotationMatrix([
+                    [-0.20844050647336543, -0.9779921178608655, 0.009163659920858486],
+                    [-0.9669276384501052, 0.2074722940685329, 0.14834483204764537],
+                    [-0.1469812820138356, 0.022060475877881697, -0.9888932390008593],
+                ]),
+                p=[0.6073802571650899, -0.016139619528128844, 0.351559001325315],
+            )]
+            # grasps = [RigidTransform(
+            # R=RotationMatrix([
+            #     [-0.03442034895124868, 0.9994073003679098, 0.0005362363300874173],
+            #     [-0.04829586151222898, -0.002199273198199581, 0.9988306527926499],
+            #     [0.9982398255624083, 0.0343542016167908, 0.04834293632380032],
+            # ]),
+            # p=[0.6597679659224048, -0.10382563627445854, 0.22689332681875962],
+            # )]
+        else:
+            grasps = [RigidTransform(
             R=RotationMatrix([
-                [0.20844051413239315, 0.9779921162174786, 0.0091636610958972],
-                [0.9669276371194906, -0.20747230186329707, 0.14834482981911887],
-                [0.14698127990578308, -0.022060475425560073, -0.9888932393242741],
+                [-0.03442034895124868, 0.9994073003679098, 0.0005362363300874173],
+                [-0.04829586151222898, -0.002199273198199581, 0.9988306527926499],
+                [0.9982398255624083, 0.0343542016167908, 0.04834293632380032],
             ]),
-            p=[0.6073802570605941, -0.016139619320196967, 0.35155900135407614],
-        )]
+            p=[0.6597679659224048, -0.10382563627445854, 0.22689332681875962],
+            )]
+            # Planning second grasping trajectory
+            # self.grasp_node.compute_candidate_grasps(
+            #     down_sampled_pcd, 
+            #     random_seed=5, 
+            #     align_grasp_axis=secondary_component, 
+            #     align_secondary_axis=minor_component, 
+            #     split_axis=2, 
+            #     minor_split_axis=0
+            # )
+        
+            # grasps = self.grasp_node.get_best_grasps(candidate_num=1)
 
         print(grasps)
         

@@ -35,14 +35,13 @@ from planning.two_grasp_display_planner import TwoGraspPlanner
 from perception.image_saver import ImageSaver
 from planning.trajectory_sources import TrajectoryWithTimingInformationSource
 
-def get_regions(scenario_path, dirstr):
+def get_regions_static(scenario_path, dirstr):
     use_native_cpp_logging()
     params = dict(edge_step_size=0.125)
     builder = RobotDiagramBuilder()
     builder.parser().AddModels(scenario_path)
     iiwa_model_instance_index = builder.plant().GetModelInstanceByName("iiwa")
-    gripper_model_instance_index = builder.plant().GetModelInstanceByName("wsg")
-    params["robot_model_instances"] = [iiwa_model_instance_index, gripper_model_instance_index]
+    params["robot_model_instances"] = [iiwa_model_instance_index]
     params["model"] = builder.Build()
     checker = SceneGraphCollisionChecker(**params)
 
@@ -92,9 +91,9 @@ def start_scenario(dirstr = "temp", scenario_path="scenario_data_grasping.yml", 
     camera2 = station.GetSubsystemByName("rgbd_sensor_camera2")
     K = camera0.color_camera_info().intrinsic_matrix()
 
+    if not os.path.exists(dirstr):
+        os.makedirs(dirstr)
     if save_imgs:
-        if not os.path.exists(dirstr):
-            os.makedirs(dirstr)
         if not os.path.exists(dirstr+"/rgb/"):
             os.makedirs(dirstr+"/rgb/")
         if not os.path.exists(dirstr+"/depth/"):
@@ -166,7 +165,7 @@ def start_scenario(dirstr = "temp", scenario_path="scenario_data_grasping.yml", 
         "iiwa.controller"
     ).get_multibody_plant_for_control()
 
-    iris_regions = get_regions(os.path.join(dir_path, os.path.join("scenario_datas", models_path)), dirstr)
+    # iris_regions = get_regions_static(os.path.join(dir_path, os.path.join("scenario_datas", models_path)), dirstr)
 
     # Set up planner
     planner = builder.AddSystem(TwoGraspPlanner(
@@ -184,7 +183,9 @@ def start_scenario(dirstr = "temp", scenario_path="scenario_data_grasping.yml", 
                 ]
             ],
             meshcat=meshcat,
-            regions=iris_regions))
+            # regions=iris_regions,
+            scenario_path=os.path.join(dir_path, os.path.join("scenario_datas", models_path)),
+            dirstr=dirstr))
 
     if use_hardware:
         # Connect the output of external station to the input of internal station
