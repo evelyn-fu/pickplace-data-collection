@@ -146,7 +146,8 @@ class TwoGraspPlanner(LeafSystem):
             controller_plant, 
             camera_body_indices,
             meshcat, 
-            # regions,
+            regions1,
+            regions2,
             scenario_path,
             dirstr,
         ):
@@ -234,6 +235,9 @@ class TwoGraspPlanner(LeafSystem):
         self.velocity_limits = 0.1 * np.ones(7)
         self.acceleration_limits = 0.1 * np.ones(7)
         self.regions = None #regions
+        self.regions1 = regions1
+        self.regions2 = regions2
+        self.use_offline_regions = False if regions1 is None else True
         self.scenario_path = scenario_path
         self.dirstr = dirstr
         self.done = False
@@ -447,9 +451,12 @@ class TwoGraspPlanner(LeafSystem):
                         X_PT=RigidTransform(rot,
                         [com[0], com[1], com[2]]))
         
-        self.regions = get_regions(self.scenario_path, self.dirstr, com, rot, dims)
+        if not self.use_offline_regions:
+            self.regions = get_regions(self.scenario_path, self.dirstr, com, rot, dims)
 
         if mode == PlannerState.WAIT_FOR_OBJECTS_TO_SETTLE:
+            if self.use_offline_regions:
+                self.regions = self.regions1
             # Planning first grasping trajectory
             # self.grasp_node.compute_candidate_grasps(
             #     down_sampled_pcd, 
@@ -476,6 +483,8 @@ class TwoGraspPlanner(LeafSystem):
             # p=[0.6597679659224048, -0.10382563627445854, 0.22689332681875962],
             # )]
         else:
+            if self.use_offline_regions:
+                self.regions = self.regions2
             grasps = [RigidTransform(
             R=RotationMatrix([
                 [-0.03442034895124868, 0.9994073003679098, 0.0005362363300874173],

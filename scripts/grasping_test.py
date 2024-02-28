@@ -41,7 +41,8 @@ def get_regions_static(scenario_path, dirstr):
     builder = RobotDiagramBuilder()
     builder.parser().AddModels(scenario_path)
     iiwa_model_instance_index = builder.plant().GetModelInstanceByName("iiwa")
-    params["robot_model_instances"] = [iiwa_model_instance_index]
+    wsg_model_instance_index = builder.plant().GetModelInstanceByName("wsg")
+    params["robot_model_instances"] = [iiwa_model_instance_index, wsg_model_instance_index]
     params["model"] = builder.Build()
     checker = SceneGraphCollisionChecker(**params)
 
@@ -71,7 +72,25 @@ def get_regions_static(scenario_path, dirstr):
     else:
         print("No solvers available")
 
-def start_scenario(dirstr = "temp", scenario_path="scenario_data_grasping.yml", models_path="scenario_data_grasping.dmd.yaml", use_hardware=False, save_imgs=False):
+def start_scenario(
+        dirstr = "temp", 
+        scenario_path="scenario_data_grasping.yml", 
+        models_path="scenario_data_grasping.dmd.yaml", 
+        pkl1_path="", 
+        pkl2_path="", 
+        use_hardware=False, 
+        save_imgs=False,
+        load_pkl_regions=False,
+        static_regions=False
+    ):
+    if load_pkl_regions:
+        if pkl1_path == "":
+            print("Must provide path to at least one pkl file to load pkl regions")
+            return
+        if pkl2_path == "":
+            print("Using pkl1_path as pkl2_path")
+            pkl2_path = pkl1_path
+
     meshcat.ResetRenderMode()
 
     builder = DiagramBuilder()
@@ -113,7 +132,6 @@ def start_scenario(dirstr = "temp", scenario_path="scenario_data_grasping.yml", 
     camera2_pcd = builder.AddSystem(DepthImageToPointCloud(camera2.depth_camera_info()))
 
     builder.Connect(station.GetOutputPort("camera0.depth_image"), camera0_pcd.GetInputPort("depth_image"))
-    # builder.Connect(station.GetOutputPort("camera0.rgb_image"), camera0_pcd.color_image_input_port())
     camera_pose0 = builder.AddSystem(
         ExtractPose(
             plant.GetBodyIndices(plant.GetModelInstanceByName("camera_main"))[0]
@@ -129,7 +147,6 @@ def start_scenario(dirstr = "temp", scenario_path="scenario_data_grasping.yml", 
     )
 
     builder.Connect(station.GetOutputPort("camera1.depth_image"), camera1_pcd.GetInputPort("depth_image"))
-    # builder.Connect(station.GetOutputPort("camera1.rgb_image"), camera1_pcd.color_image_input_port())
     camera_pose1 = builder.AddSystem(
         ExtractPose(
             plant.GetBodyIndices(plant.GetModelInstanceByName("camera_1"))[0]
@@ -145,7 +162,6 @@ def start_scenario(dirstr = "temp", scenario_path="scenario_data_grasping.yml", 
     )
 
     builder.Connect(station.GetOutputPort("camera2.depth_image"), camera2_pcd.GetInputPort("depth_image"))
-    # builder.Connect(station.GetOutputPort("camera2.rgb_image"), camera2_pcd.color_image_input_port())
     camera_pose2 = builder.AddSystem(
         ExtractPose(
             plant.GetBodyIndices(plant.GetModelInstanceByName("camera_2"))[0]
@@ -164,7 +180,20 @@ def start_scenario(dirstr = "temp", scenario_path="scenario_data_grasping.yml", 
         "iiwa.controller"
     ).get_multibody_plant_for_control()
 
-    # iris_regions = get_regions_static(os.path.join(dir_path, os.path.join("scenario_datas", models_path)), dirstr)
+    iris_regions1 = None
+    iris_regions2 = None
+    if static_regions:
+        iris_regions1 = get_regions_static(os.path.join(dir_path, os.path.join("scenario_datas", models_path)), dirstr)
+        iris_regions2 = iris_regions1
+    if load_pkl_regions:
+        with open(pkl1_path, 'rb') as f:
+            iris_regions1 = pickle.load(f)
+        if pkl1_path == pkl2_path:
+            iris_regions2 = iris_regions1
+        else:
+            with open(pkl2_path, 'rb') as f:
+                iris_regions2 = pickle.load(f)
+
 
     # Set up planner
     planner = builder.AddSystem(TwoGraspPlanner(
@@ -182,7 +211,8 @@ def start_scenario(dirstr = "temp", scenario_path="scenario_data_grasping.yml", 
                 ]
             ],
             meshcat=meshcat,
-            # regions=iris_regions,
+            regions1=iris_regions1,
+            regions2=iris_regions2,
             scenario_path=os.path.join(dir_path, os.path.join("scenario_datas", models_path)),
             dirstr=dirstr))
 
@@ -370,11 +400,24 @@ if __name__ == "__main__":
         "models_path",
         default="scenario_data_grasping.dmd.yaml",
         help="yaml file with scenario",
+        nargs='?',
     )
     parser.add_argument(
         "save_dir",
         default="temp",
         help="directory to save images in",
+        nargs='?',
+    )
+    parser.add_argument(
+        "pkl1_path",
+        default="",
+        help="path to first regions pkl file",
+        nargs='?',
+    )
+    parser.add_argument(
+        "pkl2_path",
+        default="",
+        help="path to first regions pkl file",
         nargs='?',
     )
     parser.add_argument(
@@ -387,10 +430,30 @@ if __name__ == "__main__":
         action='store_true',
         help="yaml file with scenario",
     )
+    parser.add_argument(
+        "--load_pkl_regions",
+        action='store_true',
+        help="whether to load regions from pkl file",
+    )
+    parser.add_argument(
+        "--static_regions",
+        action='store_true',
+        help="whether to load regions from pkl file",
+    )
     args = parser.parse_args()
 
     # Start the visualizer.
     meshcat = StartMeshcat()
 
     save_dir_path = os.path.abspath(os.path.join(os.path.dirname( __file__ ), '..', 'tests', args.save_dir))
-    start_scenario(save_dir_path, scenario_path= args.scenario_path, models_path=args.models_path, use_hardware=args.use_hardware, save_imgs=args.save_imgs)
+    start_scenario(
+        save_dir_path, 
+        scenario_path= args.scenario_path, 
+        models_path=args.models_path, 
+        pkl1_path=args.pkl1_path,
+        pkl2_path=args.pkl2_path,
+        use_hardware=args.use_hardware, 
+        save_imgs=args.save_imgs,
+        load_pkl_regions=args.load_pkl_regions,
+        static_regions=args.static_regions,
+    )
