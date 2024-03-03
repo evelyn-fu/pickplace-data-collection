@@ -36,6 +36,7 @@ from perception.image_saver import ImageSaver
 from planning.trajectory_sources import TrajectoryWithTimingInformationSource
 
 def get_regions_static(scenario_path, dirstr):
+    print("generating static regions")
     use_native_cpp_logging()
     params = dict(edge_step_size=0.125)
     builder = RobotDiagramBuilder()
@@ -49,7 +50,7 @@ def get_regions_static(scenario_path, dirstr):
     options = mut.IrisFromCliqueCoverOptions()
     options.num_points_per_coverage_check = 5000
     options.num_points_per_visibility_round = 500
-    options.coverage_termination_threshold = 0.9
+    options.coverage_termination_threshold = 0.95
 
     generator = RandomGenerator(0)
 
@@ -81,7 +82,8 @@ def start_scenario(
         use_hardware=False, 
         save_imgs=False,
         load_pkl_regions=False,
-        static_regions=False
+        static_regions=False,
+        no_obstacles=False
     ):
     if load_pkl_regions:
         if pkl1_path == "":
@@ -214,7 +216,8 @@ def start_scenario(
             regions1=iris_regions1,
             regions2=iris_regions2,
             scenario_path=os.path.join(dir_path, os.path.join("scenario_datas", models_path)),
-            dirstr=dirstr))
+            dirstr=dirstr,
+            no_obstacles=no_obstacles))
 
     if use_hardware:
         # Connect the output of external station to the input of internal station
@@ -438,7 +441,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--static_regions",
         action='store_true',
-        help="whether to load regions from pkl file",
+        help="if false includes object from point cloud as obstacle",
+    )
+    parser.add_argument(
+        "--no_obstacles",
+        action='store_true',
+        help="if true, plans gcs without any obstacles",
     )
     args = parser.parse_args()
 
@@ -456,4 +464,5 @@ if __name__ == "__main__":
         save_imgs=args.save_imgs,
         load_pkl_regions=args.load_pkl_regions,
         static_regions=args.static_regions,
+        no_obstacles=args.no_obstacles
     )

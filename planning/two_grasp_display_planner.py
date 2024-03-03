@@ -42,7 +42,7 @@ from pydrake.solvers import MosekSolver, GurobiSolver
 from manipulation.meshcat_utils import AddMeshcatTriad
 from enum import Enum
 
-def get_regions(scenario_path, dirstr, com, rot, dims):
+def get_regions(scenario_path, dirstr, com, rot, dims, name=None):
     # Get bounding box of object
     rpy = rot.ToRollPitchYaw().vector()
     bounding_box_urdf = """<?xml version="1.0"?>
@@ -77,7 +77,7 @@ def get_regions(scenario_path, dirstr, com, rot, dims):
     options = mut.IrisFromCliqueCoverOptions()
     options.num_points_per_coverage_check = 5000
     options.num_points_per_visibility_round = 500
-    options.coverage_termination_threshold = 0.9
+    options.coverage_termination_threshold = 0.95
 
     generator = RandomGenerator(0)
 
@@ -92,8 +92,12 @@ def get_regions(scenario_path, dirstr, com, rot, dims):
         if len(sets) < 1:
             raise("No regions found")
         
-        time_str = datetime.datetime.now().strftime('%d%m%y_%H%M%S')
-        with open(dirstr+f'/{scenario_path.split("/")[-1]}_{time_str}_regions.pkl', 'wb') as f:
+        pkl_path = dirstr + f'/{name}.pkl'
+        if name == None:
+            time_str = datetime.datetime.now().strftime('%d%m%y_%H%M%S')
+            pkl_path = dirstr+f'/{scenario_path.split("/")[-1]}_{time_str}_regions.pkl'
+
+        with open(pkl_path, 'wb') as f:
             pickle.dump(sets, f)
 
         return sets
@@ -150,6 +154,7 @@ class TwoGraspPlanner(LeafSystem):
             regions2,
             scenario_path,
             dirstr,
+            no_obstacles,
         ):
         LeafSystem.__init__(self)
 
@@ -240,6 +245,7 @@ class TwoGraspPlanner(LeafSystem):
         self.use_offline_regions = False if regions1 is None else True
         self.scenario_path = scenario_path
         self.dirstr = dirstr
+        self.no_obstacles = no_obstacles
         self.done = False
 
     def Update(self, context, state):
@@ -334,7 +340,7 @@ class TwoGraspPlanner(LeafSystem):
         # q0 = context.get_discrete_state(self._q0_index).get_value().copy()
 
         traj = plan_unconstrained_gcs_path_start_to_goal(
-            plant=self._iiwa_controller_plant, q_start=q, q_goal=q_goal, regions=self.regions
+            plant=self._iiwa_controller_plant, q_start=q, q_goal=q_goal, regions=self.regions, no_obstacles=self.no_obstacles
         )
         if traj is None:
             logging.error("Failed to find a path to the home positions.")
@@ -386,7 +392,7 @@ class TwoGraspPlanner(LeafSystem):
 
         # Plan trajectory to saved start position to ensure we start grasp traj at consistent position
         traj = plan_unconstrained_gcs_path_start_to_goal(
-            plant=self._iiwa_controller_plant, q_start=q, q_goal=q_goal, regions=self.regions
+            plant=self._iiwa_controller_plant, q_start=q, q_goal=q_goal, regions=self.regions, no_obstacles=self.no_obstacles
         )
         if traj is None:
             logging.error("Failed to find a path to the grasping start positions.")
@@ -450,12 +456,11 @@ class TwoGraspPlanner(LeafSystem):
         AddMeshcatTriad(self.meshcat, "principal axis", 
                         X_PT=RigidTransform(rot,
                         [com[0], com[1], com[2]]))
-        
-        if not self.use_offline_regions:
-            self.regions = get_regions(self.scenario_path, self.dirstr, com, rot, dims)
 
         if mode == PlannerState.WAIT_FOR_OBJECTS_TO_SETTLE:
-            if self.use_offline_regions:
+            if not self.use_offline_regions and not self.no_obstacles:
+                self.regions = get_regions(self.scenario_path, self.dirstr, com, rot, dims, "region_1")
+            else:
                 self.regions = self.regions1
             # Planning first grasping trajectory
             # self.grasp_node.compute_candidate_grasps(
@@ -474,16 +479,10 @@ class TwoGraspPlanner(LeafSystem):
                 ]),
                 p=[0.6073802571650899, -0.016139619528128844, 0.351559001325315],
             )]
-            # grasps = [RigidTransform(
-            # R=RotationMatrix([
-            #     [-0.03442034895124868, 0.9994073003679098, 0.0005362363300874173],
-            #     [-0.04829586151222898, -0.002199273198199581, 0.9988306527926499],
-            #     [0.9982398255624083, 0.0343542016167908, 0.04834293632380032],
-            # ]),
-            # p=[0.6597679659224048, -0.10382563627445854, 0.22689332681875962],
-            # )]
         else:
-            if self.use_offline_regions:
+            if not self.use_offline_regions and not self.no_obstacles:
+                self.regions = get_regions(self.scenario_path, self.dirstr, com, rot, dims, "region_2")
+            else:
                 self.regions = self.regions2
             grasps = [RigidTransform(
             R=RotationMatrix([

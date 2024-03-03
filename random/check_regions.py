@@ -10,8 +10,8 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    initial = [-6.360e-09 , 4.000e-01 , 4.171e-08, -1.200e+00  ,1.249e-07 , 1.000e+00 ,1.570e+00]
-    final = [-0.337,  0.575 , 0.414, -1.054, -0.072 , 1.541, -1.343]
+    initial = [-6.360e-09 , 4.000e-01,  4.171e-08, -1.200e+00 , 1.249e-07 , 1.000e+00, 1.570e+00]
+    final = [-0.558 , 0.672,  0.872, -1.054 ,-0.352 , 1.575 ,-1.186]
 
     filepath = args.pickle_path
     with open(filepath, 'rb') as f:
@@ -31,3 +31,6 @@ if __name__ == "__main__":
             print("initial point not in regions")
         if not final_contained:
             print("final point not in regions")
+        
+        if initial_contained and final_contained:
+            print("they both there")

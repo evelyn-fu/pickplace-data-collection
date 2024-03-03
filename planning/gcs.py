@@ -20,6 +20,7 @@ def plan_unconstrained_gcs_path_start_to_goal(
     q_start: np.ndarray,
     velocity_limits: Optional[np.ndarray] = None,
     regions: List[ConvexSet] = None,
+    no_obstacles: bool=False
 ) -> Union[Trajectory, None]:
     """Plan an unconstrained trajectory from a start to a goal in joint space using GCS.
 
@@ -38,7 +39,7 @@ def plan_unconstrained_gcs_path_start_to_goal(
     gcs = GcsTrajectoryOptimization(num_positions)
 
     # Ignore obstacles
-    if regions is None or len(regions) == 0:
+    if no_obstacles or regions is None or len(regions) == 0:
         workspace = gcs.AddRegions(
             regions=[
                 HPolyhedron.MakeBox(
@@ -64,8 +65,11 @@ def plan_unconstrained_gcs_path_start_to_goal(
     gcs.AddTimeCost()
     gcs.AddPathLengthCost()
 
-    logging.info(f"Planning unconstrained GCS path from {q_start} to {q_goal}.")
+    print("why log no work")
+    print(f"Planning unconstrained GCS path from {q_start} to {q_goal}.")
     traj, result = gcs.SolvePath(start, goal)
+    print("solve path done")
+
     if not result.is_success():
         logging.error(
             f"Failed to plan unconstrained GCS path from {q_start} to {q_goal}."
