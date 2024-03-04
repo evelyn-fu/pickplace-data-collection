@@ -3,3 +3,4 @@ old_stuff/
 tests/
 real2sim_manipulation.egg-info/
 build/
+env/

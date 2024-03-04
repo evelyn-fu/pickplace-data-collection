@@ -33,7 +33,7 @@ from pydrake.solvers import MosekSolver, GurobiSolver
 
 from planning.two_grasp_display_planner import TwoGraspPlanner
 from perception.image_saver import ImageSaver
-from planning.trajectory_sources import TrajectoryWithTimingInformationSource
+from planning.trajectory_sources import TrajectoryWithTimingInformationSource, DummyTrajSource
 
 def get_regions_static(scenario_path, dirstr):
     print("generating static regions")
@@ -255,13 +255,14 @@ def start_scenario(
             ),
         )
     )
+
     builder.Connect(
         planner.GetOutputPort("joint_position_trajectory"),
         joint_traj_source.GetInputPort("trajectory"),
     )
     if use_hardware:
         builder.Connect(
-            external_station.GetOutputPort("iiwa.position_measured"),
+            external_station.GetOutputPort("iiwa.position_commanded"),
             joint_traj_source.GetInputPort("current_cmd"),
         )
     else:

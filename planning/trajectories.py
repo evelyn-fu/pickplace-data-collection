@@ -94,11 +94,12 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q):
                     sample_times2.append(sample_times2[-1] + (times["display_traj"][0] if i == 0 else times["display_traj"][1]))
                     positions2.append(q_next)
                 else:
-                    if i != 0:
+                    if i > 1:
                         last_t = sample_times2[-1]
                         sample_times2 += [last_t + j * times["display_traj"][1] for j in range(1, i-1)]
                         reversed_positions = list(positions2[-i:-1].__reversed__())
-                        positions2 += reversed_positions[:-1] # add going backwards, dont add final one since that's assumed to be the first position of the next direction
+                        if len(reversed_positions) > 0:
+                            positions2 += reversed_positions[:-1] # add going backwards, dont add final one since that's assumed to be the first position of the next direction
                         q_prev = reversed_positions[-1] # start initial guess at first position, since it should be the first position of the next direction
                     break
 
@@ -117,7 +118,7 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q):
                     sample_times2.append(sample_times2[-1] + times["display_traj"][1])
                     positions2.append(q_next)
                 else:
-                    if i != 0:
+                    if i > 1:
                         last_t = sample_times2[-1]
                         sample_times2 += [last_t + j * times["display_traj"][1] for j in range(1, i)]
                         positions2 += list(positions2[-i:-1].__reversed__()) # add going backwards

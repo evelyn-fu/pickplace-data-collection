@@ -7,6 +7,23 @@ from iiwa_setup_dataclasses.trajectories import (
     TrajectoryWithTimingInformation,
 )
 
+class DummyTrajSource(LeafSystem):
+
+    def __init__(self):
+        super().__init__()
+
+        # The current_cmd that should be passed to output when the current trajectory is invalid
+        self._current_cmd_input_port = self.DeclareVectorInputPort(
+            "current_cmd", 7
+        )
+
+        self.DeclareVectorOutputPort(
+            "output", 7, self._calc_trajectory_value
+        )
+
+    def _calc_trajectory_value(self, context: Context, output: BasicVector) -> None:
+        output.SetFromVector(self._current_cmd_input_port.Eval(context))
+
 class TrajectoryWithTimingInformationSource(LeafSystem):
     """
     A trajectory source that outputs trajectory values while respecting the trajectory
