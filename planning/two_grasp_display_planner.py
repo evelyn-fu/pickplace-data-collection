@@ -239,25 +239,13 @@ class TwoGraspPlanner(LeafSystem):
             self.GetCurrentJointPositionTrajectory,
         )
 
-        # For iiwa position control modes.
+        # To get iiwa position
         num_positions = 7
         self._iiwa_position_index = self.DeclareVectorInputPort(
             "iiwa_position", num_positions
         ).get_index()
-        self.DeclareAbstractOutputPort(
-            "control_mode",
-            lambda: AbstractValue.Make(InputPortIndex(0)),
-            self.CalcControlMode,
-        )
-        self.DeclareAbstractOutputPort(
-            "reset_diff_ik",
-            lambda: AbstractValue.Make(False),
-            self.CalcDiffIKReset,
-        )
+
         self._q0_index = self.DeclareDiscreteState(num_positions)  # for q0
-        self._X_G_init_index = self.DeclareAbstractState(
-            AbstractValue.Make(RigidTransform())
-        )
         self.DeclareInitializationDiscreteUpdateEvent(self.Initialize)
 
         self.DeclarePeriodicUnrestrictedUpdateEvent(0.1, 0.0, self.Update)
@@ -739,24 +727,6 @@ class TwoGraspPlanner(LeafSystem):
 
         # Command the open position
         output.SetFromVector([opened])
-
-    def CalcControlMode(self, context, output):
-        mode = context.get_abstract_state(int(self._mode_index)).get_value()
-
-        # if mode == PlannerState.GRASP1 or mode == PlannerState.GRASP2:
-        #     output.set_value(InputPortIndex(1))  # Diff IK when executing display trajectories
-        # else:
-        #     output.set_value(InputPortIndex(2))  # Toppra joint traj
-        
-        output.set_value(InputPortIndex(2))  # Toppra joint traj
-
-    def CalcDiffIKReset(self, context, output):
-        mode = context.get_abstract_state(int(self._mode_index)).get_value()
-
-        if mode == PlannerState.GO_HOME1 or mode == PlannerState.GO_HOME2:
-            output.set_value(True)
-        else:
-            output.set_value(False)
 
     def Initialize(self, context, discrete_state):
         discrete_state.set_value(

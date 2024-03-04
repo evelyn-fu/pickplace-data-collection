@@ -247,13 +247,6 @@ def start_scenario(
             planner.GetInputPort("iiwa_position"),
         )
 
-    # Set up differential inverse kinematics.
-    differential_ik = AddIiwaDifferentialIK(
-        builder,
-        controller_plant,
-        frame=controller_plant.GetFrameByName("iiwa_link_7"),
-    )
-
     joint_traj_source: TrajectoryWithTimingInformationSource = (
         builder.AddNamedSystem(
             "joint_traj_source",
@@ -277,34 +270,6 @@ def start_scenario(
             joint_traj_source.GetInputPort("current_cmd"),
         )
 
-    builder.Connect(planner.GetOutputPort("X_WG"), differential_ik.get_input_port(0))
-
-    if not use_hardware:
-        builder.Connect(
-            station.GetOutputPort("iiwa.state_estimated"),
-            differential_ik.GetInputPort("robot_state"),
-        )
-    else:
-        # Export external state output
-        iiwa_state_mux: Multiplexer = builder.AddSystem(Multiplexer([7, 7]))
-        builder.Connect(
-            external_station.GetOutputPort("iiwa.position_measured"),
-            iiwa_state_mux.get_input_port(0),
-        )
-        builder.Connect(
-            external_station.GetOutputPort("iiwa.velocity_estimated"),
-            iiwa_state_mux.get_input_port(1),
-        )
-        builder.Connect(
-            iiwa_state_mux.get_output_port(),
-            differential_ik.GetInputPort("robot_state"),
-        )
-
-    builder.Connect(
-        planner.GetOutputPort("reset_diff_ik"),
-        differential_ik.GetInputPort("use_robot_state"),
-    )
-
     if use_hardware:
         builder.Connect(
             planner.GetOutputPort("wsg_position"),
@@ -316,27 +281,14 @@ def start_scenario(
             station.GetInputPort("wsg.position"),
         )
 
-    # The DiffIK and the direct position-control modes go through a PortSwitch
-    switch = builder.AddSystem(PortSwitch(7))
-    builder.Connect(
-        differential_ik.get_output_port(), switch.DeclareInputPort("diff_ik")
-    )
-    builder.Connect(
-        joint_traj_source.get_output_port(),
-        switch.DeclareInputPort("position"),
-    )
     if use_hardware:
         builder.Connect(
-            switch.get_output_port(), external_station.GetInputPort("iiwa.position")
+            joint_traj_source.get_output_port(), external_station.GetInputPort("iiwa.position")
         )
     else:
         builder.Connect(
-            switch.get_output_port(), station.GetInputPort("iiwa.position")
+            joint_traj_source.get_output_port(), station.GetInputPort("iiwa.position")
         )
-    builder.Connect(
-        planner.GetOutputPort("control_mode"),
-        switch.get_port_selector_input_port(),
-    )
 
     builder.Connect(
         camera0_pcd.GetOutputPort("point_cloud"),
