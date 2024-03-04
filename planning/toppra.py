@@ -39,6 +39,7 @@ def reparameterize_with_toppra(
     velocity_limits: np.ndarray,
     acceleration_limits: np.ndarray,
     num_grid_points: int = 1000,
+    is_pl: bool = False
 ) -> PathParameterizedTrajectory:
     """Reparameterize a trajectory/ path with Toppra.
 
@@ -57,7 +58,10 @@ def reparameterize_with_toppra(
     Returns:
         PathParameterizedTrajectory: The reparameterized trajectory.
     """
-    pl_trajectory = make_pl_traj(trajectory)
+    pl_trajectory = trajectory
+    if not is_pl:
+        pl_trajectory = make_pl_traj(trajectory)
+    
     toppra = Toppra(
         path=pl_trajectory,
         plant=plant,

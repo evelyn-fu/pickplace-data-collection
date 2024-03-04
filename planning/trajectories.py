@@ -1,70 +1,72 @@
-# Based off of https://github.com/RussTedrake/manipulation/blob/master/manipulation/pick.py 
-# with modifications to start and end at pregrasp pose, display object at location,
-# and place back at same location
-
 import numpy as np
 from pydrake.all import (
-    AngleAxis,
     PiecewisePolynomial,
-    PiecewisePose,
     RigidTransform,
 )
+from planning.inverse_kinematics import solve_global_inverse_kinematics
 
-def MakePickAndDisplayGripperFrames(X_G, t0=0):
+def MakePickAndDisplayGripperFrames(X_G):
     """
     Takes a partial specification with X_G["pick"], X_G["prepick"], and
-    X_G["display_traj"] (a list of poses of any length),
+    X_G["display_traj"] (a tuple of two list of poses of any length that begin with the same pose,
+    this is meant to display in one direction as far as possible then another as far as possible),
     and returns a X_G and times with all of the pick and display
     frames populated.
     """
     # put down where it was picked up, return gripper to initial position
     X_G["place"] = X_G["pick"]
 
-    X_GprepickGpredisplay = X_G["prepick"].inverse() @ X_G["display_traj"][0]
+    X_GprepickGpredisplay = X_G["prepick"].inverse() @ X_G["display_traj"][0][0]
 
-    # Now let's set the timing
-    times = {"prepick": t0}
+    # Amount of time it takes to GET TO each frame
+    times = {"prepick": 0}
     
     # Allow some time for the gripper to close.
     X_G["pick_start"] = X_G["pick"]
     X_G["pick_end"] = X_G["pick"]
-    times["pick_start"] = times["prepick"] + 5.0
-    times["pick_end"] = times["pick_start"] + 2.0
+    times["pick_start"] = 5.0
+    times["pick_end"] = 2.0
 
     # raise object off surface
     X_G["postpick"] = RigidTransform(X_G["pick"].rotation(), X_G["pick"].translation() + [0, 0, 0.09])
-    times["postpick"] = times["pick_end"] + 2.0
+    times["postpick"] = 2.0
 
     # Give time to get to start of display trajectory
     time_to_predisplay = 10.0 * np.linalg.norm(
         X_GprepickGpredisplay.translation()
     )
-    times["display_traj"] = []
-    times["display_traj"].append(times["postpick"] + time_to_predisplay)
-    for i in range(len(X_G["display_traj"])-1):
-        times["display_traj"].append(times["display_traj"][-1] + 2.0)
+    # special case where first value is time to first frame in traj, and second is time to consecutive frames
+    times["display_traj"] = [time_to_predisplay, 2.0] 
 
     # Prepare to place back down
     X_G["preplace"] = X_G["postpick"]
-    times["preplace"] = times["display_traj"][-1] + time_to_predisplay
+    times["preplace"] = time_to_predisplay
 
     # Place back down and allow some time for gripper to open
     X_G["place_start"] = X_G["place"]
     X_G["place_end"] = X_G["place"]
-    times["place_start"] = times["preplace"] + 2.0
-    times["place_end"] = times["place_start"] + 2.0
+    times["place_start"] = 2.0
+    times["place_end"] = 2.0
 
     # Go back to prepick pose
     X_G["postplace"] = X_G["prepick"]
-    times["postplace"] = times["place_end"] + 2.0
+    times["postplace"] = 2.0
 
     return X_G, times
 
-
-def MakePickAndDisplayGripperPoseTrajectory(X_G, times):
-    """Constructs a gripper position trajectory from the plan "sketch"."""
-    sample_times = []
-    poses = []
+def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q):
+    """
+    Constructs a gripper position trajectory from the plan "sketch".
+    Returns three piecewise polynomial trajectories. One for before grasp, one for during, one for after.
+    This is in order to close the gripper between these two trajectories.
+    """
+    sample_times1 = []
+    positions1 = []
+    sample_times2 = []
+    positions2 = []
+    sample_times3 = []
+    positions3 = []
+    q_prev = q
     for name in [
         "prepick",
         "pick_start",
@@ -77,27 +79,77 @@ def MakePickAndDisplayGripperPoseTrajectory(X_G, times):
         "postplace",
     ]:
         if name == "display_traj":
-            for i in range(len(times["display_traj"])):
-                sample_times.append(times["display_traj"][i])
-                poses.append(X_G["display_traj"][i])
+            # display direction 1 till failure
+            for i in range(len(X_G["display_traj"][0])):
+                q_next = solve_global_inverse_kinematics(
+                    plant=plant,
+                    X_G=X_G["display_traj"][0][i],
+                    initial_guess=q_prev,
+                    position_tolerance=0.0,
+                    orientation_tolerance=0.0,
+                    gripper_frame_name="iiwa_link_7",
+                )
+                if q_next is not None:
+                    q_prev = q_next
+                    sample_times2.append(sample_times2[-1] + (times["display_traj"][0] if i == 0 else times["display_traj"][1]))
+                    positions2.append(q_next)
+                else:
+                    if i != 0:
+                        last_t = sample_times2[-1]
+                        sample_times2 += [last_t + j * times["display_traj"][1] for j in range(1, i)]
+                        positions2 += list(positions2[-i:-1].__reversed__()) # add going backwards
+                    break
+
+            # display direction 2 till failure
+            for i in range(len(X_G["display_traj"][1])):
+                q_next = solve_global_inverse_kinematics(
+                    plant=plant,
+                    X_G=X_G["display_traj"][1][i],
+                    initial_guess=q_prev,
+                    position_tolerance=0.0,
+                    orientation_tolerance=0.0,
+                    gripper_frame_name="iiwa_link_7",
+                )
+                if q_next is not None:
+                    q_prev = q_next
+                    sample_times2.append(sample_times2[-1] + times["display_traj"][1])
+                    positions2.append(q_next)
+                else:
+                    if i != 0:
+                        last_t = sample_times2[-1]
+                        sample_times2 += [last_t + j * times["display_traj"][1] for j in range(1, i)]
+                        positions2 += list(positions2[-i:-1].__reversed__()) # add going backwards
+                    break
+            
+            q_prev = positions2[-1]
         else:
-            sample_times.append(times[name])
-            poses.append(X_G[name])
+            if name == "prepick" or name == "pick_start":
+                sample_times1.append((sample_times1[-1] if len(sample_times1) != 0 else 0) + times[name])
+            elif name == "place_end" or name == "postplace":
+                sample_times3.append((sample_times3[-1] if len(sample_times3) != 0 else 0) + times[name])
+            else:
+                sample_times2.append((sample_times2[-1] if len(sample_times2) != 0 else 0) + times[name])
 
-    return PiecewisePose.MakeLinear(sample_times, poses)
+            q_next = solve_global_inverse_kinematics(
+                plant=plant,
+                X_G=X_G[name],
+                initial_guess=q_prev,
+                position_tolerance=0.0,
+                orientation_tolerance=0.0,
+                gripper_frame_name="iiwa_link_7",
+            )
+            q_prev = q_next
+            if name == "prepick" or name == "pick_start":
+                positions1.append(q_next)
+            elif name == "place_end" or name == "postplace":
+                positions3.append(q_next)
+            else:
+                positions2.append(q_next)
 
-
-def MakePickAndDisplayGripperCommandTrajectory(times):
-    """Constructs a WSG command trajectory from the plan "sketch"."""
-    opened = np.array([0.107])
-    closed = np.array([0.0])
-
-    traj_wsg_command = PiecewisePolynomial.FirstOrderHold(
-        [times["prepick"], times["pick_start"]],
-        np.hstack([[opened], [opened]]),
-    )
-    traj_wsg_command.AppendFirstOrderSegment(times["pick_end"], closed)
-    traj_wsg_command.AppendFirstOrderSegment(times["place_start"], closed)
-    traj_wsg_command.AppendFirstOrderSegment(times["place_end"], opened)
-    traj_wsg_command.AppendFirstOrderSegment(times["postplace"], opened)
-    return traj_wsg_command
+    sample_times2 = [t - sample_times2[0] for t in sample_times2]
+    sample_times3 = [t - sample_times3[0] for t in sample_times3]
+    
+    t1 = PiecewisePolynomial.FirstOrderHold(sample_times1, np.array(positions1).T)
+    t2 = PiecewisePolynomial.FirstOrderHold(sample_times2, np.array(positions2).T)
+    t3 = PiecewisePolynomial.FirstOrderHold(sample_times3, np.array(positions3).T)
+    return t1, t2, t3
