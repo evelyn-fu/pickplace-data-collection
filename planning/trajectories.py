@@ -36,7 +36,7 @@ def MakePickAndDisplayGripperFrames(X_G):
         X_GprepickGpredisplay.translation()
     )
     # special case where first value is time to first frame in traj, and second is time to consecutive frames
-    times["display_traj"] = [time_to_predisplay, 2.0] 
+    times["display_traj"] = [time_to_predisplay, 0.5] 
 
     # Prepare to place back down
     X_G["preplace"] = X_G["postpick"]

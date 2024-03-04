@@ -254,8 +254,8 @@ class TwoGraspPlanner(LeafSystem):
         self.meshcat = meshcat
         self.plant = plant
         self._iiwa_controller_plant = controller_plant
-        self.velocity_limits = 1 * np.ones(7)
-        self.acceleration_limits = 1 * np.ones(7)
+        self.velocity_limits = 0.1 * np.ones(7)
+        self.acceleration_limits = 0.1 * np.ones(7)
         self.regions = None #regions
         self.regions1 = regions1
         self.regions2 = regions2
