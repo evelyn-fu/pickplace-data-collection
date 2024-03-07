@@ -19,7 +19,7 @@ def MakePickAndDisplayGripperFrames(X_G):
     X_GprepickGpredisplay = X_G["prepick"].inverse() @ X_G["display_traj"][0][0]
 
     # Amount of time it takes to GET TO each frame
-    times = {"prepick": 0}
+    times = {"prepick": 0.5}
     
     # Allow some time for the gripper to close.
     X_G["pick_start"] = X_G["pick"]
@@ -60,8 +60,8 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q):
     Returns three piecewise polynomial trajectories. One for before grasp, one for during, one for after.
     This is in order to close the gripper between these two trajectories.
     """
-    sample_times1 = []
-    positions1 = []
+    sample_times1 = [0.0]
+    positions1 = [q]
     sample_times2 = []
     positions2 = []
     sample_times3 = []
