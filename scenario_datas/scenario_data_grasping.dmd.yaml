@@ -30,7 +30,7 @@ directives:
     name: mustard_origin
     X_PF:
         base_frame: world
-        translation: [0.6, 0.0, 0.12]
+        translation: [0.57, 0.0, 0.12]
         rotation: !Rpy { deg: [0, 0, 110] }
 - add_weld:
     parent: mustard_origin
@@ -56,7 +56,7 @@ directives:
     X_PF:
         base_frame: world
         rotation: !Rpy { deg: [0.0, 0.0, 0.0]}
-        translation: [0.6, 0.0, 0]
+        translation: [0.57, 0.0, 0]
 
 - add_model:
     name: box

@@ -57,7 +57,7 @@ rot_to_axes, _ = R.align_vectors(
 AddMeshcatTriad(meshcat, "align_grasp_axis", X_PT=RigidTransform(RotationMatrix(rot_to_axes.as_matrix().T),
                         [0.6, 0.0, 0.12]))
 
-X_mustard = RigidTransform(RotationMatrix(RollPitchYaw(-np.pi/2, 0, np.pi/2)), [0.6, 0.0, 0.12])
+X_mustard = RigidTransform(RotationMatrix(RollPitchYaw(-np.pi/2, 0, np.pi/2)), [0.57, 0.0, 0.12])
 X_box = RigidTransform(RotationMatrix(), [0.15, 0.0, 0.0])
 X_WGfix = RigidTransform(RotationMatrix(RollPitchYaw(np.pi/2, 0, np.pi/2)))
 context = diagram.CreateDefaultContext()
@@ -67,7 +67,7 @@ plant.SetFreeBodyPose(plant_context, plant.GetBodyByName("base_link_mustard"), X
 X_iiwa_base = RigidTransform(RotationMatrix())
 new_positions = plant.GetPositions(plant_context)
 print(new_positions)
-new_positions[:9] = [-0.337,  0.575 , 0.414, -1.054, -0.072 , 1.541, -1.343, -0.05, 0.05 ]
+new_positions[:9] = [-0.469,  1.081, -0.438 ,-1.528,  1.464 , 2.094,  0.456, -0.05, 0.05 ]
 plant.SetPositions(plant_context, new_positions)
 print(new_positions)
 

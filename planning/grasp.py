@@ -372,13 +372,13 @@ class GraspListener():
         """
         R = X_WG.GetAsMatrix4()[:3, :3]
         t = X_WG.GetAsMatrix4()[:3, 3]
-        eff_vertical_vec = R.dot(np.array([0, 0, 1]))
+        eff_vertical_vec = R.dot(np.array([0, 1, 0]))
         eff_horizontal_vec = R.dot(np.array([1, 0, 0]))
 
         antipodal_cost = -np.sum(
             within_box_pt_normals[1, :] ** 2
-        )  # along the y axis of the gripper, larger good (antipodal metric)
-        gripper_axis_alignment_cost = eff_vertical_vec @ align_grasp_axis  # want z axis of gripper to face towards desired axis, larger worse
+        )  # along the x axis of the gripper, larger good (antipodal metric)
+        gripper_axis_alignment_cost = np.abs(eff_vertical_vec @ align_grasp_axis)  # want y axis of gripper to face towards desired axis, larger worse
         gripper_secondary_alignment_cost = np.abs(eff_horizontal_vec @ align_secondary_axis) # want x axis of gripper to face towards secondary axis (or 180 from)
         grasp_height_cost = -t[2]  # prefer higher position
         split_ratio_minor_axis_cost = -split_ratios[minor_split_axis]  # prefer higher split ratio
@@ -773,7 +773,7 @@ class GraspListener():
                                 )
                             else:
                                 continue
-            o3d.visualization.draw_geometries(viz_geoms)
+            # o3d.visualization.draw_geometries(viz_geoms)
             print("sequential antipodal grasp time: {:.3f}".format(time.time() - start_time))
 
         else:

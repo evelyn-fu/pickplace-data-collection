@@ -50,7 +50,7 @@ def get_regions_static(scenario_path, dirstr):
     options = mut.IrisFromCliqueCoverOptions()
     options.num_points_per_coverage_check = 5000
     options.num_points_per_visibility_round = 500
-    options.coverage_termination_threshold = 0.95
+    options.coverage_termination_threshold = 0.7
 
     generator = RandomGenerator(0)
 
@@ -81,17 +81,23 @@ def start_scenario(
         pkl2_path="", 
         use_hardware=False, 
         save_imgs=False,
-        load_pkl_regions=False,
+        load_pkl_region1=False,
+        load_pkl_region2=False,
+        use_same_pkl_regions=False,
         static_regions=False,
         no_obstacles=False
     ):
-    if load_pkl_regions:
+    if load_pkl_region1:
         if pkl1_path == "":
-            print("Must provide path to at least one pkl file to load pkl regions")
+            print("Must provide path to at pkl file to load region 1")
             return
+    if use_same_pkl_regions:
+        pkl2_path = pkl1_path
+        print("Using regions 1 for regions 2")
+    elif load_pkl_region2:
         if pkl2_path == "":
-            print("Using pkl1_path as pkl2_path")
-            pkl2_path = pkl1_path
+            print("Must provide path to at pkl file to load region 2")
+            return
 
     meshcat.ResetRenderMode()
 
@@ -187,14 +193,14 @@ def start_scenario(
     if static_regions:
         iris_regions1 = get_regions_static(os.path.join(dir_path, os.path.join("scenario_datas", models_path)), dirstr)
         iris_regions2 = iris_regions1
-    if load_pkl_regions:
+    if load_pkl_region1:
         with open(pkl1_path, 'rb') as f:
             iris_regions1 = pickle.load(f)
-        if pkl1_path == pkl2_path:
+        if use_same_pkl_regions:
             iris_regions2 = iris_regions1
-        else:
-            with open(pkl2_path, 'rb') as f:
-                iris_regions2 = pickle.load(f)
+    if load_pkl_region2 and iris_regions2 is None:
+        with open(pkl2_path, 'rb') as f:
+            iris_regions2 = pickle.load(f)
 
 
     # Set up planner
@@ -387,7 +393,17 @@ if __name__ == "__main__":
         help="yaml file with scenario",
     )
     parser.add_argument(
-        "--load_pkl_regions",
+        "--load_pkl_region1",
+        action='store_true',
+        help="whether to load regions from pkl file",
+    )
+    parser.add_argument(
+        "--load_pkl_region2",
+        action='store_true',
+        help="whether to load regions from pkl file",
+    )
+    parser.add_argument(
+        "--use_same_pkl_regions",
         action='store_true',
         help="whether to load regions from pkl file",
     )
@@ -415,7 +431,9 @@ if __name__ == "__main__":
         pkl2_path=args.pkl2_path,
         use_hardware=args.use_hardware, 
         save_imgs=args.save_imgs,
-        load_pkl_regions=args.load_pkl_regions,
+        load_pkl_region1=args.load_pkl_region1,
+        load_pkl_region2=args.load_pkl_region2,
+        use_same_pkl_regions=args.use_same_pkl_regions,
         static_regions=args.static_regions,
         no_obstacles=args.no_obstacles
     )

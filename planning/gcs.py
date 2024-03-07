@@ -65,7 +65,6 @@ def plan_unconstrained_gcs_path_start_to_goal(
     gcs.AddTimeCost()
     gcs.AddPathLengthCost()
 
-    print("why log no work")
     print(f"Planning unconstrained GCS path from {q_start} to {q_goal}.")
     traj, result = gcs.SolvePath(start, goal)
     print("solve path done")

@@ -48,14 +48,15 @@ diagram = builder.Build()
 
 X_GgraspGpregrasp = RigidTransform([0, 0.0, -0.15])
 
-X_G = RigidTransform(
+X_G =RigidTransform(
   R=RotationMatrix([
-    [-0.03442034895124868, 0.9994073003679098, 0.0005362363300874173],
-    [-0.04829586151222898, -0.002199273198199581, 0.9988306527926499],
-    [0.9982398255624083, 0.0343542016167908, 0.04834293632380032],
+    [0.0834121306727252, -0.8851583536076943, -0.4577522315567158],
+    [0.24095232073015768, 0.46363766580107135, -0.8526324495263393],
+    [0.9669459114094168, -0.03917657321730244, 0.25195396508005563],
   ]),
-  p=[0.6597679659224048, -0.10382563627445854, 0.22689332681875962],
+  p=[0.5705643119928675, 0.06772450226931172, 0.1909821558295339],
 )
+
 
 align_grasp_axis = [-0.109,  0.994, -0.002]
 z_axis, x_axis = [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]
@@ -66,7 +67,7 @@ rot_to_axes, _ = R.align_vectors(
 AddMeshcatTriad(meshcat, "align_grasp_axis", X_PT=RigidTransform(RotationMatrix(rot_to_axes.as_matrix().T),
                         [0.6, 0.0, 0.12]))
 
-X_mustard = RigidTransform(RotationMatrix(RollPitchYaw(-np.pi/2, 0, np.pi/2)), [0.6, 0.0, 0.12])
+X_mustard = RigidTransform(RotationMatrix(RollPitchYaw(-np.pi/2, 0, np.pi/2)), [0.57, 0.0, 0.12])
 X_WGfix = RigidTransform(RotationMatrix(RollPitchYaw(np.pi/2, 0, np.pi/2)))
 context = diagram.CreateDefaultContext()
 plant_context = plant.GetMyContextFromRoot(context)

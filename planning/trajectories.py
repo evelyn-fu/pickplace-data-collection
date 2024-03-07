@@ -67,6 +67,7 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q):
     sample_times3 = []
     positions3 = []
     q_prev = q
+    positions3_failed = False
     for name in [
         "prepick",
         "pick_start",
@@ -141,11 +142,16 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q):
                 orientation_tolerance=0.0,
                 gripper_frame_name="iiwa_link_7",
             )
-            q_prev = q_next
             if name == "prepick" or name == "pick_start":
                 positions1.append(q_next)
-            elif name == "place_end" or name == "postplace":
-                positions3.append(q_next)
+            elif name == "place_end" or name == "postplace" and not positions3_failed:
+                if q_next is None:
+                    # use the prepick and pick start reversed if this fails since it should be the same thing
+                    print(f"IK failed at {name}, using prepick/pick_start positions for postpick/place_end")
+                    positions3 = reversed(positions1)
+                    positions3_failed = True
+                else:
+                    positions3.append(q_next)
             else:
                 positions2.append(q_next)
 
