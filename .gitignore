@@ -1,6 +1,7 @@
 py310_env/
 old_stuff/
 tests/
+tests_realsense/
 real2sim_manipulation.egg-info/
 build/
 env/
