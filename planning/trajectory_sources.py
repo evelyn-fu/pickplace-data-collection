@@ -60,7 +60,6 @@ class TrajectoryWithTimingInformationSource(LeafSystem):
         else:
             traj_value = current_traj.trajectory.value(traj_time).ravel()
 
-        # print(traj_value)
         output.SetFromVector(traj_value)
 
 

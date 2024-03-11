@@ -77,10 +77,6 @@ def get_seeded_region(scenario_path, com, rot, dims, q_nominal):
     region = IrisInConfigurationSpace(plant, plant_context, iris_options)
     print("region:", region)
 
-    if not region.PointInSet(q_nominal):
-        print("the fuck?")
-        raise Exception()
-
     return region
 
 
@@ -306,8 +302,8 @@ class TwoGraspPlanner(LeafSystem):
         self.meshcat = meshcat
         self.plant = plant
         self._iiwa_controller_plant = controller_plant
-        self.velocity_limits = 1 * np.ones(7)
-        self.acceleration_limits = 1 * np.ones(7)
+        self.velocity_limits = 0.1 * np.ones(7)
+        self.acceleration_limits = 0.1 * np.ones(7)
         self.regions = None #regions
         self.object_com = None
         self.object_dims = None
@@ -340,7 +336,10 @@ class TwoGraspPlanner(LeafSystem):
             traj_q= context.get_abstract_state(
                 int(self._current_joint_traj_idx)
             ).get_value().trajectory
-            if context.get_time() > traj_q.end_time():
+            start_time = context.get_abstract_state(
+                int(self._current_joint_traj_idx)
+            ).get_value().start_time_s
+            if context.get_time() > traj_q.end_time() + start_time:
                 state.get_mutable_abstract_state(
                     int(self._mode_index)
                 ).set_value(PlannerState.GRASP1)
@@ -357,7 +356,10 @@ class TwoGraspPlanner(LeafSystem):
             traj_q= context.get_abstract_state(
                 int(self._current_joint_traj_idx)
             ).get_value().trajectory
-            if context.get_time() > traj_q.end_time():
+            start_time = context.get_abstract_state(
+                int(self._current_joint_traj_idx)
+            ).get_value().start_time_s
+            if context.get_time() > traj_q.end_time() + start_time:
                 state.get_mutable_abstract_state(
                     int(self._mode_index)
                 ).set_value(PlannerState.GO_TO_PREGRASP2)
@@ -367,7 +369,10 @@ class TwoGraspPlanner(LeafSystem):
             traj_q= context.get_abstract_state(
                 int(self._current_joint_traj_idx)
             ).get_value().trajectory
-            if context.get_time() > traj_q.end_time():
+            start_time = context.get_abstract_state(
+                int(self._current_joint_traj_idx)
+            ).get_value().start_time_s
+            if context.get_time() > traj_q.end_time() + start_time:
                 state.get_mutable_abstract_state(
                     int(self._mode_index)
                 ).set_value(PlannerState.GRASP2)
@@ -384,7 +389,10 @@ class TwoGraspPlanner(LeafSystem):
             traj_q= context.get_abstract_state(
                 int(self._current_joint_traj_idx)
             ).get_value().trajectory
-            if context.get_time() > traj_q.end_time():
+            start_time = context.get_abstract_state(
+                int(self._current_joint_traj_idx)
+            ).get_value().start_time_s
+            if context.get_time() > traj_q.end_time() + start_time:
                 state.get_mutable_abstract_state(
                     int(self._mode_index)
                 ).set_value(PlannerState.DONE)
@@ -643,12 +651,12 @@ class TwoGraspPlanner(LeafSystem):
             #     p=[0.4956561905765808, -0.008295454081149959, 0.3428158221666631],
             # )] # 1 
             grasps = [RigidTransform(
-            R=RotationMatrix([
-                [-0.5332717596714872, -0.8437471920692208, -0.06092541515806397],
-                [-0.8434339726030711, 0.5358526769718512, -0.038484314221555085],
-                [0.06511807887121664, 0.03086396697457806, -0.9974001460530847],
-            ]),
-            p=[0.5233052699964199, 0.002158190836455807, 0.354312807320992],
+                R=RotationMatrix([
+                    [-0.20844050647336543, -0.9779921178608655, 0.009163659920858486],
+                    [-0.9669276384501052, 0.2074722940685329, 0.14834483204764537],
+                    [-0.1469812820138356, 0.022060475877881697, -0.9888932390008593],
+                ]),
+                p=[0.6073802571650899, -0.016139619528128844, 0.351559001325315],
             )]
         else:
             # grasps = [RigidTransform(
@@ -661,11 +669,11 @@ class TwoGraspPlanner(LeafSystem):
             # )] # 1
             grasps = [RigidTransform(
             R=RotationMatrix([
-                [-0.0284911860918694, 0.9460670873736708, 0.32271553805693837],
-                [-0.022211377031914486, -0.32336607226967157, 0.9460132335412826],
-                [0.9993472404752146, 0.019785082592355997, 0.030226535715973897],
-            ]),
-            p=[0.5041238754982477, -0.10045247673094171, 0.23624284773590057],
+                [-0.03442034895124868, 0.9994073003679098, 0.0005362363300874173],
+                [-0.04829586151222898, -0.002199273198199581, 0.9988306527926499],
+                [0.9982398255624083, 0.0343542016167908, 0.04834293632380032],
+            ]) @ RotationMatrix(RollPitchYaw(0, -0.4, 0)),
+            p=[0.5857679659224048, -0.10382563627445854, 0.24689332681875962],
             )]
             # Planning second grasping trajectory
             # self.grasp_node.compute_candidate_grasps(
@@ -695,7 +703,7 @@ class TwoGraspPlanner(LeafSystem):
         manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
         viz_geoms = [manipuland_cloud]
         viz_geoms.append(self.grasp_node.make_gripper_line_set(grasps[0].GetAsMatrix4(), [0.0, 1.0, 0.0]))
-        o3d.visualization.draw_geometries(viz_geoms)
+        # o3d.visualization.draw_geometries(viz_geoms)
 
         return ee_grasps[0]
 

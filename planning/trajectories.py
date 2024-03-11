@@ -95,6 +95,7 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q):
                     sample_times2.append(sample_times2[-1] + (times["display_traj"][0] if i == 0 else times["display_traj"][1]))
                     positions2.append(q_next)
                 else:
+                    print("IK failed at display 1 index", i)
                     if i > 1:
                         last_t = sample_times2[-1]
                         sample_times2 += [last_t + j * times["display_traj"][1] for j in range(1, i-1)]
@@ -119,6 +120,7 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q):
                     sample_times2.append(sample_times2[-1] + times["display_traj"][1])
                     positions2.append(q_next)
                 else:
+                    print("IK failed at display 2 index", i)
                     if i > 1:
                         last_t = sample_times2[-1]
                         sample_times2 += [last_t + j * times["display_traj"][1] for j in range(1, i)]
@@ -142,6 +144,8 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q):
                 orientation_tolerance=0.0,
                 gripper_frame_name="iiwa_link_7",
             )
+            if q_next is None:
+                print("IK failed at", name)
             if name == "prepick" or name == "pick_start":
                 positions1.append(q_next)
             elif name == "place_end" or name == "postplace" and not positions3_failed:
