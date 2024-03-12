@@ -5,6 +5,14 @@ import argparse
 import time
 import os
 
+import sys
+import select
+import tty
+import termios
+
+def isData():
+    return select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], [])
+
 
 def realsense(dirstr="temp"):
     if not os.path.exists(dirstr):
@@ -39,9 +47,9 @@ def realsense(dirstr="temp"):
     config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
 
     if device_product_line == 'L500':
-        config.enable_stream(rs.stream.color, 960, 540, rs.format.bgr8, 30)
+        config.enable_stream(rs.stream.color, 960, 540, rs.format.rgb8, 30)
     else:
-        config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
+        config.enable_stream(rs.stream.color, 640, 480, rs.format.rgb8, 30)
 
     # Start streaming
     profile = pipeline.start(config)
@@ -64,13 +72,16 @@ def realsense(dirstr="temp"):
 
     # Streaming loop
     start_t = time.time()
+    print("Press esc to exit, press any other key to pause/unpause")
+    save_on = True
+    old_settings = termios.tcgetattr(sys.stdin)
     try:
+        tty.setcbreak(sys.stdin.fileno())
         while True:
             time_ms = int((time.time() - start_t) * 1000)
             timestr = f"{time_ms:06d}"
             # Get frameset of color and depth
             frames = pipeline.wait_for_frames()
-            # frames.get_depth_frame() is a 640x360 depth image
 
             # Align the depth frame to color frame
             aligned_frames = align.process(frames)
@@ -86,12 +97,26 @@ def realsense(dirstr="temp"):
             depth_image = np.asanyarray(aligned_depth_frame.get_data())
             color_image = np.asanyarray(color_frame.get_data())
 
-            color_pil = Image.fromarray(color_image)
-            color_pil.save(dirstr+"/rgb/"+timestr+".png")
+            if save_on:
+                color_pil = Image.fromarray(color_image, mode='RGB')
+                color_pil.save(dirstr+"/rgb/"+timestr+".png")
 
-            depth_pil = Image.fromarray(depth_image)
-            depth_pil.save(dirstr+"/depth/"+timestr+".png")
+                depth_pil = Image.fromarray(depth_image)
+                depth_pil.save(dirstr+"/depth/"+timestr+".png")
+
+            if isData():
+                c = sys.stdin.read(1)
+                if c == '\x1b':         # x1b is ESC
+                    break
+                else:
+                    save_on = not save_on
+                    if save_on:
+                        print("unpaused")
+                    else:
+                        print("paused")
+
     finally:
+        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
         pipeline.stop()
 
 if __name__ == "__main__":
