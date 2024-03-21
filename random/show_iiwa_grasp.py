@@ -67,7 +67,8 @@ plant.SetFreeBodyPose(plant_context, plant.GetBodyByName("base_link_mustard"), X
 X_iiwa_base = RigidTransform(RotationMatrix())
 new_positions = plant.GetPositions(plant_context)
 print(new_positions)
-new_positions[:9] = [-0.469,  1.081, -0.438 ,-1.528,  1.464 , 2.094,  0.456, -0.05, 0.05 ]
+# new_positions[:9] = [0.003 , 0.271 , 0.008 ,-1.453 ,-0.015 , 1.3 ,  -1.619, -0.05, 0.05 ]
+new_positions[:9] = [-0.004  ,0.19  , 0.007, -1.514 ,-0.005,  1.237, -1.627, -0.05, 0.05 ]
 plant.SetPositions(plant_context, new_positions)
 print(new_positions)
 

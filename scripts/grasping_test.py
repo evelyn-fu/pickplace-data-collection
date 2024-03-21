@@ -77,6 +77,7 @@ def start_scenario(
         dirstr = "temp", 
         scenario_path="scenario_data_grasping.yml", 
         models_path="scenario_data_grasping.dmd.yaml", 
+        gripper_model_path="",
         pkl1_path="", 
         pkl2_path="", 
         use_hardware=False, 
@@ -221,9 +222,11 @@ def start_scenario(
             meshcat=meshcat,
             regions1=iris_regions1,
             regions2=iris_regions2,
+            trajectories=None,
             scenario_path=os.path.join(dir_path, os.path.join("scenario_datas", models_path)),
             dirstr=dirstr,
-            no_obstacles=no_obstacles))
+            no_obstacles=no_obstacles,
+            gripper_model_path=gripper_model_path))
 
     if use_hardware:
         # Connect the output of external station to the input of internal station
@@ -393,6 +396,11 @@ if __name__ == "__main__":
         help="yaml file with scenario",
     )
     parser.add_argument(
+        "--load_trajectories",
+        action='store_true',
+        help="whether to load compositite bspline trajectories from a directory",
+    )
+    parser.add_argument(
         "--load_pkl_region1",
         action='store_true',
         help="whether to load regions from pkl file",
@@ -419,6 +427,10 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
+    gripper_model_path = "file://./home/evelyn/sources/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_buffer.sdf"
+    if args.use_hardware:
+        gripper_model_path = "file://./home/real2sim/src/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_buffer.sdf"
+
     # Start the visualizer.
     meshcat = StartMeshcat()
 
@@ -426,6 +438,7 @@ if __name__ == "__main__":
     start_scenario(
         save_dir_path, 
         scenario_path= args.scenario_path, 
+        gripper_model_path=gripper_model_path,
         models_path=args.models_path, 
         pkl1_path=args.pkl1_path,
         pkl2_path=args.pkl2_path,

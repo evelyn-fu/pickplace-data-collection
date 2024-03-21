@@ -14,6 +14,7 @@ from planning.trajectory_sources import TrajectoryWithTimingInformationSource
 from planning.gcs import plan_unconstrained_gcs_path_start_to_goal
 from planning.inverse_kinematics import solve_global_inverse_kinematics
 from iiwa_setup_dataclasses.trajectories import TrajectoryWithTimingInformation
+from iiwa_setup_dataclasses.bspline_trajectory import CompositeBsplineTrajectoryAttributes
 from pydrake.systems.framework import LeafSystem
 from pydrake.perception import (
     Concatenate,
@@ -114,7 +115,8 @@ def get_regions(scenario_path, com, rot, dims):
 
     options = mut.IrisFromCliqueCoverOptions()
     options.num_points_per_coverage_check = 5000
-    options.num_points_per_visibility_round = 500
+    options.num_points_per_visibility_round = 1000
+    options.minimum_clique_size = 16
     options.coverage_termination_threshold = 0.7
 
     generator = RandomGenerator(0)
@@ -216,9 +218,11 @@ class TwoGraspPlanner(LeafSystem):
             meshcat, 
             regions1,
             regions2,
+            trajectories,
             scenario_path,
             dirstr,
             no_obstacles,
+            gripper_model_path
         ):
         LeafSystem.__init__(self)
 
@@ -298,7 +302,7 @@ class TwoGraspPlanner(LeafSystem):
 
         self.DeclarePeriodicUnrestrictedUpdateEvent(0.1, 0.0, self.Update)
 
-        self.grasp_node = GraspListener()
+        self.grasp_node = GraspListener(gripper_model_path=gripper_model_path)
         self.meshcat = meshcat
         self.plant = plant
         self._iiwa_controller_plant = controller_plant
@@ -313,7 +317,7 @@ class TwoGraspPlanner(LeafSystem):
         self.use_offline_regions1 = False if regions1 is None else True
         self.use_offline_regions2 = False if regions1 is None else True
         self.scenario_path = scenario_path
-        self.dirstr = dirstr
+        self.savedir = dirstr
         self.no_obstacles = no_obstacles
         self.done = False
 
@@ -397,7 +401,7 @@ class TwoGraspPlanner(LeafSystem):
                     int(self._mode_index)
                 ).set_value(PlannerState.DONE)
                 self.done = True
-                save_trajs_pkl(self.trajectories, self.dirstr)
+                save_trajs_pkl(self.trajectories, self.savedir)
             return
         
     def UpdateInGrasp(self, context, state, after_grasp_state):
@@ -459,6 +463,7 @@ class TwoGraspPlanner(LeafSystem):
         if traj is None:
             logging.error("Failed to find a path to the home positions.")
             exit(1)
+        CompositeBsplineTrajectoryAttributes.log(traj, self.savedir)
 
         breaks = np.linspace(0, traj.end_time(), int(1e3), endpoint=False)
         knots = traj.vector_values(breaks)
@@ -533,7 +538,7 @@ class TwoGraspPlanner(LeafSystem):
                 if not q_goal_in_regions:
                     raise Exception("q_goal not in regions?")
 
-                save_regions_pkl(self.regions, self.scenario_path, self.dirstr, "regions_1")
+                save_regions_pkl(self.regions, self.scenario_path, self.savedir, "regions_1")
             else:
                 self.regions = self.regions1
         else:
@@ -556,7 +561,7 @@ class TwoGraspPlanner(LeafSystem):
                     print("getting seeded region for q goal")
                     self.regions.append(get_seeded_region(self.scenario_path, self.object_com, self.object_rot, self.object_dims, q_goal))
 
-                save_regions_pkl(self.regions, self.scenario_path, self.dirstr, "regions_2")
+                save_regions_pkl(self.regions, self.scenario_path, self.savedir, "regions_2")
             else:
                 self.regions = self.regions2
 
@@ -633,13 +638,24 @@ class TwoGraspPlanner(LeafSystem):
 
         if mode == PlannerState.WAIT_FOR_OBJECTS_TO_SETTLE:
             # Planning first grasping trajectory
+            print("align grasp axis", secondary_component)
+            print("align minor axis", minor_component)
+            self.grasp_node.compute_candidate_grasps(
+                down_sampled_pcd, 
+                num_samples=5,
+                random_seed=5, 
+                align_grasp_axis=principal_component,  
+                align_minor_axis=minor_component,
+                split_axis=1, 
+                minor_split_axis=0
+            )
             # self.grasp_node.compute_candidate_grasps(
             #     down_sampled_pcd, 
             #     num_samples=5,
-            #     random_seed=5, 
-            #     align_grasp_axis=principal_component,  
-            #     align_secondary_axis=minor_component,
-            #     split_axis=1, 
+            #     random_seed=1, 
+            #     align_grasp_axis=secondary_component, 
+            #     align_secondary_axis=minor_component, 
+            #     split_axis=2, 
             #     minor_split_axis=0
             # )
             # grasps = [RigidTransform(
@@ -650,14 +666,14 @@ class TwoGraspPlanner(LeafSystem):
             #     ]),
             #     p=[0.4956561905765808, -0.008295454081149959, 0.3428158221666631],
             # )] # 1 
-            grasps = [RigidTransform(
-                R=RotationMatrix([
-                    [-0.20844050647336543, -0.9779921178608655, 0.009163659920858486],
-                    [-0.9669276384501052, 0.2074722940685329, 0.14834483204764537],
-                    [-0.1469812820138356, 0.022060475877881697, -0.9888932390008593],
-                ]),
-                p=[0.6073802571650899, -0.016139619528128844, 0.351559001325315],
-            )]
+            # grasps = [RigidTransform(
+            #     R=RotationMatrix([
+            #         [-0.20844050647336543, -0.9779921178608655, 0.009163659920858486],
+            #         [-0.9669276384501052, 0.2074722940685329, 0.14834483204764537],
+            #         [-0.1469812820138356, 0.022060475877881697, -0.9888932390008593],
+            #     ]),
+            #     p=[0.6073802571650899, -0.016139619528128844, 0.351559001325315],
+            # )]
         else:
             # grasps = [RigidTransform(
             # R=RotationMatrix([
@@ -667,26 +683,26 @@ class TwoGraspPlanner(LeafSystem):
             # ]),
             # p=[0.5705643119928675, 0.06772450226931172, 0.1909821558295339],
             # )] # 1
-            grasps = [RigidTransform(
-            R=RotationMatrix([
-                [-0.03442034895124868, 0.9994073003679098, 0.0005362363300874173],
-                [-0.04829586151222898, -0.002199273198199581, 0.9988306527926499],
-                [0.9982398255624083, 0.0343542016167908, 0.04834293632380032],
-            ]) @ RotationMatrix(RollPitchYaw(0, -0.4, 0)),
-            p=[0.5857679659224048, -0.10382563627445854, 0.24689332681875962],
-            )]
+            # grasps = [RigidTransform(
+            # R=RotationMatrix([
+            #     [-0.03442034895124868, 0.9994073003679098, 0.0005362363300874173],
+            #     [-0.04829586151222898, -0.002199273198199581, 0.9988306527926499],
+            #     [0.9982398255624083, 0.0343542016167908, 0.04834293632380032],
+            # ]) @ RotationMatrix(RollPitchYaw(0, -0.4, 0)),
+            # p=[0.5857679659224048, -0.10382563627445854, 0.24689332681875962],
+            # )]
             # Planning second grasping trajectory
-            # self.grasp_node.compute_candidate_grasps(
-            #     down_sampled_pcd, 
-            #     num_samples=5,
-            #     random_seed=1, 
-            #     align_grasp_axis=secondary_component, 
-            #     align_secondary_axis=minor_component, 
-            #     split_axis=2, 
-            #     minor_split_axis=0
-            # )
+            self.grasp_node.compute_candidate_grasps(
+                down_sampled_pcd, 
+                num_samples=20,
+                random_seed=1, 
+                align_grasp_axis=secondary_component, 
+                align_minor_axis=minor_component, 
+                split_axis=2, 
+                minor_split_axis=0
+            )
         
-        # grasps = self.grasp_node.get_best_grasps(candidate_num=1)
+        grasps = self.grasp_node.get_best_grasps(candidate_num=1)
 
         print(grasps)
         
@@ -703,7 +719,7 @@ class TwoGraspPlanner(LeafSystem):
         manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
         viz_geoms = [manipuland_cloud]
         viz_geoms.append(self.grasp_node.make_gripper_line_set(grasps[0].GetAsMatrix4(), [0.0, 1.0, 0.0]))
-        # o3d.visualization.draw_geometries(viz_geoms)
+        o3d.visualization.draw_geometries(viz_geoms)
 
         return ee_grasps[0]
 

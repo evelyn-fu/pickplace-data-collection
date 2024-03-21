@@ -3,6 +3,7 @@
 <sdf version="1.7">
   <model name="Schunk_Gripper">
     <link name="body">
+      <pose>0 -0.049133 0 0 0 0</pose>
       <inertial>
         <mass>0.988882</mass>
         <inertia>
@@ -14,7 +15,6 @@
           <izz>0.164814</izz>
         </inertia>
       </inertial>
-      <kinematic>0</kinematic>
       <visual name="visual">
         <geometry>
           <mesh>
@@ -32,17 +32,13 @@
             <size>0.146 0.0725 0.05</size>
           </box>
         </geometry>
-        <drake:proximity_properties>
-          <drake:compliant_hydroelastic/>
-          <drake:hydroelastic_modulus>1.0e4</drake:hydroelastic_modulus>
-        </drake:proximity_properties>
       </collision>
     </link>
     <frame name="body_frame">
       <pose relative_to="body"/>
     </frame>
     <link name="left_finger">
-      <pose>-0.0665 0.028 0 0 3.141592 0</pose>
+      <pose>-0.06 0.028 0 0 3.141592 0</pose>
       <inertial>
         <mass>0.05</mass>
         <inertia>
@@ -54,48 +50,27 @@
           <izz>0.16</izz>
         </inertia>
       </inertial>
-      <kinematic>0</kinematic>
       <visual name="visual">
         <geometry>
           <mesh>
             <scale>1 1 1</scale>
-            <uri>package://drake_models/wsg_50_description/meshes/finger_with_tip.obj</uri>
+            <uri>package://drake_models/wsg_50_description/meshes/finger_without_tip.obj</uri>
           </mesh>
         </geometry>
         <material>
           <diffuse>0.2 0.2 0.2 1</diffuse>
         </material>
       </visual>
-      <collision name="left_tip">
-        <pose> -0.0075 0.031 0 0 0 0 </pose>
-        <geometry>
-          <box>
-            <size>0.003 0.02 0.02</size>
-          </box>
-        </geometry>
-        <drake:proximity_properties>
-          <drake:compliant_hydroelastic/>
-          <drake:hydroelastic_modulus>1.0e4</drake:hydroelastic_modulus>
-          <drake:mu_static>100.0</drake:mu_static>
-          <drake:mu_dynamic>100.0</drake:mu_dynamic>
-        </drake:proximity_properties>
-      </collision>
       <collision name="collision">
         <geometry>
           <box>
             <size>0.012 0.082 0.02</size>
           </box>
         </geometry>
-        <drake:proximity_properties>
-          <drake:compliant_hydroelastic/>
-          <drake:hydroelastic_modulus>1.0e4</drake:hydroelastic_modulus>
-          <drake:mu_static>100.0</drake:mu_static>
-          <drake:mu_dynamic>100.0</drake:mu_dynamic>
-        </drake:proximity_properties>
       </collision>
     </link>
-    <link name="right_finger"> 
-      <pose>0.0665 0.028 0 0 0 0</pose>
+    <link name="right_finger">
+      <pose>0.06 0.028 0 0 0 0</pose>
       <inertial>
         <mass>0.05</mass>
         <inertia>
@@ -107,54 +82,32 @@
           <izz>0.16</izz>
         </inertia>
       </inertial>
-      <kinematic>0</kinematic>
       <visual name="visual">
         <geometry>
           <mesh>
             <scale>1 1 1</scale>
-            <uri>package://drake_models/wsg_50_description/meshes/finger_with_tip.obj</uri>
+            <uri>package://drake_models/wsg_50_description/meshes/finger_without_tip.obj</uri>
           </mesh>
         </geometry>
         <material>
           <diffuse>0.2 0.2 0.2 1</diffuse>
         </material>
       </visual>
-      <collision name="left_tip">
-        <pose> -0.0075 0.031 0 0 0 0 </pose>
-        <geometry>
-          <box>
-            <size>0.003 0.02 0.02</size>
-          </box>
-        </geometry>
-        <drake:proximity_properties>
-          <drake:compliant_hydroelastic/>
-          <drake:hydroelastic_modulus>1.0e4</drake:hydroelastic_modulus>
-          <drake:mu_static>100.0</drake:mu_static>
-          <drake:mu_dynamic>100.0</drake:mu_dynamic>
-        </drake:proximity_properties>
-      </collision>
       <collision name="collision">
         <geometry>
           <box>
             <size>0.012 0.082 0.02</size>
           </box>
         </geometry>
-        <drake:proximity_properties>
-          <drake:compliant_hydroelastic/>
-          <drake:hydroelastic_modulus>1.0e4</drake:hydroelastic_modulus>
-          <drake:mu_static>100.0</drake:mu_static>
-          <drake:mu_dynamic>100.0</drake:mu_dynamic>
-        </drake:proximity_properties>
       </collision>
     </link>
-    <joint name="left_finger_joint" type="fixed">
+    <joint name="left_finger_sliding_joint" type="fixed">
       <parent>body</parent>
       <child>left_finger</child>
     </joint>
-    <joint name="right_finger_joint" type="fixed">
+    <joint name="right_finger_sliding_joint" type="fixed">
       <parent>body</parent>
       <child>right_finger</child>
     </joint>
-    <static>0</static>
   </model>
 </sdf>

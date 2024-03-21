@@ -30,7 +30,7 @@ lock = threading.Lock()
 class GraspListener():
     """The class responsible for computing and evaluation grasp candidates."""
 
-    def __init__(self, hand_finger_path=None):
+    def __init__(self, hand_finger_path=None, gripper_model_path=None):
         if hand_finger_path == None:
             hand_finger_path = os.path.abspath(os.path.join(os.path.dirname( __file__ ), 'misc', 'hand_finger.sdf'))
         self.hand_collision_model = SignedDensityField.from_sdf(hand_finger_path)
@@ -39,7 +39,7 @@ class GraspListener():
         self.plant, self.scene_graph = AddMultibodyPlantSceneGraph(builder, time_step=0.0005)
         parser = Parser(self.plant)
         ConfigureParser(parser)
-        parser.AddModelsFromUrl("package://manipulation/schunk_wsg_50_welded_fingers.sdf")
+        parser.AddModelsFromUrl(gripper_model_path)
         self.plant.Finalize()
 
         diagram = builder.Build()
@@ -169,7 +169,7 @@ class GraspListener():
         dist = self.hand_collision_model.get_distance(pcd_G_np.transpose(0, 2, 1))
         return dist.reshape(len(dist), -1).min(axis=-1)
 
-    def find_minimum_distance(self, pcd, X_WG):
+    def find_minimum_distance(self, pcd, X_WG, thre=0.0):
         """
         By doing line search, compute the maximum allowable distance along the z axis before penetration.
         Return the maximum distance, as well as the new transform. Returns (np.nan, None) if nothing is returned after
@@ -202,7 +202,6 @@ class GraspListener():
             # o3d.visualization.draw_geometries(viz_geoms)
 
             # If the value crossed for the first time, return.
-            thre = 0.0
             if (last_signed_distance > thre) and (signed_distance < thre):
                 return last_signed_distance, X_WGlast
 
@@ -357,7 +356,7 @@ class GraspListener():
             major_split_axis: int,
             minor_split_axis: int,
             align_grasp_axis: List[float]=[0,0,1],
-            align_secondary_axis: List[float]=[1,0,0],
+            align_minor_axis: List[float]=[1,0,0],
             ) -> float:
         """
         Computes a grasp candidate cost based on a weighted sum of:
@@ -372,24 +371,24 @@ class GraspListener():
         """
         R = X_WG.GetAsMatrix4()[:3, :3]
         t = X_WG.GetAsMatrix4()[:3, 3]
-        eff_vertical_vec = R.dot(np.array([0, 1, 0]))
-        eff_horizontal_vec = R.dot(np.array([1, 0, 0]))
+        eff_vertical_vec = R.dot(np.array([0, 0, 1])) # vertical axis of gripper (parallel to fingers)
+        eff_horizontal_vec = R.dot(np.array([0, 1, 0])) # horizontal axis of gripper (line connecting finger tips)
 
         antipodal_cost = -np.sum(
             within_box_pt_normals[1, :] ** 2
         )  # along the x axis of the gripper, larger good (antipodal metric)
-        gripper_axis_alignment_cost = np.abs(eff_vertical_vec @ align_grasp_axis)  # want y axis of gripper to face towards desired axis, larger worse
-        gripper_secondary_alignment_cost = np.abs(eff_horizontal_vec @ align_secondary_axis) # want x axis of gripper to face towards secondary axis (or 180 from)
+        gripper_axis_alignment_cost = -np.abs(eff_vertical_vec @ align_grasp_axis)  # want vertical axis of gripper to face towards desired axis, larger worse
+        gripper_minor_alignment_cost = -np.abs(eff_horizontal_vec @ align_minor_axis) # want horizontal axis of gripper to align with minor axis 
         grasp_height_cost = -t[2]  # prefer higher position
         split_ratio_minor_axis_cost = -split_ratios[minor_split_axis]  # prefer higher split ratio
         split_ratio_major_axis_cost = -split_ratios[major_split_axis]
         cost = (
-            antipodal_cost
-            + 80.0 * gripper_axis_alignment_cost
-            + 20.0 * gripper_secondary_alignment_cost
+            5.0 * antipodal_cost
+            + 8.0 * gripper_axis_alignment_cost
+            + 2.0 * gripper_minor_alignment_cost
             # + 10.0 * grasp_height_cost
             + 1.0 * split_ratio_minor_axis_cost
-            + 10.0 * split_ratio_major_axis_cost
+            + 1.0 * split_ratio_major_axis_cost
         )
         return cost
 
@@ -647,7 +646,7 @@ class GraspListener():
         return line_set
 
     def compute_candidate_grasps(
-        self, pcd: PointCloud, candidate_num=30, num_samples=20, random_seed=5, align_grasp_axis = [0, 0, 1], align_secondary_axis = [1, 0, 0], split_axis=2, minor_split_axis=0
+        self, pcd: PointCloud, candidate_num=30, num_samples=20, random_seed=5, align_grasp_axis = [0, 0, 1], align_minor_axis = [1, 0, 0], split_axis=2, minor_split_axis=0
     ):
         """
         Compute sorted candidate grasps.
@@ -768,12 +767,12 @@ class GraspListener():
                                         split_axis, 
                                         minor_split_axis, 
                                         align_grasp_axis, 
-                                        align_secondary_axis
+                                        align_minor_axis
                                     )
                                 )
                             else:
                                 continue
-            # o3d.visualization.draw_geometries(viz_geoms)
+            o3d.visualization.draw_geometries(viz_geoms)
             print("sequential antipodal grasp time: {:.3f}".format(time.time() - start_time))
 
         else:
