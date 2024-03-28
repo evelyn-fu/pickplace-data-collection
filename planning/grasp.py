@@ -206,6 +206,11 @@ class GraspListener():
                 return last_signed_distance, X_WGlast
 
         # If nothing is returned after line search, discard the sample by sending None.
+        # manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
+        # manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
+        # viz_geoms = [manipuland_cloud]
+        # viz_geoms.append(self.make_gripper_line_set(X_WG.GetAsMatrix4(), [0.0, 1.0, 0.0]))
+        # o3d.visualization.draw_geometries(viz_geoms)
         return np.nan, None
 
     def find_minimum_distance_batch(self, pcds, X_WGs):
@@ -383,7 +388,7 @@ class GraspListener():
         split_ratio_minor_axis_cost = -split_ratios[minor_split_axis]  # prefer higher split ratio
         split_ratio_major_axis_cost = -split_ratios[major_split_axis]
         cost = (
-            5.0 * antipodal_cost
+            2.0 * antipodal_cost
             + 8.0 * gripper_axis_alignment_cost
             + 2.0 * gripper_minor_alignment_cost
             # + 10.0 * grasp_height_cost

@@ -3,6 +3,7 @@ import logging
 import pickle
 import datetime
 import open3d as o3d
+import os
 from scipy.spatial.transform import Rotation as R
 from planning.grasp import GraspListener
 from planning.toppra import reparameterize_with_toppra
@@ -14,7 +15,7 @@ from planning.trajectory_sources import TrajectoryWithTimingInformationSource
 from planning.gcs import plan_unconstrained_gcs_path_start_to_goal
 from planning.inverse_kinematics import solve_global_inverse_kinematics
 from iiwa_setup_dataclasses.trajectories import TrajectoryWithTimingInformation
-from iiwa_setup_dataclasses.bspline_trajectory import CompositeBsplineTrajectoryAttributes
+from iiwa_setup_dataclasses.bspline_trajectory import CompositeBezierCurveTrajectoryAttributes
 from pydrake.systems.framework import LeafSystem
 from pydrake.perception import (
     Concatenate,
@@ -43,7 +44,7 @@ from pydrake.geometry.optimization import IrisOptions, IrisInConfigurationSpace
 from manipulation.meshcat_utils import AddMeshcatTriad
 from enum import Enum
 
-def get_seeded_region(scenario_path, com, rot, dims, q_nominal):
+def get_seeded_region(models_path, com, rot, dims, q_nominal):
     # Get bounding box of object
     rpy = rot.ToRollPitchYaw().vector()
     bounding_box_urdf = """<?xml version="1.0"?>
@@ -66,7 +67,7 @@ def get_seeded_region(scenario_path, com, rot, dims, q_nominal):
     print("getting seeded region around", q_nominal)
     builder = RobotDiagramBuilder()
     plant = builder.plant()
-    builder.parser().AddModels(scenario_path)
+    builder.parser().AddModels(models_path)
     builder.parser().AddModelsFromString(bounding_box_urdf, "urdf")
     diagram = builder.Build()
 
@@ -81,7 +82,7 @@ def get_seeded_region(scenario_path, com, rot, dims, q_nominal):
     return region
 
 
-def get_regions(scenario_path, com, rot, dims):
+def get_regions(models_path, com, rot, dims):
     # Get bounding box of object
     rpy = rot.ToRollPitchYaw().vector()
     bounding_box_urdf = """<?xml version="1.0"?>
@@ -105,7 +106,7 @@ def get_regions(scenario_path, com, rot, dims):
     use_native_cpp_logging()
     params = dict(edge_step_size=0.125)
     builder = RobotDiagramBuilder()
-    builder.parser().AddModels(scenario_path)
+    builder.parser().AddModels(models_path)
     builder.parser().AddModelsFromString(bounding_box_urdf, "urdf")
     iiwa_model_instance_index = builder.plant().GetModelInstanceByName("iiwa")
     wsg_model_instance_index = builder.plant().GetModelInstanceByName("wsg")
@@ -136,22 +137,24 @@ def get_regions(scenario_path, com, rot, dims):
     else:
         print("No solvers available")
 
-def save_regions_pkl(sets, scenario_path, dirstr, name=None):
+def save_regions_pkl(sets, models_path, dirstr, name=None):
     pkl_path = dirstr + f'/{name}.pkl'
     if name == None:
         time_str = datetime.datetime.now().strftime('%d%m%y_%H%M%S')
-        pkl_path = dirstr+f'/{scenario_path.split("/")[-1]}_{time_str}_regions.pkl'
+        pkl_path = dirstr+f'/{models_path.split("/")[-1]}_{time_str}_regions.pkl'
 
     with open(pkl_path, 'wb') as f:
         pickle.dump(sets, f)
 
-def save_trajs_pkl(trajs, dirstr, name=None):
-    pkl_path = dirstr + f'/{name}.pkl'
-    if name == None:
-        pkl_path = dirstr+f'/trajectories.pkl'
-
-    with open(pkl_path, 'wb') as f:
-        pickle.dump(trajs, f)
+def make_trajectory_save_dirs(dirstr, traj_name):
+    if not os.path.exists(dirstr+f"/{traj_name}"):
+        os.makedirs(dirstr+f"/{traj_name}")
+    if not os.path.exists(dirstr+f"/{traj_name}" + "/control_points"):
+        os.makedirs(dirstr+f"/{traj_name}" + "/control_points")
+    if not os.path.exists(dirstr+f"/{traj_name}" + "/start_times"):
+        os.makedirs(dirstr+f"/{traj_name}" + "/start_times")
+    if not os.path.exists(dirstr+f"/{traj_name}" + "/end_times"):
+        os.makedirs(dirstr+f"/{traj_name}" + "/end_times")
 
 def compute_principal_minor_components(pcd):
     cov = np.cov(pcd.T)
@@ -218,8 +221,8 @@ class TwoGraspPlanner(LeafSystem):
             meshcat, 
             regions1,
             regions2,
-            trajectories,
-            scenario_path,
+            traj_dir,
+            models_path,
             dirstr,
             no_obstacles,
             gripper_model_path
@@ -314,14 +317,13 @@ class TwoGraspPlanner(LeafSystem):
         self.object_rot = None
         self.regions1 = regions1
         self.regions2 = regions2
+        self.traj_dir = traj_dir
         self.use_offline_regions1 = False if regions1 is None else True
         self.use_offline_regions2 = False if regions1 is None else True
-        self.scenario_path = scenario_path
+        self.models_path = models_path
         self.savedir = dirstr
         self.no_obstacles = no_obstacles
         self.done = False
-
-        self.trajectories = []
 
     def Update(self, context, state):
         mode = context.get_abstract_state(int(self._mode_index)).get_value()
@@ -401,7 +403,6 @@ class TwoGraspPlanner(LeafSystem):
                     int(self._mode_index)
                 ).set_value(PlannerState.DONE)
                 self.done = True
-                save_trajs_pkl(self.trajectories, self.savedir)
             return
         
     def UpdateInGrasp(self, context, state, after_grasp_state):
@@ -457,13 +458,30 @@ class TwoGraspPlanner(LeafSystem):
         q = self.get_input_port(self._iiwa_position_index).Eval(context)
         q_goal = context.get_discrete_state(self._q0_index).get_value().copy() # initial pose
 
-        traj = plan_unconstrained_gcs_path_start_to_goal(
-            plant=self._iiwa_controller_plant, q_start=q, q_goal=q_goal, regions=self.regions, no_obstacles=self.no_obstacles
-        )
-        if traj is None:
-            logging.error("Failed to find a path to the home positions.")
-            exit(1)
-        CompositeBsplineTrajectoryAttributes.log(traj, self.savedir)
+        if self.traj_dir is not None:
+            if mode == PlannerState.GRASP1:
+                traj = CompositeBezierCurveTrajectoryAttributes.load(self.traj_dir + "/grasp1_gohome_traj/").to_composite_bezier_curve_trajectory()
+            else:
+                traj = CompositeBezierCurveTrajectoryAttributes.load(self.traj_dir + "/grasp2_gohome_traj/").to_composite_bezier_curve_trajectory()
+        else:
+            traj = plan_unconstrained_gcs_path_start_to_goal(
+                plant=self._iiwa_controller_plant, q_start=q, q_goal=q_goal, regions=self.regions, no_obstacles=self.no_obstacles
+            )
+            if traj is None:
+                logging.error("Failed to find a path to the home positions.")
+                exit(1)
+
+            mode = context.get_abstract_state(int(self._mode_index)).get_value()
+        
+        if mode == PlannerState.GRASP1:
+            make_trajectory_save_dirs(self.savedir, "grasp1_gohome_traj")
+            traj_attr = CompositeBezierCurveTrajectoryAttributes.from_composite_bezier_curve_trajectory(traj)
+            traj_attr.log(self.savedir + "/grasp1_gohome_traj/")
+        else:
+            make_trajectory_save_dirs(self.savedir, "grasp2_gohome_traj")
+            traj_attr = CompositeBezierCurveTrajectoryAttributes.from_composite_bezier_curve_trajectory(traj)
+            traj_attr.log(self.savedir + "/grasp2_gohome_traj/")
+
 
         breaks = np.linspace(0, traj.end_time(), int(1e3), endpoint=False)
         knots = traj.vector_values(breaks)
@@ -475,8 +493,6 @@ class TwoGraspPlanner(LeafSystem):
             acceleration_limits=self.acceleration_limits,
             num_grid_points=100,
         )
-
-        self.trajectories.append(toppra_traj)
 
         current_time = context.get_time()
         state.get_mutable_abstract_state(self._current_joint_traj_idx).set_value(
@@ -516,13 +532,13 @@ class TwoGraspPlanner(LeafSystem):
         # Set gcs regions or generate if not given or not ignoring obstacles
         if mode == PlannerState.WAIT_FOR_OBJECTS_TO_SETTLE:
             if not self.use_offline_regions1 and not self.no_obstacles:
-                self.regions = get_regions(self.scenario_path, self.object_com, self.object_rot, self.object_dims)
+                self.regions = get_regions(self.models_path, self.object_com, self.object_rot, self.object_dims)
 
                 # make sure the start and pregrasp positions are in the regions
                 print("getting seeded region for q")
-                self.regions.append(get_seeded_region(self.scenario_path, self.object_com, self.object_rot, self.object_dims, q))
+                self.regions.append(get_seeded_region(self.models_path, self.object_com, self.object_rot, self.object_dims, q))
                 print("getting seeded region for q goal")
-                self.regions.append(get_seeded_region(self.scenario_path, self.object_com, self.object_rot, self.object_dims, q_goal))
+                self.regions.append(get_seeded_region(self.models_path, self.object_com, self.object_rot, self.object_dims, q_goal))
 
                 q_in_regions = False
                 q_goal_in_regions = False
@@ -538,12 +554,12 @@ class TwoGraspPlanner(LeafSystem):
                 if not q_goal_in_regions:
                     raise Exception("q_goal not in regions?")
 
-                save_regions_pkl(self.regions, self.scenario_path, self.savedir, "regions_1")
+                save_regions_pkl(self.regions, self.models_path, self.savedir, "regions_1")
             else:
                 self.regions = self.regions1
         else:
             if not self.use_offline_regions2 and not self.no_obstacles:
-                self.regions = get_regions(self.scenario_path, self.object_com, self.object_rot, self.object_dims)
+                self.regions = get_regions(self.models_path, self.object_com, self.object_rot, self.object_dims)
 
                 q_in_regions = False
                 q_goal_in_regions = False
@@ -555,22 +571,37 @@ class TwoGraspPlanner(LeafSystem):
                 
                 if not q_in_regions:
                     print("getting seeded region for q")
-                    self.regions.append(get_seeded_region(self.scenario_path, self.object_com, self.object_rot, self.object_dims, q))
+                    self.regions.append(get_seeded_region(self.models_path, self.object_com, self.object_rot, self.object_dims, q))
                 
                 if not q_goal_in_regions:
                     print("getting seeded region for q goal")
-                    self.regions.append(get_seeded_region(self.scenario_path, self.object_com, self.object_rot, self.object_dims, q_goal))
+                    self.regions.append(get_seeded_region(self.models_path, self.object_com, self.object_rot, self.object_dims, q_goal))
 
-                save_regions_pkl(self.regions, self.scenario_path, self.savedir, "regions_2")
+                save_regions_pkl(self.regions, self.models_path, self.savedir, "regions_2")
             else:
                 self.regions = self.regions2
 
-        traj = plan_unconstrained_gcs_path_start_to_goal(
-            plant=self._iiwa_controller_plant, q_start=q, q_goal=q_goal, regions=self.regions, no_obstacles=self.no_obstacles
-        )
-        if traj is None:
-            logging.error("Failed to find a path to the grasping start positions.")
-            exit(1)
+        if self.traj_dir is not None:
+            if mode == PlannerState.WAIT_FOR_OBJECTS_TO_SETTLE:
+                traj = CompositeBezierCurveTrajectoryAttributes.load(self.traj_dir + "/grasp1_pregrasp_traj/").to_composite_bezier_curve_trajectory()
+            else:
+                traj = CompositeBezierCurveTrajectoryAttributes.load(self.traj_dir + "/grasp2_pregrasp_traj/").to_composite_bezier_curve_trajectory()
+        else:
+            traj = plan_unconstrained_gcs_path_start_to_goal(
+                plant=self._iiwa_controller_plant, q_start=q, q_goal=q_goal, regions=self.regions, no_obstacles=self.no_obstacles
+            )
+            if traj is None:
+                logging.error("Failed to find a path to the grasping start positions.")
+                exit(1)
+
+        if mode == PlannerState.WAIT_FOR_OBJECTS_TO_SETTLE:
+            make_trajectory_save_dirs(self.savedir, "grasp1_pregrasp_traj")
+            traj_attr = CompositeBezierCurveTrajectoryAttributes.from_composite_bezier_curve_trajectory(traj)
+            traj_attr.log(self.savedir + "/grasp1_pregrasp_traj/")
+        else:
+            make_trajectory_save_dirs(self.savedir, "grasp2_pregrasp_traj")
+            traj_attr = CompositeBezierCurveTrajectoryAttributes.from_composite_bezier_curve_trajectory(traj)
+            traj_attr.log(self.savedir + "/grasp2_pregrasp_traj/")
 
         breaks = np.linspace(0, traj.end_time(), int(1e3), endpoint=False)
         knots = traj.vector_values(breaks)
@@ -581,8 +612,6 @@ class TwoGraspPlanner(LeafSystem):
             velocity_limits=self.velocity_limits,
             acceleration_limits=self.acceleration_limits,
         )
-
-        self.trajectories.append(toppra_traj)
 
         current_time = context.get_time()
         state.get_mutable_abstract_state(self._current_joint_traj_idx).set_value(
@@ -640,22 +669,13 @@ class TwoGraspPlanner(LeafSystem):
             # Planning first grasping trajectory
             print("align grasp axis", secondary_component)
             print("align minor axis", minor_component)
-            self.grasp_node.compute_candidate_grasps(
-                down_sampled_pcd, 
-                num_samples=5,
-                random_seed=5, 
-                align_grasp_axis=principal_component,  
-                align_minor_axis=minor_component,
-                split_axis=1, 
-                minor_split_axis=0
-            )
             # self.grasp_node.compute_candidate_grasps(
             #     down_sampled_pcd, 
             #     num_samples=5,
-            #     random_seed=1, 
-            #     align_grasp_axis=secondary_component, 
-            #     align_secondary_axis=minor_component, 
-            #     split_axis=2, 
+            #     random_seed=5, 
+            #     align_grasp_axis=principal_component,  
+            #     align_minor_axis=minor_component,
+            #     split_axis=1, 
             #     minor_split_axis=0
             # )
             # grasps = [RigidTransform(
@@ -666,14 +686,14 @@ class TwoGraspPlanner(LeafSystem):
             #     ]),
             #     p=[0.4956561905765808, -0.008295454081149959, 0.3428158221666631],
             # )] # 1 
-            # grasps = [RigidTransform(
-            #     R=RotationMatrix([
-            #         [-0.20844050647336543, -0.9779921178608655, 0.009163659920858486],
-            #         [-0.9669276384501052, 0.2074722940685329, 0.14834483204764537],
-            #         [-0.1469812820138356, 0.022060475877881697, -0.9888932390008593],
-            #     ]),
-            #     p=[0.6073802571650899, -0.016139619528128844, 0.351559001325315],
-            # )]
+            grasps = [RigidTransform(
+                R=RotationMatrix([
+                    [-0.20844050647336543, -0.9779921178608655, 0.009163659920858486],
+                    [-0.9669276384501052, 0.2074722940685329, 0.14834483204764537],
+                    [-0.1469812820138356, 0.022060475877881697, -0.9888932390008593],
+                ]),
+                p=[0.6073802571650899, -0.016139619528128844, 0.351559001325315 + 0.01],
+            )]
         else:
             # grasps = [RigidTransform(
             # R=RotationMatrix([
@@ -683,26 +703,26 @@ class TwoGraspPlanner(LeafSystem):
             # ]),
             # p=[0.5705643119928675, 0.06772450226931172, 0.1909821558295339],
             # )] # 1
-            # grasps = [RigidTransform(
-            # R=RotationMatrix([
-            #     [-0.03442034895124868, 0.9994073003679098, 0.0005362363300874173],
-            #     [-0.04829586151222898, -0.002199273198199581, 0.9988306527926499],
-            #     [0.9982398255624083, 0.0343542016167908, 0.04834293632380032],
-            # ]) @ RotationMatrix(RollPitchYaw(0, -0.4, 0)),
-            # p=[0.5857679659224048, -0.10382563627445854, 0.24689332681875962],
-            # )]
+            grasps = [RigidTransform(
+            R=RotationMatrix([
+                [-0.03442034895124868, 0.9994073003679098, 0.0005362363300874173],
+                [-0.04829586151222898, -0.002199273198199581, 0.9988306527926499],
+                [0.9982398255624083, 0.0343542016167908, 0.04834293632380032],
+            ]) @ RotationMatrix(RollPitchYaw(0, -0.4, 0)),
+            p=[0.5857679659224048, -0.10382563627445854 - 0.03, 0.24689332681875962],
+            )]
             # Planning second grasping trajectory
-            self.grasp_node.compute_candidate_grasps(
-                down_sampled_pcd, 
-                num_samples=20,
-                random_seed=1, 
-                align_grasp_axis=secondary_component, 
-                align_minor_axis=minor_component, 
-                split_axis=2, 
-                minor_split_axis=0
-            )
+            # self.grasp_node.compute_candidate_grasps(
+            #     down_sampled_pcd, 
+            #     num_samples=5,
+            #     random_seed=1, 
+            #     align_grasp_axis=secondary_component, 
+            #     align_minor_axis=minor_component, 
+            #     split_axis=2, 
+            #     minor_split_axis=0
+            # )
         
-        grasps = self.grasp_node.get_best_grasps(candidate_num=1)
+        # grasps = self.grasp_node.get_best_grasps(candidate_num=1)
 
         print(grasps)
         
@@ -755,8 +775,6 @@ class TwoGraspPlanner(LeafSystem):
             is_pl=True,
         )
 
-        self.trajectories.append(toppra_traj_pick)
-
         # start pick traj
         current_time = context.get_time()
         state.get_mutable_abstract_state(self._current_joint_traj_idx).set_value(
@@ -786,8 +804,6 @@ class TwoGraspPlanner(LeafSystem):
             is_pl=True,
         )
 
-        self.trajectories.append(toppra_traj)
-
         state.get_mutable_abstract_state(self._current_joint_traj_idx).set_value(
             TrajectoryWithTimingInformation(
                 trajectory=toppra_traj,
@@ -806,8 +822,6 @@ class TwoGraspPlanner(LeafSystem):
             num_grid_points=100,
             is_pl=True,
         )
-
-        self.trajectories.append(toppra_traj)
 
         state.get_mutable_abstract_state(self._current_joint_traj_idx).set_value(
             TrajectoryWithTimingInformation(

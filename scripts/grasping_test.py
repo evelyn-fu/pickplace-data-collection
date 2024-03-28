@@ -49,7 +49,8 @@ def get_regions_static(scenario_path, dirstr):
 
     options = mut.IrisFromCliqueCoverOptions()
     options.num_points_per_coverage_check = 5000
-    options.num_points_per_visibility_round = 500
+    options.num_points_per_visibility_round = 1000
+    options.minimum_clique_size = 16
     options.coverage_termination_threshold = 0.7
 
     generator = RandomGenerator(0)
@@ -76,17 +77,19 @@ def get_regions_static(scenario_path, dirstr):
 def start_scenario(
         dirstr = "temp", 
         scenario_path="scenario_data_grasping.yml", 
-        models_path="scenario_data_grasping.dmd.yaml", 
+        models_path="scenario_data_grasping_no_object.dmd.yaml", 
         gripper_model_path="",
         pkl1_path="", 
         pkl2_path="", 
+        traj_dir="",
         use_hardware=False, 
         save_imgs=False,
         load_pkl_region1=False,
         load_pkl_region2=False,
         use_same_pkl_regions=False,
         static_regions=False,
-        no_obstacles=False
+        no_obstacles=False,
+        load_trajectories=False
     ):
     if load_pkl_region1:
         if pkl1_path == "":
@@ -99,6 +102,12 @@ def start_scenario(
         if pkl2_path == "":
             print("Must provide path to at pkl file to load region 2")
             return
+        
+    if load_trajectories and traj_dir == "":
+        print("Must provide path to directory with trajectories to load trajectories")
+        return
+    if not load_trajectories:
+        traj_dir = None
 
     meshcat.ResetRenderMode()
 
@@ -202,8 +211,7 @@ def start_scenario(
     if load_pkl_region2 and iris_regions2 is None:
         with open(pkl2_path, 'rb') as f:
             iris_regions2 = pickle.load(f)
-
-
+    
     # Set up planner
     planner = builder.AddSystem(TwoGraspPlanner(
             plant, 
@@ -222,8 +230,8 @@ def start_scenario(
             meshcat=meshcat,
             regions1=iris_regions1,
             regions2=iris_regions2,
-            trajectories=None,
-            scenario_path=os.path.join(dir_path, os.path.join("scenario_datas", models_path)),
+            traj_dir=traj_dir,
+            models_path=os.path.join(dir_path, os.path.join("scenario_datas", models_path)),
             dirstr=dirstr,
             no_obstacles=no_obstacles,
             gripper_model_path=gripper_model_path))
@@ -386,6 +394,12 @@ if __name__ == "__main__":
         nargs='?',
     )
     parser.add_argument(
+        "traj_dir",
+        default="",
+        help="path to directory with saved gcs trajectories",
+        nargs='?',
+    )
+    parser.add_argument(
         "--use_hardware",
         action="store_true",
         help="Whether to use real world hardware.",
@@ -394,11 +408,6 @@ if __name__ == "__main__":
         "--save_imgs",
         action='store_true',
         help="yaml file with scenario",
-    )
-    parser.add_argument(
-        "--load_trajectories",
-        action='store_true',
-        help="whether to load compositite bspline trajectories from a directory",
     )
     parser.add_argument(
         "--load_pkl_region1",
@@ -425,6 +434,11 @@ if __name__ == "__main__":
         action='store_true',
         help="if true, plans gcs without any obstacles",
     )
+    parser.add_argument(
+        "--load_trajectories",
+        action='store_true',
+        help="whether to load gcs trajectories from traj_dir",
+    )
     args = parser.parse_args()
 
     gripper_model_path = "file://./home/evelyn/sources/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_buffer.sdf"
@@ -442,11 +456,13 @@ if __name__ == "__main__":
         models_path=args.models_path, 
         pkl1_path=args.pkl1_path,
         pkl2_path=args.pkl2_path,
+        traj_dir=args.traj_dir,
         use_hardware=args.use_hardware, 
         save_imgs=args.save_imgs,
         load_pkl_region1=args.load_pkl_region1,
         load_pkl_region2=args.load_pkl_region2,
         use_same_pkl_regions=args.use_same_pkl_regions,
         static_regions=args.static_regions,
-        no_obstacles=args.no_obstacles
+        no_obstacles=(args.no_obstacles or args.load_trajectories),
+        load_trajectories=args.load_trajectories
     )

@@ -29,7 +29,49 @@
       <collision name="collision">
         <geometry>
           <box>
-            <size>0.146 0.11 0.05</size>
+            <size>0.146 0.0725 0.05</size>
+          </box>
+        </geometry>
+      </collision>
+    </link>
+    <link name="buffer">
+      <visual name="visual">
+        <pose> 0 0.0025 0 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>0.146 0.03 0.05</size>
+          </box>
+        </geometry>
+        <material>
+          <diffuse>0.5 0.5 0.5 1</diffuse>
+        </material>
+      </visual>
+      <collision name="collision">
+        <pose> 0 0.0025 0 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>0.146 0.03 0.05</size>
+          </box>
+        </geometry>
+      </collision>
+    </link>
+    <link name="hand_camera">
+      <visual name="visual">
+      <pose>0 -0.049133 -0.0452 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>0.146 0.0725 0.0404</size>
+          </box>
+        </geometry>
+        <material>
+          <diffuse>0.5 0.5 0.5 1</diffuse>
+        </material>
+      </visual>
+      <collision name="collision">
+      <pose>0 -0.049133 -0.0452 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>0.146 0.0725 0.0404</size>
           </box>
         </geometry>
       </collision>
@@ -108,6 +150,14 @@
     <joint name="right_finger_sliding_joint" type="fixed">
       <parent>body</parent>
       <child>right_finger</child>
+    </joint>
+    <joint name="buffer_to_body" type="fixed">
+      <parent>body</parent>
+      <child>buffer</child>
+    </joint>
+    <joint name="camera_to_body" type="fixed">
+      <parent>body</parent>
+      <child>hand_camera</child>
     </joint>
   </model>
 </sdf>
