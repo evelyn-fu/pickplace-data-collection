@@ -455,6 +455,7 @@ class TwoGraspPlanner(LeafSystem):
         Reset to default home position to move arm out of the way of the camera
         '''
 
+        mode = context.get_abstract_state(int(self._mode_index)).get_value()
         q = self.get_input_port(self._iiwa_position_index).Eval(context)
         q_goal = context.get_discrete_state(self._q0_index).get_value().copy() # initial pose
 
