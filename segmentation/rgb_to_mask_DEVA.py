@@ -2,6 +2,8 @@ import sys
 import os
 from pathlib import Path
 import shutil 
+from PIL import Image
+import numpy as np
 
 def main(argv):
     '''
@@ -25,6 +27,14 @@ def main(argv):
     os.system(f"python {deva_path}/demo/demo_with_text.py --chunk_size 4 --img_path {rgb_path} --amp --temporal_setting semionline --size 480 --output {parent_path}/temp --prompt \"{text_prompt}\" --max_num_objects 1")
     shutil.move(f"{parent_path}/temp/Annotations", mask_dir_path)
     shutil.rmtree(f"{parent_path}/temp")
+
+    for image_path in os.listdir(mask_dir_path):
+        input_path = os.path.join(mask_dir_path, image_path)
+        label_image = np.array(Image.open(input_path))
+        mask = np.uint8(np.where(np.sum(label_image, axis=-1) == 0, 0, 255))
+
+        mask_pil = Image.fromarray(mask)
+        mask_pil.save(input_path)
 
 if __name__ == "__main__":
    main(sys.argv[1:])
