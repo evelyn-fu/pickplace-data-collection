@@ -7,7 +7,7 @@ from pydrake.all import (
 )
 from planning.inverse_kinematics import solve_global_inverse_kinematics
 
-def MakePickAndDisplayGripperFrames(X_G):
+def MakePickAndDisplayGripperFrames(X_G, place_flipped=False):
     """
     Takes a partial specification with X_G["pick"], X_G["prepick"], and
     X_G["display_traj"] (a tuple of two list of poses of any length that begin with the same pose,
@@ -17,7 +17,12 @@ def MakePickAndDisplayGripperFrames(X_G):
     """
     # put down where it was picked up, rotated 180 to show other side
     rot_180 = RigidTransform(RotationMatrix(RollPitchYaw(0, 0, np.pi)))
-    X_G["place"] = X_G["pick"] @ rot_180
+    X_G["place"] = X_G["pick"]
+    if place_flipped:
+        R = X_G["pick"].GetAsMatrix4()[:3, :3]
+        t = X_G["pick"].GetAsMatrix4()[:3, 3]
+        X_G["place"] = rot_180 @ RigidTransform(RotationMatrix(R))
+        X_G["place"].set_translation(t)
 
     X_GprepickGpredisplay = X_G["prepick"].inverse() @ X_G["display_traj"][0][0]
 

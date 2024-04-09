@@ -309,8 +309,8 @@ class TwoGraspPlanner(LeafSystem):
         self.meshcat = meshcat
         self.plant = plant
         self._iiwa_controller_plant = controller_plant
-        self.velocity_limits = 1 * np.ones(7)
-        self.acceleration_limits = 1 * np.ones(7)
+        self.velocity_limits = 0.4 * np.ones(7)
+        self.acceleration_limits = 0.4 * np.ones(7)
         self.regions = None #regions
         self.object_com = None
         self.object_dims = None
@@ -758,14 +758,15 @@ class TwoGraspPlanner(LeafSystem):
         }
 
         X_G["display_traj"] = (yaw_display_traj_negative, yaw_display_traj_positive)
-        X_G, times = MakePickAndDisplayGripperFrames(X_G)
+        place_flipped = (mode == PlannerState.GO_TO_PREGRASP1)
+        X_G, times = MakePickAndDisplayGripperFrames(X_G, place_flipped)
 
         state.get_mutable_abstract_state(int(self._times_index)).set_value(
             times
         )
 
         q = self.get_input_port(self._iiwa_position_index).Eval(context)
-        traj_q1, traj_q2, traj_q3 = MakePickAndDisplayJointPositionsTrajectory(X_G, times, self._iiwa_controller_plant, q, 7)
+        traj_q1, traj_q2, traj_q3 = MakePickAndDisplayJointPositionsTrajectory(X_G, times, self._iiwa_controller_plant, q, 8)
         
         toppra_traj_pick = reparameterize_with_toppra(
             trajectory=traj_q1,
