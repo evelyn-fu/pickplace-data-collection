@@ -53,6 +53,17 @@ def realsense(dirstr="temp"):
 
     # Start streaming
     profile = pipeline.start(config)
+    intr = profile.get_stream(rs.stream.depth).as_video_stream_profile().get_intrinsics()
+    w = intr.width
+    h = intr.height
+    ppx = intr.ppx
+    ppy = intr.ppy
+    fx = intr.fx
+    fy = intr.fy
+    K = np.array([[fx, 0.0, ppx],
+                                 [0.0, fy, ppy],
+                                 [0.0, 0.0, 1.0]])
+    np.savetxt(dirstr+"/cam_K.txt", K)
 
     # Getting the depth sensor's depth scale (see rs-align example for explanation)
     depth_sensor = profile.get_device().first_depth_sensor()

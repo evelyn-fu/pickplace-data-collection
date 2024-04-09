@@ -455,6 +455,7 @@ class TwoGraspPlanner(LeafSystem):
         Reset to default home position to move arm out of the way of the camera
         '''
 
+        mode = context.get_abstract_state(int(self._mode_index)).get_value()
         q = self.get_input_port(self._iiwa_position_index).Eval(context)
         q_goal = context.get_discrete_state(self._q0_index).get_value().copy() # initial pose
 
@@ -734,12 +735,12 @@ class TwoGraspPlanner(LeafSystem):
         # Store grasp pose to use later when making pick + display trajectory
         state.get_mutable_abstract_state(self._grasp_X_G_index).set_value(ee_grasps[0])
 
-        # visualize grasp in o3d
-        manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(down_sampled_pcd.xyzs().T))
-        manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
-        viz_geoms = [manipuland_cloud]
-        viz_geoms.append(self.grasp_node.make_gripper_line_set(grasps[0].GetAsMatrix4(), [0.0, 1.0, 0.0]))
-        o3d.visualization.draw_geometries(viz_geoms)
+        # # visualize grasp in o3d
+        # manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(down_sampled_pcd.xyzs().T))
+        # manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
+        # viz_geoms = [manipuland_cloud]
+        # viz_geoms.append(self.grasp_node.make_gripper_line_set(grasps[0].GetAsMatrix4(), [0.0, 1.0, 0.0]))
+        # o3d.visualization.draw_geometries(viz_geoms)
 
         return ee_grasps[0]
 

@@ -777,7 +777,7 @@ class GraspListener():
                                 )
                             else:
                                 continue
-            o3d.visualization.draw_geometries(viz_geoms)
+            # o3d.visualization.draw_geometries(viz_geoms)
             print("sequential antipodal grasp time: {:.3f}".format(time.time() - start_time))
 
         else:
