@@ -309,8 +309,8 @@ class TwoGraspPlanner(LeafSystem):
         self.meshcat = meshcat
         self.plant = plant
         self._iiwa_controller_plant = controller_plant
-        self.velocity_limits = 0.1 * np.ones(7)
-        self.acceleration_limits = 0.1 * np.ones(7)
+        self.velocity_limits = 1 * np.ones(7)
+        self.acceleration_limits = 1 * np.ones(7)
         self.regions = None #regions
         self.object_com = None
         self.object_dims = None
@@ -635,7 +635,7 @@ class TwoGraspPlanner(LeafSystem):
             cloud = self.get_input_port(i).Eval(context)
 
             # Crop to region of interest.
-            pcd.append(cloud.Crop(lower_xyz=[0.3, -0.5, 0.121], upper_xyz=[1.0, 0.5, 0.32]))
+            pcd.append(cloud.Crop(lower_xyz=[0.3, -0.5, 0.161], upper_xyz=[1.0, 0.5, 0.36]))
             # Estimate normals
             pcd[i].EstimateNormals(radius=0.1, num_closest=30)
 
@@ -693,7 +693,7 @@ class TwoGraspPlanner(LeafSystem):
                     [-0.9669276384501052, 0.2074722940685329, 0.14834483204764537],
                     [-0.1469812820138356, 0.022060475877881697, -0.9888932390008593],
                 ]),
-                p=[0.6073802571650899, -0.016139619528128844, 0.351559001325315 + 0.01],
+                p=[0.6073802571650899, -0.016139619528128844, 0.351559001325315 + 0.05],
             )]
         else:
             # grasps = [RigidTransform(
@@ -710,7 +710,7 @@ class TwoGraspPlanner(LeafSystem):
                 [-0.04829586151222898, -0.002199273198199581, 0.9988306527926499],
                 [0.9982398255624083, 0.0343542016167908, 0.04834293632380032],
             ]) @ RotationMatrix(RollPitchYaw(0, -0.4, 0)),
-            p=[0.5857679659224048, -0.10382563627445854 - 0.03, 0.24689332681875962],
+            p=[0.5857679659224048, -0.10382563627445854 - 0.04, 0.24689332681875962],
             )]
             # Planning second grasping trajectory
             # self.grasp_node.compute_candidate_grasps(
@@ -765,7 +765,7 @@ class TwoGraspPlanner(LeafSystem):
         )
 
         q = self.get_input_port(self._iiwa_position_index).Eval(context)
-        traj_q1, traj_q2, traj_q3 = MakePickAndDisplayJointPositionsTrajectory(X_G, times, self._iiwa_controller_plant, q)
+        traj_q1, traj_q2, traj_q3 = MakePickAndDisplayJointPositionsTrajectory(X_G, times, self._iiwa_controller_plant, q, 7)
         
         toppra_traj_pick = reparameterize_with_toppra(
             trajectory=traj_q1,

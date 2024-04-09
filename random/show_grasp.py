@@ -35,7 +35,7 @@ builder = DiagramBuilder()
 plant, scene_graph = AddMultibodyPlantSceneGraph(builder, time_step=0.0005)
 parser = Parser(plant)
 ConfigureParser(parser)
-parser.AddModelsFromUrl("file://./home/evelyn/sources/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_buffer.sdf")
+parser.AddModelsFromUrl("file://./home/evelyn/sources/Real2SimObjectManipulation/models/schunk_wsg_50_with_tip_w_buffer.sdf")
 parser.AddModelsFromUrl("package://drake/manipulation/models/ycb/sdf/006_mustard_bottle.sdf")
 plant.Finalize()
 
@@ -58,13 +58,13 @@ X_GgraspGpregrasp = RigidTransform([0, 0.0, -0.15])
 # )
 
 X_G = RigidTransform(
-  R=RotationMatrix([
-    [-0.07695407022646775, -0.8083822133486049, 0.583606261290256],
-    [-0.9078308609565966, 0.29881542961254354, 0.2941980063159417],
-    [-0.41221499120044597, -0.50717604060827, -0.7568693842814194],
-  ]),
-  p=[0.46679165812005635, -0.0360518455274682, 0.3533314571063431],
-)
+                R=RotationMatrix([
+                    [-0.20844050647336543, -0.9779921178608655, 0.009163659920858486],
+                    [-0.9669276384501052, 0.2074722940685329, 0.14834483204764537],
+                    [-0.1469812820138356, 0.022060475877881697, -0.9888932390008593],
+                ]),
+                p=[0.6073802571650899, -0.016139619528128844, 0.351559001325315 + 0.05],
+            )
 
 rot = X_G.GetAsMatrix4()[:3, :3]
 t = X_G.GetAsMatrix4()[:3, 3]
@@ -96,9 +96,10 @@ print(gripper_axis_alignment_cost, gripper_minor_alignment_cost)
 
 X_mustard = RigidTransform(RotationMatrix(RollPitchYaw(-np.pi/2, 0, np.pi/2)), [0.57, 0.0, 0.12])
 X_WGfix = RigidTransform(RotationMatrix(RollPitchYaw(np.pi/2, 0, np.pi/2)))
+rot_180 = RigidTransform(RotationMatrix(RollPitchYaw(0, np.pi, 0)))
 context = diagram.CreateDefaultContext()
 plant_context = plant.GetMyContextFromRoot(context)
-plant.SetFreeBodyPose(plant_context, plant.GetBodyByName("body"), X_G.multiply(X_WGfix))
+plant.SetFreeBodyPose(plant_context, plant.GetBodyByName("body"), X_G.multiply(X_WGfix) @ rot_180)
 plant.SetFreeBodyPose(plant_context, plant.GetBodyByName("base_link_mustard"), X_mustard)
 
 diagram.ForcedPublish(context)
