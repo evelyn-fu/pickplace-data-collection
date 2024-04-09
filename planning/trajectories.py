@@ -2,6 +2,8 @@ import numpy as np
 from pydrake.all import (
     PiecewisePolynomial,
     RigidTransform,
+    RotationMatrix,
+    RollPitchYaw
 )
 from planning.inverse_kinematics import solve_global_inverse_kinematics
 
@@ -13,8 +15,9 @@ def MakePickAndDisplayGripperFrames(X_G):
     and returns a X_G and times with all of the pick and display
     frames populated.
     """
-    # put down where it was picked up, return gripper to initial position
-    X_G["place"] = X_G["pick"]
+    # put down where it was picked up, rotated 180 to show other side
+    rot_180 = RigidTransform(RotationMatrix(RollPitchYaw(0, 0, np.pi)))
+    X_G["place"] = X_G["pick"] @ rot_180
 
     X_GprepickGpredisplay = X_G["prepick"].inverse() @ X_G["display_traj"][0][0]
 
@@ -39,7 +42,7 @@ def MakePickAndDisplayGripperFrames(X_G):
     times["display_traj"] = [time_to_predisplay, 0.5] 
 
     # Prepare to place back down
-    X_G["preplace"] = X_G["postpick"]
+    X_G["preplace"] = RigidTransform(X_G["place"].rotation(), X_G["place"].translation() + [0, 0, 0.09])
     times["preplace"] = time_to_predisplay
 
     # Place back down and allow some time for gripper to open
@@ -49,16 +52,25 @@ def MakePickAndDisplayGripperFrames(X_G):
     times["place_end"] = 2.0
 
     # Go back to prepick pose
-    X_G["postplace"] = X_G["prepick"]
+    X_GgraspGpostgrasp = RigidTransform([0, 0.0, -0.15])
+    X_G["postplace"] = X_G["place"] @ X_GgraspGpostgrasp
     times["postplace"] = 2.0
 
     return X_G, times
 
-def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q):
+def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q, max_display_frames=6):
     """
     Constructs a gripper position trajectory from the plan "sketch".
     Returns three piecewise polynomial trajectories. One for before grasp, one for during, one for after.
     This is in order to close the gripper between these two trajectories.
+
+    X_G: map of gripper poses for each frame, with X_G["display_traj"] being a tuple of two lists, one with frames
+        of the display trajectory in one direction, and one with frames of the display trajectory in the other direction
+    times: map of time to get to each frame
+    plant: plant with iiwa to solve for global IK
+    q: iiwa starting position
+    max_dislay_frames: maximum number of frames from X_G["display_traj"] to add to trajectory, prevents wasting time
+        displaying already seen angles
     """
     sample_times1 = [0.0]
     positions1 = [q]
@@ -80,8 +92,11 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q):
         "postplace",
     ]:
         if name == "display_traj":
+            display_frames = 0
             # display direction 1 till failure
             for i in range(len(X_G["display_traj"][0])):
+                if display_frames == max_display_frames:
+                    break
                 q_next = solve_global_inverse_kinematics(
                     plant=plant,
                     X_G=X_G["display_traj"][0][i],
@@ -94,6 +109,7 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q):
                     q_prev = q_next
                     sample_times2.append(sample_times2[-1] + (times["display_traj"][0] if i == 0 else times["display_traj"][1]))
                     positions2.append(q_next)
+                    display_frames += 1
                 else:
                     print("IK failed at display 1 index", i)
                     if i > 1:
@@ -107,6 +123,8 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q):
 
             # display direction 2 till failure
             for i in range(len(X_G["display_traj"][1])):
+                if display_frames == max_display_frames:
+                    break
                 q_next = solve_global_inverse_kinematics(
                     plant=plant,
                     X_G=X_G["display_traj"][1][i],
@@ -119,6 +137,8 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q):
                     q_prev = q_next
                     sample_times2.append(sample_times2[-1] + times["display_traj"][1])
                     positions2.append(q_next)
+                    if i != 0: # don't double count initial frame, already counted in direction 1
+                        display_frames += 1
                 else:
                     print("IK failed at display 2 index", i)
                     if i > 1:
