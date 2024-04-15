@@ -44,7 +44,7 @@ def MakePickAndDisplayGripperFrames(X_G, place_flipped=False):
     times["pick_end"] = 2.0
 
     # raise object off surface
-    X_G["postpick"] = RigidTransform(X_G["pick"].rotation(), X_G["pick"].translation() + [0, 0, 0.09])
+    X_G["postpick"] = RigidTransform(X_G["pick"].rotation(), X_G["pick"].translation() + [0, 0, 0.15])
     times["postpick"] = 2.0
 
     # Give time to get to start of display trajectory
@@ -55,7 +55,7 @@ def MakePickAndDisplayGripperFrames(X_G, place_flipped=False):
     times["display_traj"] = [time_to_predisplay, 0.5] 
 
     # Prepare to place back down
-    X_G["preplace"] = RigidTransform(X_G["place"].rotation(), X_G["place"].translation() + [0, 0, 0.09])
+    X_G["preplace"] = RigidTransform(X_G["place"].rotation(), X_G["place"].translation() + [0, 0, 0.15])
     times["preplace"] = time_to_predisplay
 
     # Place back down and allow some time for gripper to open
@@ -191,11 +191,11 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q, max_display
                 q_prepick = q_next
             if name == "prepick" or name == "pick_start":
                 positions1.append(q_next)
-            elif name == "place_end" or name == "postplace" and not positions3_failed:
+            elif (name == "place_end" or name == "postplace") and not positions3_failed:
                 if q_next is None:
                     # use the prepick and pick start reversed if this fails since it should be the same thing
                     print(f"IK failed at {name}, using prepick/pick_start positions for postpick/place_end")
-                    positions3 = reversed(positions1)
+                    positions3 = list(reversed(positions1[1:]))
                     positions3_failed = True
                 else:
                     positions3.append(q_next)
