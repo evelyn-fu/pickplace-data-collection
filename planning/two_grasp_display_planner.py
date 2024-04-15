@@ -668,62 +668,68 @@ class TwoGraspPlanner(LeafSystem):
 
         if mode == PlannerState.WAIT_FOR_OBJECTS_TO_SETTLE:
             # Planning first grasping trajectory
-            print("align grasp axis", secondary_component)
-            print("align minor axis", minor_component)
-            # self.grasp_node.compute_candidate_grasps(
-            #     down_sampled_pcd, 
-            #     num_samples=5,
-            #     random_seed=5, 
-            #     align_grasp_axis=principal_component,  
-            #     align_minor_axis=minor_component,
-            #     split_axis=1, 
-            #     minor_split_axis=0
-            # )
+            self.grasp_node.compute_candidate_grasps(
+                down_sampled_pcd, 
+                num_samples=5,
+                random_seed=5, 
+                align_grasp_axis=principal_component,  
+                align_minor_axis=minor_component,
+                split_axis=1, 
+                minor_split_axis=0
+            )
             # grasps = [RigidTransform(
             #     R=RotationMatrix([
-            #         [-0.26319746721208853, -0.9256698903407268, 0.2717762818380754],
-            #         [-0.9566819996188846, 0.28676669060812554, 0.050243574344157924],
-            #         [-0.12444534888196886, -0.24677949524677076, -0.961047988327011],
+            #         [-0.20844050647336543, -0.9779921178608655, 0.009163659920858486],
+            #         [-0.9669276384501052, 0.2074722940685329, 0.14834483204764537],
+            #         [-0.1469812820138356, 0.022060475877881697, -0.9888932390008593],
             #     ]),
-            #     p=[0.4956561905765808, -0.008295454081149959, 0.3428158221666631],
-            # )] # 1 
-            grasps = [RigidTransform(
-                R=RotationMatrix([
-                    [-0.20844050647336543, -0.9779921178608655, 0.009163659920858486],
-                    [-0.9669276384501052, 0.2074722940685329, 0.14834483204764537],
-                    [-0.1469812820138356, 0.022060475877881697, -0.9888932390008593],
-                ]),
-                p=[0.6073802571650899, -0.016139619528128844, 0.351559001325315 + 0.05],
-            )]
+            #     p=[0.6073802571650899, -0.016139619528128844, 0.351559001325315 + 0.05],
+            # )]
+            # grasps = [RigidTransform(
+            #     R=RotationMatrix([
+            #         [0.08472559387264231, -0.941355146773054, 0.3266068912114519],
+            #         [-0.99055979602941, -0.11502579540288305, -0.07456780057174242],
+            #         [0.10776300029741656, -0.3172058543529977, -0.9422141910049345],
+            #     ]),
+            #     p=[0.5692794485487916, 0.011625283538667042, 0.4150752004305674],
+            # )]
+            # grasps = [RigidTransform(
+            # R=RotationMatrix([
+            #     [-0.5992939527909914, -0.7943221285289788, -0.09949429268727963],
+            #     [-0.8004885529668663, 0.5958673409705173, 0.06449952351558598],
+            #     [0.008052000817307088, 0.11829821678249354, -0.9929454653650026],
+            # ]),
+            # p=[0.6107806088259712, -0.006034702576291118, 0.41235102791686445],
+            # )]
         else:
             # grasps = [RigidTransform(
             # R=RotationMatrix([
-            #     [0.0834121306727252, -0.8851583536076943, -0.4577522315567158],
-            #     [0.24095232073015768, 0.46363766580107135, -0.8526324495263393],
-            #     [0.9669459114094168, -0.03917657321730244, 0.25195396508005563],
-            # ]),
-            # p=[0.5705643119928675, 0.06772450226931172, 0.1909821558295339],
-            # )] # 1
-            grasps = [RigidTransform(
-            R=RotationMatrix([
-                [-0.03442034895124868, 0.9994073003679098, 0.0005362363300874173],
-                [-0.04829586151222898, -0.002199273198199581, 0.9988306527926499],
-                [0.9982398255624083, 0.0343542016167908, 0.04834293632380032],
-            ]) @ RotationMatrix(RollPitchYaw(0, -0.4, 0)),
-            p=[0.5857679659224048, -0.10382563627445854 - 0.04, 0.24689332681875962],
-            )]
+            #     [-0.03442034895124868, 0.9994073003679098, 0.0005362363300874173],
+            #     [-0.04829586151222898, -0.002199273198199581, 0.9988306527926499],
+            #     [0.9982398255624083, 0.0343542016167908, 0.04834293632380032],
+            # ]) @ RotationMatrix(RollPitchYaw(0, -0.4, 0)),
+            # p=[0.5857679659224048, -0.10382563627445854 - 0.04, 0.24689332681875962],
+            # )]
+            # grasps = [RigidTransform(
+            # R=RotationMatrix([
+            #     [0.008404247921087992, -0.9997622542022855, 0.02011973382640602],
+            #     [-0.011690311663703053, 0.02002083754059202, 0.9997312152160591],
+            #     [-0.9998963472430967, -0.008637194946147186, -0.011519272258952102],
+            # ]) @ RotationMatrix(RollPitchYaw(0, 0.4, 0)),
+            # p=[0.614956510693794, -0.1215970958857894, 0.262368267226212],
+            # )]
             # Planning second grasping trajectory
-            # self.grasp_node.compute_candidate_grasps(
-            #     down_sampled_pcd, 
-            #     num_samples=5,
-            #     random_seed=1, 
-            #     align_grasp_axis=secondary_component, 
-            #     align_minor_axis=minor_component, 
-            #     split_axis=2, 
-            #     minor_split_axis=0
-            # )
+            self.grasp_node.compute_candidate_grasps(
+                down_sampled_pcd, 
+                num_samples=5,
+                random_seed=1, 
+                align_grasp_axis=secondary_component,
+                align_minor_axis=minor_component, 
+                split_axis=2, 
+                minor_split_axis=0
+            )
         
-        # grasps = self.grasp_node.get_best_grasps(candidate_num=1)
+        grasps = self.grasp_node.get_best_grasps(candidate_num=1)
 
         print(grasps)
         
@@ -735,11 +741,11 @@ class TwoGraspPlanner(LeafSystem):
         # Store grasp pose to use later when making pick + display trajectory
         state.get_mutable_abstract_state(self._grasp_X_G_index).set_value(ee_grasps[0])
 
-        # # visualize grasp in o3d
-        # manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(down_sampled_pcd.xyzs().T))
-        # manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
-        # viz_geoms = [manipuland_cloud]
-        # viz_geoms.append(self.grasp_node.make_gripper_line_set(grasps[0].GetAsMatrix4(), [0.0, 1.0, 0.0]))
+        # visualize grasp in o3d
+        manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(down_sampled_pcd.xyzs().T))
+        manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
+        viz_geoms = [manipuland_cloud]
+        viz_geoms.append(self.grasp_node.make_gripper_line_set(grasps[0].GetAsMatrix4(), [0.0, 1.0, 0.0]))
         # o3d.visualization.draw_geometries(viz_geoms)
 
         return ee_grasps[0]

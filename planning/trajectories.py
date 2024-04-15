@@ -22,7 +22,15 @@ def MakePickAndDisplayGripperFrames(X_G, place_flipped=False):
         R = X_G["pick"].GetAsMatrix4()[:3, :3]
         t = X_G["pick"].GetAsMatrix4()[:3, 3]
         X_G["place"] = rot_180 @ RigidTransform(RotationMatrix(R))
-        X_G["place"].set_translation(t)
+
+        # TODO: calculate translation difference of bottom of gripper given rotation (t is top of gripper, want to place object back in same place)
+        t_gripper_angle = X_G["place"] @ [0, 0, 0.12] # 12 cm is roughly the length of the gripper?
+        t_gripper_angle[2] = 0
+        t_gripper_angle *= 2
+        print(t_gripper_angle)
+        X_G["place"].set_translation(t - t_gripper_angle)
+        print("X_pick", X_G["pick"])
+        print("X_place", X_G["place"])
 
     X_GprepickGpredisplay = X_G["prepick"].inverse() @ X_G["display_traj"][0][0]
 
@@ -59,7 +67,9 @@ def MakePickAndDisplayGripperFrames(X_G, place_flipped=False):
     # Go back to prepick pose
     X_GgraspGpostgrasp = RigidTransform([0, 0.0, -0.15])
     X_G["postplace"] = X_G["place"] @ X_GgraspGpostgrasp
-    times["postplace"] = 2.0
+    times["postplace"] = 1.0
+    X_G["postpostplace"] = X_G["prepick"]
+    times["postpostplace"] = 1.0
 
     return X_G, times
 
@@ -85,6 +95,7 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q, max_display
     positions3 = []
     q_prev = q
     positions3_failed = False
+    q_prepick = None
     for name in [
         "prepick",
         "pick_start",
@@ -95,6 +106,7 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q, max_display
         "place_start",
         "place_end",
         "postplace",
+        "postpostplace"
     ]:
         if name == "display_traj":
             display_frames = 0
@@ -156,10 +168,14 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q, max_display
         else:
             if name == "prepick" or name == "pick_start":
                 sample_times1.append((sample_times1[-1] if len(sample_times1) != 0 else 0) + times[name])
-            elif name == "place_end" or name == "postplace":
+            elif name == "place_end" or name == "postplace" or name == "postpostplace":
                 sample_times3.append((sample_times3[-1] if len(sample_times3) != 0 else 0) + times[name])
             else:
                 sample_times2.append((sample_times2[-1] if len(sample_times2) != 0 else 0) + times[name])
+
+            if name == "postpostplace":
+                positions3.append(q_prepick)
+                continue
 
             q_next = solve_global_inverse_kinematics(
                 plant=plant,
@@ -171,6 +187,8 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q, max_display
             )
             if q_next is None:
                 print("IK failed at", name)
+            if name == "prepick":
+                q_prepick = q_next
             if name == "prepick" or name == "pick_start":
                 positions1.append(q_next)
             elif name == "place_end" or name == "postplace" and not positions3_failed:

@@ -89,7 +89,7 @@ class GraspListener():
         if nvec.dot(normal) > 0:
             nvec = -nvec
 
-        finger_tip_translation = np.array([0, 0, -0.06])
+        finger_tip_translation = np.array([0, 0, 0])
         # need the transform from finger tip to grasp
         R = np.vstack((tvec_major, tvec_minor, nvec))
         if np.linalg.det(R) < 0:
@@ -178,7 +178,7 @@ class GraspListener():
         NOTE: This does not consider the collision scene (e.g. table) but only the object point cloud.
         """
         num_z_samples = 10  # NOTE: The size of this affects the grasp computation time significantly
-        z_grid = np.linspace(-0.05, 0.05, num_z_samples)
+        z_grid = np.linspace(-0.11, -0.01, num_z_samples)
         signed_distance = -np.inf
         X_WGnew = RigidTransform()
 
@@ -187,7 +187,7 @@ class GraspListener():
             last_signed_distance = signed_distance
             X_WGlast = X_WGnew
 
-            # Compute new values.)
+            # Compute new values.
             X_WGnew = X_WG.multiply(RigidTransform([0.0, 0.0, z]))
             # print(z, X_WGnew)
 
@@ -301,7 +301,6 @@ class GraspListener():
     def check_nonempty(self, pcd, X_WG, visualize=False):
         """
         Check if the "closing region" of the gripper is nonempty by transforming the pointclouds to gripper coordinates.
-        Assumes the panda gripper model.
 
         Args:
             - pcd (PointCloud object): pointcloud of the object.
@@ -316,8 +315,8 @@ class GraspListener():
 
         # Bounding box of the closing region written in the coordinate frame of the gripper body.
         # Do not modify
-        crop_min = [-0.02, -0.053, 0.05]  # [-0.054, 0.036, -0.01]
-        crop_max = [0.02, 0.053, 0.105]  # [0.054, 0.117, 0.01]
+        crop_min = [-0.01, -0.053, 0.03]  # [-0.054, 0.036, -0.01]
+        crop_max = [0.01, 0.053, 0.15]  # [0.054, 0.117, 0.01]
 
         # Transform the pointcloud to gripper frame.
         X_GW = X_WG.inverse()
@@ -338,18 +337,14 @@ class GraspListener():
 
         is_nonempty = indices.any()
 
-        # if visualize:
-        #     meshcat.Delete()
-        #     pcd_G = PointCloud(pcd)
-        #     pcd_G.mutable_xyzs()[:] = pcd_G_np
-
-        #     draw_grasp_candidate(RigidTransform())
-        #     meshcat.SetObject("cloud", pcd_G)
-
-        #     box_length = np.array(crop_max) - np.array(crop_min)
-        #     box_center = (np.array(crop_max) + np.array(crop_min)) / 2.0
-        #     meshcat.SetObject("closing_region", Box(box_length[0], box_length[1], box_length[2]), Rgba(1, 0, 0, 0.3))
-        #     meshcat.SetTransform("closing_region", RigidTransform(box_center))
+        if visualize:
+            pcd_closing_region = pcd.xyzs().T[indices, :]
+            pcd_closing_region_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd_closing_region))
+            pcd_closing_region_cloud.paint_uniform_color([1.0, 0.0, 0.0])
+            manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
+            manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
+            viz_geoms = [manipuland_cloud, pcd_closing_region_cloud, self.make_gripper_line_set(X_WG.GetAsMatrix4(), [0.0, 1.0, 0.0])]
+            o3d.visualization.draw_geometries(viz_geoms)
 
         return is_nonempty, pcd_normals_G_np[:, indices]
 
@@ -389,8 +384,8 @@ class GraspListener():
         split_ratio_major_axis_cost = -split_ratios[major_split_axis]
         cost = (
             2.0 * antipodal_cost
-            + 8.0 * gripper_axis_alignment_cost
-            + 2.0 * gripper_minor_alignment_cost
+            + 20.0 * gripper_axis_alignment_cost
+            + 5.0 * gripper_minor_alignment_cost
             # + 10.0 * grasp_height_cost
             + 1.0 * split_ratio_minor_axis_cost
             + 1.0 * split_ratio_major_axis_cost
@@ -636,9 +631,9 @@ class GraspListener():
         hand_anchor_points = np.array(
             [
                 [0.0, 0.0, 0.0],
-                [1.0, 0.0, 0.0],
-                [0.0, 1.0, 0.0],
-                [0.0, 0.0, 1.0],
+                [0.1, 0.0, 0.0],
+                [0.0, 0.1, 0.0],
+                [0.0, 0.0, 0.1],
             ]
         )
         line_index = [[0, 1], [0, 2], [0, 3]]
@@ -678,13 +673,16 @@ class GraspListener():
         y_min = -0.01
         y_max = 0.01
         num_y_samples = 3
-        roll_min = -np.pi / 8
-        roll_max = np.pi / 8
-        num_roll_samples = 10
+        roll_min = -np.pi / 2
+        roll_max = np.pi / 2
+        num_roll_samples = 9
+        pitch_min = -np.pi / 4
+        pitch_max = np.pi / 4
+        num_pitch_samples = 5
         # TODO: Look into exploiting Panda gripper symmetry (grasps rotated by n*pi should be equivalent)
         yaw_min = -np.pi / 2
         yaw_max = np.pi / 2
-        num_yaw_samples = 11
+        num_yaw_samples = 5
 
         np.random.seed(random_seed)
 
@@ -737,46 +735,61 @@ class GraspListener():
             candidate_lst: List[RigidTransform] = []
             candidate_costs: List[float] = []
             for X_WP, split_ratio in zip(X_WPs, split_ratios[darboux_frame_sample_indices]):
-
+                color = np.random.rand(3)
+                color /= np.linalg.norm(color)
+                color = tuple(color)
+                # print("X_WP:", X_WP)
+                # o3d.visualization.draw_geometries([manipuland_cloud, self.make_triad_line_set(X_WP.GetAsMatrix4(), [0.0, 1.0, 0.0]), self.make_gripper_line_set(X_WP.GetAsMatrix4(), [1.0, 0.0, 0.0])])
                 # NOTE: The best variations to sample/ search over is situation/ grasp environment dependent (e.g. bin vs table)
                 for y in np.linspace(y_min, y_max, num_y_samples):
-                    for roll in np.linspace(roll_min, roll_max, num_roll_samples):
-                        for yaw in np.linspace(yaw_min, yaw_max, num_yaw_samples):
-                            # TODO: Explore whether it is faster to do this transform in numpy
-                            X_PPnew = RigidTransform(RollPitchYaw(roll, 0.0, yaw), np.array([0, y, 0]))
-                            X_WPnew = X_WP.multiply(X_PPnew)
+                    for pitch in np.linspace(pitch_min, pitch_max, num_pitch_samples):
+                        # X_ptich_test = X_WP.multiply(RigidTransform(RollPitchYaw(0.0, pitch, 0.0), np.array([0, 0, 0])))
+                        # print("pitch:", pitch)
+                        # o3d.visualization.draw_geometries([manipuland_cloud, self.make_triad_line_set(X_WP.GetAsMatrix4(), [0.0, 1.0, 0.0]), self.make_gripper_line_set(X_ptich_test.GetAsMatrix4(), [1.0, 0.0, 0.0])])
+                        for roll in np.linspace(roll_min, roll_max, num_roll_samples):
+                            # X_roll_test = X_WP.multiply(RigidTransform(RollPitchYaw(roll, 0.0, 0.0), np.array([0, 0, 0])))
+                            # print("roll:", roll)
+                            # o3d.visualization.draw_geometries([manipuland_cloud, self.make_triad_line_set(X_WP.GetAsMatrix4(), [0.0, 1.0, 0.0]), self.make_gripper_line_set(X_roll_test.GetAsMatrix4(), [1.0, 0.0, 0.0])])
+                            for yaw in np.linspace(yaw_min, yaw_max, num_yaw_samples):
+                                # print("yaw:", yaw)
+                                # X_yaw_test = X_WP.multiply(RigidTransform(RollPitchYaw(0.0, 0.0, yaw), np.array([0, 0, 0])))
+                                # o3d.visualization.draw_geometries([manipuland_cloud, self.make_triad_line_set(X_WP.GetAsMatrix4(), [0.0, 1.0, 0.0]), self.make_gripper_line_set(X_yaw_test.GetAsMatrix4(), [1.0, 0.0, 1.0])])
+                                # TODO: Explore whether it is faster to do this transform in numpy
+                                X_PPnew = RigidTransform(RollPitchYaw(roll, pitch, yaw), np.array([0, y, 0]))
+                                X_WPnew = X_WP.multiply(X_PPnew)
 
-                            # visualize
-                            # manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
-                            # manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
-                            # o3d.visualization.draw_geometries([manipuland_cloud, self.make_triad_line_set(X_WP.GetAsMatrix4(), [0.0, 1.0, 0.0])])
-                            # print("darboux frame", X_WP)
+                                # visualize
+                                # manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
+                                # manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
+                                # o3d.visualization.draw_geometries([manipuland_cloud, self.make_triad_line_set(X_WP.GetAsMatrix4(), [0.0, 1.0, 0.0])])
+                                # print("darboux frame", X_WP)
 
-                            # Compute a new transform that minimizes y-direction distance without penetration
-                            distance, X_WPnew = self.find_minimum_distance(pcd, X_WPnew)
-                            # If distance cannot be found, go over to the next iteration
-                            if np.isnan(distance):
-                                continue
+                                # Compute a new transform that minimizes y-direction distance without penetration
+                                distance, X_WPnew = self.find_minimum_distance(pcd, X_WPnew)
+                                # If distance cannot be found, go over to the next iteration
+                                if np.isnan(distance):
+                                    continue
 
-                            # If the candidate has no collisions and the closing region is non
-                            # empty, then append it to the list of candidates.
-                            is_nonempty, within_box_pt_normals = self.check_nonempty(pcd, X_WPnew)
-                            if is_nonempty:
-                                candidate_lst.append(X_WPnew)
-                                viz_geoms.append(self.make_gripper_line_set(X_WPnew.GetAsMatrix4(), [0.0, 1.0, 0.0]))
-                                candidate_costs.append(
-                                    self.compute_costs(
-                                        X_WPnew, 
-                                        within_box_pt_normals, 
-                                        split_ratio, 
-                                        split_axis, 
-                                        minor_split_axis, 
-                                        align_grasp_axis, 
-                                        align_minor_axis
+                                # If the candidate has no collisions and the closing region is non
+                                # empty, then append it to the list of candidates.
+                                is_nonempty, within_box_pt_normals = self.check_nonempty(pcd, X_WPnew)
+                                if is_nonempty:
+                                    candidate_lst.append(X_WPnew)
+                                    viz_geoms.append(self.make_gripper_line_set(X_WPnew.GetAsMatrix4(), color))
+                                    # o3d.visualization.draw_geometries([manipuland_cloud, self.make_triad_line_set(X_WP.GetAsMatrix4(), [0.0, 1.0, 0.0]), self.make_gripper_line_set(X_WPnew.GetAsMatrix4(), [1.0, 0.0, 0.0])])
+                                    candidate_costs.append(
+                                        self.compute_costs(
+                                            X_WPnew, 
+                                            within_box_pt_normals, 
+                                            split_ratio, 
+                                            split_axis, 
+                                            minor_split_axis, 
+                                            align_grasp_axis, 
+                                            align_minor_axis
+                                        )
                                     )
-                                )
-                            else:
-                                continue
+                                else:
+                                    continue
             # o3d.visualization.draw_geometries(viz_geoms)
             print("sequential antipodal grasp time: {:.3f}".format(time.time() - start_time))
 
