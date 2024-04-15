@@ -113,7 +113,15 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q, max_display
             # display direction 1 till failure
             for i in range(len(X_G["display_traj"][0])):
                 if display_frames == max_display_frames:
+                    if i > 1:
+                        last_t = sample_times2[-1]
+                        sample_times2 += [last_t + j * times["display_traj"][1] for j in range(1, i-1)]
+                        reversed_positions = list(positions2[-i:-1].__reversed__())
+                        if len(reversed_positions) > 0:
+                            positions2 += reversed_positions[:-1] # add going backwards, dont add final one since that's assumed to be the first position of the next direction
+                        q_prev = reversed_positions[-1] # start initial guess at first position, since it should be the first position of the next direction
                     break
+
                 q_next = solve_global_inverse_kinematics(
                     plant=plant,
                     X_G=X_G["display_traj"][0][i],
@@ -141,6 +149,10 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q, max_display
             # display direction 2 till failure
             for i in range(len(X_G["display_traj"][1])):
                 if display_frames == max_display_frames:
+                    if i > 1:
+                        last_t = sample_times2[-1]
+                        sample_times2 += [last_t + j * times["display_traj"][1] for j in range(1, i)]
+                        positions2 += list(positions2[-i:-1].__reversed__()) # add going backwards
                     break
                 q_next = solve_global_inverse_kinematics(
                     plant=plant,
@@ -195,7 +207,7 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q, max_display
                 if q_next is None:
                     # use the prepick and pick start reversed if this fails since it should be the same thing
                     print(f"IK failed at {name}, using prepick/pick_start positions for postpick/place_end")
-                    positions3 = list(reversed(positions1[1:]))
+                    positions3 = list(positions1[1:].__reversed__())
                     positions3_failed = True
                 else:
                     positions3.append(q_next)
