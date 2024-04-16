@@ -22,10 +22,12 @@ from scipy.spatial import KDTree
 from scipy.spatial.transform import Rotation as R
 from planning.misc.sdf_tools import SignedDensityField
 import time
-import torch
+import multiprocessing
+from multiprocessing.pool import ThreadPool as Pool
 
 lock = threading.Lock()
 
+PROCESSES = multiprocessing.cpu_count()
 
 class GraspListener():
     """The class responsible for computing and evaluation grasp candidates."""
@@ -373,20 +375,19 @@ class GraspListener():
         t = X_WG.GetAsMatrix4()[:3, 3]
         eff_vertical_vec = R.dot(np.array([0, 0, 1])) # vertical axis of gripper (parallel to fingers)
         eff_horizontal_vec = R.dot(np.array([0, 1, 0])) # horizontal axis of gripper (line connecting finger tips)
-
+        
         antipodal_cost = -np.sum(
             within_box_pt_normals[1, :] ** 2
-        )  # along the x axis of the gripper, larger good (antipodal metric)
-        gripper_axis_alignment_cost = -np.abs(eff_vertical_vec @ align_grasp_axis)  # want vertical axis of gripper to face towards desired axis, larger worse
+        ) / within_box_pt_normals.shape[1]  # along the horizontal axis of the gripper, larger good (antipodal metric)
+
+        gripper_axis_alignment_cost = -np.abs(eff_vertical_vec @ align_grasp_axis)  # want vertical axis of gripper to face towards desired axis
         gripper_minor_alignment_cost = -np.abs(eff_horizontal_vec @ align_minor_axis) # want horizontal axis of gripper to align with minor axis 
-        grasp_height_cost = -t[2]  # prefer higher position
         split_ratio_minor_axis_cost = -split_ratios[minor_split_axis]  # prefer higher split ratio
         split_ratio_major_axis_cost = -split_ratios[major_split_axis]
         cost = (
-            2.0 * antipodal_cost
-            + 20.0 * gripper_axis_alignment_cost
+            20.0 * antipodal_cost
+            + 8.0 * gripper_axis_alignment_cost
             + 5.0 * gripper_minor_alignment_cost
-            # + 10.0 * grasp_height_cost
             + 1.0 * split_ratio_minor_axis_cost
             + 1.0 * split_ratio_major_axis_cost
         )
@@ -682,7 +683,7 @@ class GraspListener():
         # TODO: Look into exploiting Panda gripper symmetry (grasps rotated by n*pi should be equivalent)
         yaw_min = -np.pi / 2
         yaw_max = np.pi / 2
-        num_yaw_samples = 5
+        num_yaw_samples = 9
 
         np.random.seed(random_seed)
 
@@ -727,42 +728,32 @@ class GraspListener():
         viz_geoms = [manipuland_cloud]
 
         PARALLEL = False
+        VISUALIZE = False
+        VISUALIZE_EACH = False
 
         start_time = time.time()
         if not PARALLEL:
-
             # Local grid search around darboux frames
             candidate_lst: List[RigidTransform] = []
             candidate_costs: List[float] = []
             for X_WP, split_ratio in zip(X_WPs, split_ratios[darboux_frame_sample_indices]):
                 color = np.random.rand(3)
                 color /= np.linalg.norm(color)
-                color = tuple(color)
-                # print("X_WP:", X_WP)
-                # o3d.visualization.draw_geometries([manipuland_cloud, self.make_triad_line_set(X_WP.GetAsMatrix4(), [0.0, 1.0, 0.0]), self.make_gripper_line_set(X_WP.GetAsMatrix4(), [1.0, 0.0, 0.0])])
-                # NOTE: The best variations to sample/ search over is situation/ grasp environment dependent (e.g. bin vs table)
+                color = tuple(color)# NOTE: The best variations to sample/ search over is situation/ grasp environment dependent (e.g. bin vs table)
                 for y in np.linspace(y_min, y_max, num_y_samples):
                     for pitch in np.linspace(pitch_min, pitch_max, num_pitch_samples):
-                        # X_ptich_test = X_WP.multiply(RigidTransform(RollPitchYaw(0.0, pitch, 0.0), np.array([0, 0, 0])))
-                        # print("pitch:", pitch)
-                        # o3d.visualization.draw_geometries([manipuland_cloud, self.make_triad_line_set(X_WP.GetAsMatrix4(), [0.0, 1.0, 0.0]), self.make_gripper_line_set(X_ptich_test.GetAsMatrix4(), [1.0, 0.0, 0.0])])
                         for roll in np.linspace(roll_min, roll_max, num_roll_samples):
-                            # X_roll_test = X_WP.multiply(RigidTransform(RollPitchYaw(roll, 0.0, 0.0), np.array([0, 0, 0])))
-                            # print("roll:", roll)
-                            # o3d.visualization.draw_geometries([manipuland_cloud, self.make_triad_line_set(X_WP.GetAsMatrix4(), [0.0, 1.0, 0.0]), self.make_gripper_line_set(X_roll_test.GetAsMatrix4(), [1.0, 0.0, 0.0])])
                             for yaw in np.linspace(yaw_min, yaw_max, num_yaw_samples):
-                                # print("yaw:", yaw)
-                                # X_yaw_test = X_WP.multiply(RigidTransform(RollPitchYaw(0.0, 0.0, yaw), np.array([0, 0, 0])))
-                                # o3d.visualization.draw_geometries([manipuland_cloud, self.make_triad_line_set(X_WP.GetAsMatrix4(), [0.0, 1.0, 0.0]), self.make_gripper_line_set(X_yaw_test.GetAsMatrix4(), [1.0, 0.0, 1.0])])
                                 # TODO: Explore whether it is faster to do this transform in numpy
                                 X_PPnew = RigidTransform(RollPitchYaw(roll, pitch, yaw), np.array([0, y, 0]))
                                 X_WPnew = X_WP.multiply(X_PPnew)
 
-                                # visualize
-                                # manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
-                                # manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
-                                # o3d.visualization.draw_geometries([manipuland_cloud, self.make_triad_line_set(X_WP.GetAsMatrix4(), [0.0, 1.0, 0.0])])
-                                # print("darboux frame", X_WP)
+                                if VISUALIZE:
+                                    # visualize
+                                    manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
+                                    manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
+                                    o3d.visualization.draw_geometries([manipuland_cloud, self.make_triad_line_set(X_WP.GetAsMatrix4(), [0.0, 1.0, 0.0])])
+                                    print("darboux frame", X_WP)
 
                                 # Compute a new transform that minimizes y-direction distance without penetration
                                 distance, X_WPnew = self.find_minimum_distance(pcd, X_WPnew)
@@ -776,7 +767,6 @@ class GraspListener():
                                 if is_nonempty:
                                     candidate_lst.append(X_WPnew)
                                     viz_geoms.append(self.make_gripper_line_set(X_WPnew.GetAsMatrix4(), color))
-                                    # o3d.visualization.draw_geometries([manipuland_cloud, self.make_triad_line_set(X_WP.GetAsMatrix4(), [0.0, 1.0, 0.0]), self.make_gripper_line_set(X_WPnew.GetAsMatrix4(), [1.0, 0.0, 0.0])])
                                     candidate_costs.append(
                                         self.compute_costs(
                                             X_WPnew, 
@@ -788,54 +778,109 @@ class GraspListener():
                                             align_minor_axis
                                         )
                                     )
+                                    if VISUALIZE_EACH:
+                                        # if (candidate_costs[-1] < -250):
+                                        print(candidate_costs[-1])
+                                        o3d.visualization.draw_geometries([manipuland_cloud, self.make_triad_line_set(X_WP.GetAsMatrix4(), [0.0, 1.0, 0.0]), self.make_gripper_line_set(X_WPnew.GetAsMatrix4(), [1.0, 0.0, 0.0])])
                                 else:
                                     continue
-            # o3d.visualization.draw_geometries(viz_geoms)
+
+            if VISUALIZE:
+                o3d.visualization.draw_geometries(viz_geoms)
             print("sequential antipodal grasp time: {:.3f}".format(time.time() - start_time))
 
         else:
-
+            # This is literally slower oof
             y_split = np.linspace(y_min, y_max, num_y_samples)
-
+            pitch_split = np.linspace(pitch_min, pitch_max, num_pitch_samples)
             roll_split = np.linspace(roll_min, roll_max, num_roll_samples)
-            pitch_split = np.zeros_like(roll_split)
             yaw_split = np.linspace(yaw_min, yaw_max, num_yaw_samples)
-            # List of all possible roll, pitch, yaw combinations
-            rot_list = np.stack(np.meshgrid(roll_split, pitch_split, yaw_split), axis=-1).reshape(-1, 3)
-            batch_rot = to_rotation_matrices(torch.from_numpy(rot_list)).detach().numpy()
 
-            pcd_W_np = pcd.xyzs()[np.newaxis, :]
-            pcd_W_normals = pcd.normals()[np.newaxis, :]
+            def check_candidate(X_WP, split_ratio, y, pitch, roll, yaw):
+                X_PPnew = RigidTransform(RollPitchYaw(roll, pitch, yaw), np.array([0, y, 0]))
+                X_WPnew = X_WP.multiply(X_PPnew)
 
-            candidate_lst = []
-            candidate_costs = []
-            for X_WP, split_ratio in zip(X_WPs, split_ratios[darboux_frame_sample_indices]):
-                batch_delta_transform = np.zeros((len(batch_rot), 4, 4))
-                batch_delta_transform[:, :3, :3] = batch_rot
-                batch_delta_transform[:, :3, 1] = y_split
-                X_WP_batch = X_WP.GetAsMatrix4()[np.newaxis, :] @ batch_delta_transform
+                # Compute a new transform that minimizes y-direction distance without penetration
+                distance, X_WPnew = self.find_minimum_distance(pcd, X_WPnew)
+                # If distance cannot be found, go over to the next iteration
+                if np.isnan(distance):
+                    return None, None
 
-                distances, X_WPnew_batch = self.find_minimum_distance_batch(pcd_W_np, X_WP_batch)
-                no_penetration_mask = distances > 0.0
-                X_WPnew_batch_no_penetration = X_WPnew_batch[no_penetration_mask]
-                if len(X_WPnew_batch_no_penetration) == 0:
-                    continue
+                # If the candidate has no collisions and the closing region is non
+                # empty, then append it to the list of candidates.
+                is_nonempty, within_box_pt_normals = self.check_nonempty(pcd, X_WPnew)
+                if is_nonempty:
+                    candidate = X_WPnew
+                    candidate_cost = self.compute_costs(
+                                        X_WPnew, 
+                                        within_box_pt_normals, 
+                                        split_ratio, 
+                                        split_axis, 
+                                        minor_split_axis, 
+                                        align_grasp_axis, 
+                                        align_minor_axis
+                                    )
+                    return candidate, candidate_cost
+                return None, None
+            def check_candidate_star(args):
+                return check_candidate(*args)
 
-                cage_mask, within_box_pt_normals = self.check_nonempty_batch(
-                    pcd_W_np, pcd_W_normals, X_WPnew_batch_no_penetration
-                )
-                X_WPnew_batch_nonempty = X_WPnew_batch_no_penetration[cage_mask]
-                if len(X_WPnew_batch_nonempty) == 0:
-                    continue
+            candidate_lst: List[RigidTransform] = []
+            candidate_costs: List[float] = []
+            print(f"compute_candidate_grasps PARALLEL. PROCESSES = {PROCESSES}")
+            with Pool(PROCESSES) as pool:
+                tasks = [(X_WP, split_ratio, y, pitch, roll, yaw)
+                         for X_WP, split_ratio in zip(X_WPs, split_ratios[darboux_frame_sample_indices])
+                         for y in y_split
+                         for pitch in pitch_split
+                         for roll in roll_split
+                         for yaw in yaw_split]
+                for candidate, candidate_cost in pool.map(check_candidate_star, tasks):
+                    if candidate != None:
+                        candidate_lst.append(candidate)
+                        candidate_costs.append(candidate_cost)
 
-                grasp_costs = self.compute_costs_batch(X_WPnew_batch_no_penetration, within_box_pt_normals, split_ratio, align_grasp_axis)
+            # y_split = np.linspace(y_min, y_max, num_y_samples)
 
-                # Pick valid grasps and associated costs
-                candidate_lst.append(X_WPnew_batch_nonempty)
-                candidate_costs.append(grasp_costs[cage_mask])
+            # roll_split = np.linspace(roll_min, roll_max, num_roll_samples)
+            # pitch_split = np.zeros_like(roll_split)
+            # yaw_split = np.linspace(yaw_min, yaw_max, num_yaw_samples)
+            # # List of all possible roll, pitch, yaw combinations
+            # rot_list = np.stack(np.meshgrid(roll_split, pitch_split, yaw_split), axis=-1).reshape(-1, 3)
+            # batch_rot = to_rotation_matrices(torch.from_numpy(rot_list)).detach().numpy()
 
-            candidate_lst = np.concatenate(candidate_lst, axis=0)
-            candidate_costs = np.concatenate(candidate_costs, axis=0)
+            # pcd_W_np = pcd.xyzs()[np.newaxis, :]
+            # pcd_W_normals = pcd.normals()[np.newaxis, :]
+
+            # candidate_lst = []
+            # candidate_costs = []
+            # for X_WP, split_ratio in zip(X_WPs, split_ratios[darboux_frame_sample_indices]):
+            #     batch_delta_transform = np.zeros((len(batch_rot), 4, 4))
+            #     batch_delta_transform[:, :3, :3] = batch_rot
+            #     batch_delta_transform[:, :3, 1] = y_split
+            #     X_WP_batch = X_WP.GetAsMatrix4()[np.newaxis, :] @ batch_delta_transform
+
+            #     distances, X_WPnew_batch = self.find_minimum_distance_batch(pcd_W_np, X_WP_batch)
+            #     no_penetration_mask = distances > 0.0
+            #     X_WPnew_batch_no_penetration = X_WPnew_batch[no_penetration_mask]
+            #     if len(X_WPnew_batch_no_penetration) == 0:
+            #         continue
+
+            #     cage_mask, within_box_pt_normals = self.check_nonempty_batch(
+            #         pcd_W_np, pcd_W_normals, X_WPnew_batch_no_penetration
+            #     )
+            #     X_WPnew_batch_nonempty = X_WPnew_batch_no_penetration[cage_mask]
+            #     if len(X_WPnew_batch_nonempty) == 0:
+            #         continue
+
+            #     grasp_costs = self.compute_costs_batch(X_WPnew_batch_no_penetration, within_box_pt_normals, split_ratio, align_grasp_axis)
+
+            #     # Pick valid grasps and associated costs
+            #     candidate_lst.append(X_WPnew_batch_nonempty)
+            #     candidate_costs.append(grasp_costs[cage_mask])
+
+            # candidate_lst = np.concatenate(candidate_lst, axis=0)
+            # candidate_costs = np.concatenate(candidate_costs, axis=0)
 
             print("parallel antipodal grasp time: {:.3f}".format(time.time() - start_time))
 

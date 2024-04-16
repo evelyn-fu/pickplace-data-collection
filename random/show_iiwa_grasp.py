@@ -27,6 +27,7 @@ from manipulation import running_as_notebook
 from manipulation.scenarios import AddFloatingRpyJoint, AddRgbdSensors, ycb
 from manipulation.utils import ConfigureParser
 from manipulation.meshcat_utils import AddMeshcatTriad
+from planning.inverse_kinematics import solve_global_inverse_kinematics
 
 # Start the visualizer.
 meshcat = StartMeshcat()
@@ -67,9 +68,27 @@ plant.SetFreeBodyPose(plant_context, plant.GetBodyByName("base_link_mustard"), X
 X_iiwa_base = RigidTransform(RotationMatrix())
 new_positions = plant.GetPositions(plant_context)
 print(new_positions)
-# new_positions[:9] = [0.003 , 0.271 , 0.008 ,-1.453 ,-0.015 , 1.3 ,  -1.619, -0.05, 0.05 ]
-new_positions[:9] = [-0.004  ,0.19  , 0.007, -1.514 ,-0.005,  1.237, -1.627, -0.05, 0.05 ]
-plant.SetPositions(plant_context, new_positions)
+
+X_G = RigidTransform(
+  R=RotationMatrix([
+    [0.5295776198751465, 0.846339745369453, -0.05706645192532622],
+    [0.8477111514205422, -0.5304580047265671, -0.0003301193244864655],
+    [-0.030550749330160602, -0.04820104386296692, -0.9983703276269217],
+  ]),
+  p=[0.6078755953524031, 0.011975470771703942, 0.5630797220524787],
+)
+
+q = [0] * 7 + list(new_positions[7:])
+q_goal = solve_global_inverse_kinematics(
+    plant=plant,
+    X_G=X_G,
+    initial_guess=q,
+    position_tolerance=0.01,
+    orientation_tolerance=0.01,
+    gripper_frame_name="iiwa_link_7",
+)
+
+plant.SetPositions(plant_context, q_goal)
 print(new_positions)
 
 diagram.ForcedPublish(context)

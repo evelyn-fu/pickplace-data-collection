@@ -525,6 +525,18 @@ class TwoGraspPlanner(LeafSystem):
         )
         print(q_goal)
         if q_goal is None:
+            print("trying global inverse kinematics with initial guess of all zeros")
+            q_goal = solve_global_inverse_kinematics(
+                plant=self._iiwa_controller_plant,
+                X_G=X_G_prepick,
+                initial_guess=[0] * 7,
+                position_tolerance=0.01,
+                orientation_tolerance=0.01,
+                gripper_frame_name="iiwa_link_7",
+            )
+            print(q_goal)
+
+        if q_goal is None:
             logging.error(
                 "Failed to solve inverse kinematics for the grasping start pose."
             )
@@ -635,7 +647,7 @@ class TwoGraspPlanner(LeafSystem):
             cloud = self.get_input_port(i).Eval(context)
 
             # Crop to region of interest.
-            pcd.append(cloud.Crop(lower_xyz=[0.3, -0.5, 0.161], upper_xyz=[1.0, 0.5, 0.36]))
+            pcd.append(cloud.Crop(lower_xyz=[0.3, -0.5, 0.071], upper_xyz=[1.0, 0.5, 0.27]))
             # Estimate normals
             pcd[i].EstimateNormals(radius=0.1, num_closest=30)
 
@@ -677,47 +689,7 @@ class TwoGraspPlanner(LeafSystem):
                 split_axis=1, 
                 minor_split_axis=0
             )
-            # grasps = [RigidTransform(
-            #     R=RotationMatrix([
-            #         [-0.20844050647336543, -0.9779921178608655, 0.009163659920858486],
-            #         [-0.9669276384501052, 0.2074722940685329, 0.14834483204764537],
-            #         [-0.1469812820138356, 0.022060475877881697, -0.9888932390008593],
-            #     ]),
-            #     p=[0.6073802571650899, -0.016139619528128844, 0.351559001325315 + 0.05],
-            # )]
-            # grasps = [RigidTransform(
-            #     R=RotationMatrix([
-            #         [0.08472559387264231, -0.941355146773054, 0.3266068912114519],
-            #         [-0.99055979602941, -0.11502579540288305, -0.07456780057174242],
-            #         [0.10776300029741656, -0.3172058543529977, -0.9422141910049345],
-            #     ]),
-            #     p=[0.5692794485487916, 0.011625283538667042, 0.4150752004305674],
-            # )]
-            # grasps = [RigidTransform(
-            # R=RotationMatrix([
-            #     [-0.5992939527909914, -0.7943221285289788, -0.09949429268727963],
-            #     [-0.8004885529668663, 0.5958673409705173, 0.06449952351558598],
-            #     [0.008052000817307088, 0.11829821678249354, -0.9929454653650026],
-            # ]),
-            # p=[0.6107806088259712, -0.006034702576291118, 0.41235102791686445],
-            # )]
         else:
-            # grasps = [RigidTransform(
-            # R=RotationMatrix([
-            #     [-0.03442034895124868, 0.9994073003679098, 0.0005362363300874173],
-            #     [-0.04829586151222898, -0.002199273198199581, 0.9988306527926499],
-            #     [0.9982398255624083, 0.0343542016167908, 0.04834293632380032],
-            # ]) @ RotationMatrix(RollPitchYaw(0, -0.4, 0)),
-            # p=[0.5857679659224048, -0.10382563627445854 - 0.04, 0.24689332681875962],
-            # )]
-            # grasps = [RigidTransform(
-            # R=RotationMatrix([
-            #     [0.008404247921087992, -0.9997622542022855, 0.02011973382640602],
-            #     [-0.011690311663703053, 0.02002083754059202, 0.9997312152160591],
-            #     [-0.9998963472430967, -0.008637194946147186, -0.011519272258952102],
-            # ]) @ RotationMatrix(RollPitchYaw(0, 0.4, 0)),
-            # p=[0.614956510693794, -0.1215970958857894, 0.262368267226212],
-            # )]
             # Planning second grasping trajectory
             self.grasp_node.compute_candidate_grasps(
                 down_sampled_pcd, 

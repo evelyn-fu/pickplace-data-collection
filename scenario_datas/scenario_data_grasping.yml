@@ -28,7 +28,7 @@ directives:
     file: file://./home/evelyn/sources/Real2SimObjectManipulation/models/006_mustard_bottle.sdf
     default_free_body_pose:
         base_link_mustard:
-            translation: [0.57, 0.01, 0.16]
+            translation: [0.57, 0.01, 0.07]
             rotation: !Rpy { deg: [0, 0, 110] }
 - add_frame:
     name: table_origin
