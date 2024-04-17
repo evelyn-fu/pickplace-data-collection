@@ -23,7 +23,7 @@ def MakePickAndDisplayGripperFrames(X_G, place_flipped=False):
         t = X_G["pick"].GetAsMatrix4()[:3, 3]
         X_G["place"] = rot_180 @ RigidTransform(RotationMatrix(R))
 
-        # TODO: calculate translation difference of bottom of gripper given rotation (t is top of gripper, want to place object back in same place)
+        # calculate translation difference of bottom of gripper given rotation (t is top of gripper, want to place object back in same place)
         t_gripper_angle = X_G["place"] @ [0, 0, 0.12] # 12 cm is roughly the length of the gripper?
         t_gripper_angle[2] = 0
         t_gripper_angle *= 2
@@ -32,7 +32,7 @@ def MakePickAndDisplayGripperFrames(X_G, place_flipped=False):
         print("X_pick", X_G["pick"])
         print("X_place", X_G["place"])
 
-    X_GprepickGpredisplay = X_G["prepick"].inverse() @ X_G["display_traj"][0][0]
+    X_GprepickGpredisplay = X_G["prepick"].inverse() @ X_G["display_traj"][0]
 
     # Amount of time it takes to GET TO each frame
     times = {"prepick": 0.5}
@@ -40,19 +40,19 @@ def MakePickAndDisplayGripperFrames(X_G, place_flipped=False):
     # Allow some time for the gripper to close.
     X_G["pick_start"] = X_G["pick"]
     X_G["pick_end"] = X_G["pick"]
-    times["pick_start"] = 5.0
-    times["pick_end"] = 2.0
+    times["pick_start"] = 1.0
+    times["pick_end"] = 0.0
 
     # raise object off surface
     X_G["postpick"] = RigidTransform(X_G["pick"].rotation(), X_G["pick"].translation() + [0, 0, 0.15])
-    times["postpick"] = 2.0
+    times["postpick"] = 1.0
 
     # Give time to get to start of display trajectory
-    time_to_predisplay = 10.0 * np.linalg.norm(
+    time_to_predisplay = 5.0 * np.linalg.norm(
         X_GprepickGpredisplay.translation()
     )
     # special case where first value is time to first frame in traj, and second is time to consecutive frames
-    times["display_traj"] = [time_to_predisplay, 0.5] 
+    times["display_traj"] = [time_to_predisplay, 0.1] 
 
     # Prepare to place back down
     X_G["preplace"] = RigidTransform(X_G["place"].rotation(), X_G["place"].translation() + [0, 0, 0.15])
@@ -61,8 +61,8 @@ def MakePickAndDisplayGripperFrames(X_G, place_flipped=False):
     # Place back down and allow some time for gripper to open
     X_G["place_start"] = X_G["place"]
     X_G["place_end"] = X_G["place"]
-    times["place_start"] = 2.0
-    times["place_end"] = 2.0
+    times["place_start"] = 1.0
+    times["place_end"] = 0.0
 
     # Go back to prepick pose
     X_GgraspGpostgrasp = RigidTransform([0, 0.0, -0.15])
@@ -109,74 +109,35 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q, max_display
         "postpostplace"
     ]:
         if name == "display_traj":
-            display_frames = 0
-            # display direction 1 till failure
-            for i in range(len(X_G["display_traj"][0])):
-                if display_frames == max_display_frames:
-                    if i > 1:
-                        last_t = sample_times2[-1]
-                        sample_times2 += [last_t + j * times["display_traj"][1] for j in range(1, i-1)]
-                        reversed_positions = list(positions2[-i:-1].__reversed__())
-                        if len(reversed_positions) > 0:
-                            positions2 += reversed_positions[:-1] # add going backwards, dont add final one since that's assumed to be the first position of the next direction
-                        q_prev = reversed_positions[-1] # start initial guess at first position, since it should be the first position of the next direction
-                    break
-
-                q_next = solve_global_inverse_kinematics(
+            center_found = False
+            for i in range(len(X_G["display_traj"])):
+                q_display_center = solve_global_inverse_kinematics(
                     plant=plant,
-                    X_G=X_G["display_traj"][0][i],
+                    X_G=X_G["display_traj"][i],
                     initial_guess=q_prev,
                     position_tolerance=0.0,
                     orientation_tolerance=0.0,
                     gripper_frame_name="iiwa_link_7",
                 )
-                if q_next is not None:
-                    q_prev = q_next
-                    sample_times2.append(sample_times2[-1] + (times["display_traj"][0] if i == 0 else times["display_traj"][1]))
-                    positions2.append(q_next)
-                    display_frames += 1
-                else:
-                    print("IK failed at display 1 index", i)
-                    if i > 1:
-                        last_t = sample_times2[-1]
-                        sample_times2 += [last_t + j * times["display_traj"][1] for j in range(1, i-1)]
-                        reversed_positions = list(positions2[-i:-1].__reversed__())
-                        if len(reversed_positions) > 0:
-                            positions2 += reversed_positions[:-1] # add going backwards, dont add final one since that's assumed to be the first position of the next direction
-                        q_prev = reversed_positions[-1] # start initial guess at first position, since it should be the first position of the next direction
-                    break
+                if q_display_center is not None:
+                    # construct trajectory of rotating 7th joint
+                    q7s = [0.0, np.pi/4, np.pi/2, 3*np.pi/4, np.pi, 
+                               3*np.pi/4, np.pi/2, np.pi/4, 
+                               0.0, -np.pi/4, -np.pi/2, -3*np.pi/4, -np.pi]
+                    for i in range(len(q7s)):
+                        q_temp = q_display_center.copy()
+                        q_temp[6] = q7s[i]
+                        positions2.append(q_temp)
+                        
+                        if i == 0:
+                            sample_times2.append((sample_times2[-1] if len(sample_times2) != 0 else 0) + times[name][0])
+                        else:
+                            sample_times2.append((sample_times2[-1] if len(sample_times2) != 0 else 0) + times[name][1])
 
-            # display direction 2 till failure
-            for i in range(len(X_G["display_traj"][1])):
-                if display_frames == max_display_frames:
-                    if i > 1:
-                        last_t = sample_times2[-1]
-                        sample_times2 += [last_t + j * times["display_traj"][1] for j in range(1, i)]
-                        positions2 += list(positions2[-i:-1].__reversed__()) # add going backwards
+                    center_found = True
                     break
-                q_next = solve_global_inverse_kinematics(
-                    plant=plant,
-                    X_G=X_G["display_traj"][1][i],
-                    initial_guess=q_prev,
-                    position_tolerance=0.0,
-                    orientation_tolerance=0.0,
-                    gripper_frame_name="iiwa_link_7",
-                )
-                if q_next is not None:
-                    q_prev = q_next
-                    sample_times2.append(sample_times2[-1] + times["display_traj"][1])
-                    positions2.append(q_next)
-                    if i != 0: # don't double count initial frame, already counted in direction 1
-                        display_frames += 1
-                else:
-                    print("IK failed at display 2 index", i)
-                    if i > 1:
-                        last_t = sample_times2[-1]
-                        sample_times2 += [last_t + j * times["display_traj"][1] for j in range(1, i)]
-                        positions2 += list(positions2[-i:-1].__reversed__()) # add going backwards
-                    break
-            
-            q_prev = positions2[-1]
+            if not center_found:
+                raise Exception("Failed to solve global IK for display trajectory center")
         else:
             if name == "prepick" or name == "pick_start":
                 sample_times1.append((sample_times1[-1] if len(sample_times1) != 0 else 0) + times[name])
@@ -199,6 +160,27 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q, max_display
             )
             if q_next is None:
                 print("IK failed at", name)
+                attempts = 0
+                while q_next is None and attempts < 10:
+                    print("trying global inverse kinematics with new initial guess randomized around q")
+                    q_next = solve_global_inverse_kinematics(
+                        plant=plant,
+                        X_G=X_G[name],
+                        initial_guess=q_prev + np.random.normal(0, np.pi/4, 7),
+                        position_tolerance=0.0,
+                        orientation_tolerance=0.0,
+                        gripper_frame_name="iiwa_link_7",
+                    )
+                    attempts += 1
+
+                if q_next is None:
+                    print("IK failed again at", name)
+                else:
+                    print("phew.")
+            
+            if q_next is not None:
+                q_prev = q_next
+
             if name == "prepick":
                 q_prepick = q_next
             if name == "prepick" or name == "pick_start":

@@ -385,7 +385,7 @@ class GraspListener():
         split_ratio_minor_axis_cost = -split_ratios[minor_split_axis]  # prefer higher split ratio
         split_ratio_major_axis_cost = -split_ratios[major_split_axis]
         cost = (
-            20.0 * antipodal_cost
+            10.0 * antipodal_cost
             + 8.0 * gripper_axis_alignment_cost
             + 5.0 * gripper_minor_alignment_cost
             + 1.0 * split_ratio_minor_axis_cost
@@ -779,7 +779,6 @@ class GraspListener():
                                         )
                                     )
                                     if VISUALIZE_EACH:
-                                        # if (candidate_costs[-1] < -250):
                                         print(candidate_costs[-1])
                                         o3d.visualization.draw_geometries([manipuland_cloud, self.make_triad_line_set(X_WP.GetAsMatrix4(), [0.0, 1.0, 0.0]), self.make_gripper_line_set(X_WPnew.GetAsMatrix4(), [1.0, 0.0, 0.0])])
                                 else:

@@ -190,27 +190,15 @@ default_home_pose = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0)), 
 # pregrasp is negative z in the gripper frame
 X_GgraspGpregrasp = RigidTransform([0, 0.0, -0.15])
 
-yaw_display_traj_negative = []
+yaw_display_traj = []
 
-yaw_display_traj_negative.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0)), [0.6, 0.0, 0.54]))
-yaw_display_traj_negative.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi/4)), [0.6, 0.0, 0.54]))
-yaw_display_traj_negative.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi/2)), [0.6, 0.0, 0.54]))
-yaw_display_traj_negative.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -3*np.pi/4)), [0.6, 0.0, 0.54]))
-yaw_display_traj_negative.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi)), [0.6, 0.0, 0.54]))
-yaw_display_traj_negative.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -5*np.pi)), [0.6, 0.0, 0.54]))
-yaw_display_traj_negative.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -3*np.pi/2)), [0.6, 0.0, 0.54]))
-
-yaw_display_traj_positive = []
-
-yaw_display_traj_positive.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0)), [0.6, 0.0, 0.54]))
-yaw_display_traj_positive.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/4)), [0.6, 0.0, 0.54]))
-yaw_display_traj_positive.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/2)), [0.6, 0.0, 0.54]))
-yaw_display_traj_positive.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 3*np.pi/4)), [0.6, 0.0, 0.54]))
-yaw_display_traj_positive.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi)), [0.6, 0.0, 0.54]))
-yaw_display_traj_positive.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 5*np.pi)), [0.6, 0.0, 0.54]))
-yaw_display_traj_positive.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 3*np.pi/2)), [0.6, 0.0, 0.54]))
-
-
+yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0)), [0.6, 0.0, 0.54]))
+yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi/4)), [0.6, 0.0, 0.54]))
+yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi/2)), [0.6, 0.0, 0.54]))
+yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -3*np.pi/4)), [0.6, 0.0, 0.54]))
+yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi)), [0.6, 0.0, 0.54]))
+yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -5*np.pi)), [0.6, 0.0, 0.54]))
+yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -3*np.pi/2)), [0.6, 0.0, 0.54]))
 
 class TwoGraspPlanner(LeafSystem):
     def __init__(
@@ -310,7 +298,9 @@ class TwoGraspPlanner(LeafSystem):
         self.plant = plant
         self._iiwa_controller_plant = controller_plant
         self.velocity_limits = 0.4 * np.ones(7)
+        self.velocity_limits[6] = 1.0
         self.acceleration_limits = 0.4 * np.ones(7)
+        self.acceleration_limits[6] = 1.0
         self.regions = None #regions
         self.object_com = None
         self.object_dims = None
@@ -519,28 +509,29 @@ class TwoGraspPlanner(LeafSystem):
             plant=self._iiwa_controller_plant,
             X_G=X_G_prepick,
             initial_guess=q,
-            position_tolerance=0.01,
-            orientation_tolerance=0.01,
+            position_tolerance=0.0,
+            orientation_tolerance=0.0,
             gripper_frame_name="iiwa_link_7",
         )
-        print(q_goal)
-        if q_goal is None:
-            print("trying global inverse kinematics with initial guess of all zeros")
+        attempts = 0
+        while q_goal is None and attempts < 10:
+            print("trying global inverse kinematics with new initial guess randomized around q")
             q_goal = solve_global_inverse_kinematics(
                 plant=self._iiwa_controller_plant,
                 X_G=X_G_prepick,
-                initial_guess=[0] * 7,
-                position_tolerance=0.01,
-                orientation_tolerance=0.01,
+                initial_guess=q + np.random.normal(0, np.pi/4, 7),
+                position_tolerance=0.0,
+                orientation_tolerance=0.0,
                 gripper_frame_name="iiwa_link_7",
             )
-            print(q_goal)
+            attempts += 1
 
         if q_goal is None:
             logging.error(
                 "Failed to solve inverse kinematics for the grasping start pose."
             )
             exit(1)
+        print(q_goal)
 
         # Set gcs regions or generate if not given or not ignoring obstacles
         if mode == PlannerState.WAIT_FOR_OBJECTS_TO_SETTLE:
@@ -680,28 +671,44 @@ class TwoGraspPlanner(LeafSystem):
 
         if mode == PlannerState.WAIT_FOR_OBJECTS_TO_SETTLE:
             # Planning first grasping trajectory
-            self.grasp_node.compute_candidate_grasps(
-                down_sampled_pcd, 
-                num_samples=5,
-                random_seed=5, 
-                align_grasp_axis=principal_component,  
-                align_minor_axis=minor_component,
-                split_axis=1, 
-                minor_split_axis=0
-            )
+            # self.grasp_node.compute_candidate_grasps(
+            #     down_sampled_pcd, 
+            #     num_samples=5,
+            #     random_seed=5, 
+            #     align_grasp_axis=principal_component,  
+            #     align_minor_axis=minor_component,
+            #     split_axis=1, 
+            #     minor_split_axis=0
+            # )
+            grasps = [RigidTransform(
+            R=RotationMatrix([
+                [0.20681969377898063, 0.9685467022240954, 0.1383578688618696],
+                [0.9774142324949082, -0.21081815591263353, 0.014735102781668053],
+                [0.043439985975579215, 0.13218544075814884, -0.9902726780387395],
+            ]),
+            p=[0.5798396344223478, -0.0008122595958626092, 0.3250179079887979],
+            )]
         else:
             # Planning second grasping trajectory
-            self.grasp_node.compute_candidate_grasps(
-                down_sampled_pcd, 
-                num_samples=5,
-                random_seed=1, 
-                align_grasp_axis=secondary_component,
-                align_minor_axis=minor_component, 
-                split_axis=2, 
-                minor_split_axis=0
-            )
+            # self.grasp_node.compute_candidate_grasps(
+            #     down_sampled_pcd, 
+            #     num_samples=5,
+            #     random_seed=1, 
+            #     align_grasp_axis=secondary_component,
+            #     align_minor_axis=minor_component, 
+            #     split_axis=2, 
+            #     minor_split_axis=0
+            # )
+            grasps = [RigidTransform(
+            R=RotationMatrix([
+                [0.12572403407217733, 0.9917884232805839, 0.023434818182183535],
+                [0.2661806471800798, -0.056479645509977305, 0.9622670693263183],
+                [0.9556889296854982, -0.11474220274023483, -0.2710957332510173],
+            ]),
+            p=[0.5768087034926264, -0.11622951972991928, 0.19546535154771355],
+            )]
         
-        grasps = self.grasp_node.get_best_grasps(candidate_num=1)
+        # grasps = self.grasp_node.get_best_grasps(candidate_num=1)
 
         print(grasps)
         
@@ -735,7 +742,7 @@ class TwoGraspPlanner(LeafSystem):
             "prepick": X_G_prepick
         }
 
-        X_G["display_traj"] = (yaw_display_traj_negative, yaw_display_traj_positive)
+        X_G["display_traj"] = yaw_display_traj
         place_flipped = (mode == PlannerState.GO_TO_PREGRASP1)
         X_G, times = MakePickAndDisplayGripperFrames(X_G, place_flipped)
 
@@ -817,11 +824,11 @@ class TwoGraspPlanner(LeafSystem):
         current_time = context.get_time()
 
         traj_wsg_command = PiecewisePolynomial.FirstOrderHold(
-            [current_time, current_time+3.0],
+            [current_time, current_time+1.0],
             np.hstack([[closed], [opened]]) if direction == "open" else np.hstack([[opened], [closed]]) 
         )
 
-        self._gripper_traj_end_time = current_time + 3.0
+        self._gripper_traj_end_time = current_time + 1.0
 
         state.get_mutable_abstract_state(int(self._traj_wsg_index)).set_value(
             traj_wsg_command
