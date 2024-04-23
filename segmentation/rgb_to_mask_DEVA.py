@@ -42,5 +42,9 @@ def main(argv):
             new_rgb_path = os.path.join(new_rgb_dir, image_path)
             shutil.copy2(old_rgb_path, new_rgb_path)
 
+    old_rgb_dir = argv[2] + "_original"
+    shutil.move(rgb_path, old_rgb_dir)
+    shutil.move(new_rgb_dir, rgb_path)
+
 if __name__ == "__main__":
    main(sys.argv[1:])

@@ -311,6 +311,7 @@ class GraspListener():
         Return:
             - is_nonempty (boolean): boolean set to True if there is a point within the cropped region.
             - pcd_normals_G_np (np.array): pcd normals within the gripper closing region of shape (3, N).
+            - fraction_enclosed: proportion of normals enclosed out of all possible points in PCD
         """
         pcd_W_np = pcd.xyzs()
         pcd_W_normals = pcd.normals()
@@ -347,14 +348,17 @@ class GraspListener():
             manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
             viz_geoms = [manipuland_cloud, pcd_closing_region_cloud, self.make_gripper_line_set(X_WG.GetAsMatrix4(), [0.0, 1.0, 0.0])]
             o3d.visualization.draw_geometries(viz_geoms)
+        
+        fraction_enclosed = len(indices) / (pcd_normals_G_np.shape[1])
 
-        return is_nonempty, pcd_normals_G_np[:, indices]
+        return is_nonempty, pcd_normals_G_np[:, indices], fraction_enclosed
 
     def compute_costs(
             self, 
             X_WG: RigidTransform, 
             within_box_pt_normals: np.ndarray, 
-            split_ratios: float, 
+            fraction_enclosed: float,
+            split_ratios: np.ndarray, 
             major_split_axis: int,
             minor_split_axis: int,
             align_grasp_axis: List[float]=[0,0,1],
@@ -386,10 +390,11 @@ class GraspListener():
         split_ratio_major_axis_cost = -split_ratios[major_split_axis]
         cost = (
             10.0 * antipodal_cost
-            + 8.0 * gripper_axis_alignment_cost
+            + 10.0 * gripper_axis_alignment_cost
             + 5.0 * gripper_minor_alignment_cost
-            + 1.0 * split_ratio_minor_axis_cost
-            + 1.0 * split_ratio_major_axis_cost
+            + 5.0 * split_ratio_minor_axis_cost
+            + 5.0 * split_ratio_major_axis_cost
+            + 5.0 * fraction_enclosed
         )
         return cost
 
@@ -763,7 +768,7 @@ class GraspListener():
 
                                 # If the candidate has no collisions and the closing region is non
                                 # empty, then append it to the list of candidates.
-                                is_nonempty, within_box_pt_normals = self.check_nonempty(pcd, X_WPnew)
+                                is_nonempty, within_box_pt_normals, fraction_enclosed = self.check_nonempty(pcd, X_WPnew)
                                 if is_nonempty:
                                     candidate_lst.append(X_WPnew)
                                     viz_geoms.append(self.make_gripper_line_set(X_WPnew.GetAsMatrix4(), color))
@@ -771,6 +776,7 @@ class GraspListener():
                                         self.compute_costs(
                                             X_WPnew, 
                                             within_box_pt_normals, 
+                                            fraction_enclosed,
                                             split_ratio, 
                                             split_axis, 
                                             minor_split_axis, 
