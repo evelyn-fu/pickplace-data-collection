@@ -121,9 +121,9 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q, max_display
                 )
                 if q_display_center is not None:
                     # construct trajectory of rotating 7th joint
-                    q7s = [0.0, np.pi/4, np.pi/2, 3*np.pi/4, np.pi, 
+                    q7s = [0.0, np.pi/4, np.pi/2, 3*np.pi/4, np.pi * 165.0 / 180.0, 
                                3*np.pi/4, np.pi/2, np.pi/4, 
-                               0.0, -np.pi/4, -np.pi/2, -3*np.pi/4, -np.pi]
+                               0.0, -np.pi/4, -np.pi/2, -3*np.pi/4, -np.pi * 165.0 / 180.0]
                     for i in range(len(q7s)):
                         q_temp = q_display_center.copy()
                         q_temp[6] = q7s[i]
