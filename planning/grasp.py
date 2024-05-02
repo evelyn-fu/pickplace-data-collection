@@ -4,7 +4,7 @@ import time
 import open3d as o3d
 import numpy as np
 import threading
-from typing import List
+from typing import List, Tuple
 import planning.utils.utils as utils
 import os
 from planning.utils.geometry import to_rotation_matrices, se3_inverse_batch
@@ -311,7 +311,7 @@ class GraspListener():
         Return:
             - is_nonempty (boolean): boolean set to True if there is a point within the cropped region.
             - pcd_normals_G_np (np.array): pcd normals within the gripper closing region of shape (3, N).
-            - fraction_enclosed: proportion of normals enclosed out of all possible points in PCD
+            - proportion_enclosed: proportion of normals enclosed out of all possible points in PCD
         """
         pcd_W_np = pcd.xyzs()
         pcd_W_normals = pcd.normals()
@@ -349,26 +349,22 @@ class GraspListener():
             viz_geoms = [manipuland_cloud, pcd_closing_region_cloud, self.make_gripper_line_set(X_WG.GetAsMatrix4(), [0.0, 1.0, 0.0])]
             o3d.visualization.draw_geometries(viz_geoms)
         
-        fraction_enclosed = len(indices) / (pcd_normals_G_np.shape[1])
+        proportion_enclosed = len(indices) / (pcd_normals_G_np.shape[1])
 
-        return is_nonempty, pcd_normals_G_np[:, indices], fraction_enclosed
+        return is_nonempty, pcd_normals_G_np[:, indices], proportion_enclosed
 
     def compute_costs(
             self, 
             X_WG: RigidTransform, 
-            within_box_pt_normals: np.ndarray, 
-            fraction_enclosed: float,
-            split_ratios: np.ndarray, 
-            major_split_axis: int,
-            minor_split_axis: int,
-            align_grasp_axis: List[float]=[0,0,1],
-            align_minor_axis: List[float]=[1,0,0],
+            within_box_pt_normals: np.ndarray,
+            split_ratios: np.ndarray,
+            split_axes = np.ndarray,
             ) -> float:
         """
         Computes a grasp candidate cost based on a weighted sum of:
         - Antipodal (grasp normal) cost (prefer more antipodal)
         - Gripper axis alignment cost (prefer more aligned with given axes)
-        - Vertical position cost (prefer higher grasps)
+        - Split ratio cost (prefer to grasp near middles of object)
 
         :param X_WG: The grasp candidate to compute the cost for.
         :param within_box_pt_normals: Point cloud normals within the gripper closing region of shape (3, N).
@@ -384,17 +380,16 @@ class GraspListener():
             within_box_pt_normals[1, :] ** 2
         ) / within_box_pt_normals.shape[1]  # along the horizontal axis of the gripper, larger good (antipodal metric)
 
-        gripper_axis_alignment_cost = -np.abs(eff_vertical_vec @ align_grasp_axis)  # want vertical axis of gripper to face towards desired axis
-        gripper_minor_alignment_cost = -np.abs(eff_horizontal_vec @ align_minor_axis) # want horizontal axis of gripper to align with minor axis 
-        split_ratio_minor_axis_cost = -split_ratios[minor_split_axis]  # prefer higher split ratio
-        split_ratio_major_axis_cost = -split_ratios[major_split_axis]
+        gripper_vertical_axis_alignment_cost = -np.max(np.abs(eff_vertical_vec @ split_axes))
+        gripper_horizontal_axis_alignment_cost = -np.max(np.abs(eff_horizontal_vec @ split_axes))
+        split_ratio_costs = -split_ratios
+        split_ratio_costs_sorted = np.sort(split_ratio_costs)
         cost = (
             10.0 * antipodal_cost
-            + 10.0 * gripper_axis_alignment_cost
-            + 5.0 * gripper_minor_alignment_cost
-            + 5.0 * split_ratio_minor_axis_cost
-            + 5.0 * split_ratio_major_axis_cost
-            + 5.0 * fraction_enclosed
+            + 10.0 * gripper_vertical_axis_alignment_cost
+            + 5.0 * gripper_horizontal_axis_alignment_cost
+            + 5.0 * split_ratio_costs_sorted[0]
+            + 5.0 * split_ratio_costs_sorted[1]
         )
         return cost
 
@@ -542,11 +537,17 @@ class GraspListener():
         min_point_vals = np.min(pcd_points_axis_aligned, axis=0)
         max_point_vals = np.max(pcd_points_axis_aligned, axis=0)
 
+        # upper bound on distance between points
+        length = np.linalg.norm(max_point_vals - min_point_vals)
+
         # Compute split ratio
         split = np.array([max_point_vals - pcd_points_axis_aligned, pcd_points_axis_aligned - min_point_vals])
         split_ratio = np.min(split, axis=0) / np.max(split, axis=0)
 
-        return split_ratio[:, [0, 1, 2]]
+        # return split axes
+        axes = np.stack([principal_component, secondary_component, minor_component])
+
+        return split_ratio[:, [0, 1, 2]], axes, length
 
 
     @staticmethod
@@ -652,7 +653,7 @@ class GraspListener():
         return line_set
 
     def compute_candidate_grasps(
-        self, pcd: PointCloud, candidate_num=30, num_samples=20, random_seed=5, align_grasp_axis = [0, 0, 1], align_minor_axis = [1, 0, 0], split_axis=2, minor_split_axis=0
+        self, pcd: PointCloud, candidate_num=30, num_samples=20, random_seed=5
     ):
         """
         Compute sorted candidate grasps.
@@ -672,8 +673,7 @@ class GraspListener():
               grasps, sorted based on cost.
         """
 
-        split_ratio_major_axis_threshold = 0.6  # Axis of biggest pcd variation
-        split_ratio_minor_axis_threshold = 0.6  # Axis of smallest pcd variation
+        split_ratio_threshold = 0.6
 
         # NOTE: All num_samples should be odd numbers
         y_min = -0.01
@@ -694,13 +694,11 @@ class GraspListener():
 
         pcd_points = pcd.xyzs().T
 
-        # Filter pcd based on split ratio
-        split_ratios = self.compute_pcd_split_ratio(pcd_points, viz_split_ratio_axes=False)
-        print(split_ratios[:, minor_split_axis])
-        print(split_ratios[:, split_axis])
-        mask = (split_ratios[:, minor_split_axis] > split_ratio_minor_axis_threshold) * (
-            split_ratios[:, split_axis] > split_ratio_major_axis_threshold
-        )
+        # Filter pcd based on split ratio: must pass threshold for any 2/3 axes
+        split_ratios, split_axes, length = self.compute_pcd_split_ratio(pcd_points, viz_split_ratio_axes=False)
+        mask = (split_ratios[:, 0] > split_ratio_threshold) or (split_ratios[:, 1] > split_ratio_threshold) * (
+            split_ratios[:, 1] > split_ratio_threshold) or (split_ratios[:, 2] > split_ratio_threshold) * (
+            split_ratios[:, 2] > split_ratio_threshold) or (split_ratios[:, 0] > split_ratio_threshold)
         split_ratio_filtered_points = pcd_points[mask]
         split_ratio_filtered_normals = pcd.normals()[:, mask].T
 
@@ -768,7 +766,7 @@ class GraspListener():
 
                                 # If the candidate has no collisions and the closing region is non
                                 # empty, then append it to the list of candidates.
-                                is_nonempty, within_box_pt_normals, fraction_enclosed = self.check_nonempty(pcd, X_WPnew)
+                                is_nonempty, within_box_pt_normals, _ = self.check_nonempty(pcd, X_WPnew)
                                 if is_nonempty:
                                     candidate_lst.append(X_WPnew)
                                     viz_geoms.append(self.make_gripper_line_set(X_WPnew.GetAsMatrix4(), color))
@@ -776,12 +774,8 @@ class GraspListener():
                                         self.compute_costs(
                                             X_WPnew, 
                                             within_box_pt_normals, 
-                                            fraction_enclosed,
-                                            split_ratio, 
-                                            split_axis, 
-                                            minor_split_axis, 
-                                            align_grasp_axis, 
-                                            align_minor_axis
+                                            split_ratio,
+                                            split_axes
                                         )
                                     )
                                     if VISUALIZE_EACH:
@@ -819,11 +813,8 @@ class GraspListener():
                     candidate_cost = self.compute_costs(
                                         X_WPnew, 
                                         within_box_pt_normals, 
-                                        split_ratio, 
-                                        split_axis, 
-                                        minor_split_axis, 
-                                        align_grasp_axis, 
-                                        align_minor_axis
+                                        split_ratio,
+                                        split_axes
                                     )
                     return candidate, candidate_cost
                 return None, None
@@ -891,8 +882,49 @@ class GraspListener():
 
         sorted_indices = np.argsort(candidate_costs)
         candidate_lst_sorted = [candidate_lst[idx] for idx in sorted_indices]
+        candidate_costs_sorted = [candidate_costs[idx] for idx in sorted_indices]
 
-        self.grasp_candidates: List[np.ndarray] = candidate_lst_sorted[:candidate_num]
+        # Two grasp selection
+        pairs = []
+        pair_costs = []
+        for i in range(len(candidate_lst_sorted)-1):
+            for j in range(i+1, len(candidate_lst_sorted)):
+                X_WG1 = candidate_lst_sorted[i]
+                X_WG2 = candidate_lst_sorted[j]
+                cost1 = candidate_costs_sorted[i]
+                cost2 = candidate_costs_sorted[j]
+
+                R1 = X_WG1.GetAsMatrix4()[:3, :3]
+                t1 = X_WG1.GetAsMatrix4()[:3, 3]
+                R2 = X_WG2.GetAsMatrix4()[:3, :3]
+                t2 = X_WG2.GetAsMatrix4()[:3, 3]
+
+                # normalized translational distance between grasps, higher better
+                dist_cost = -np.linalg.norm(t1 - t2) / length 
+                
+                # TODO: maybe try to avoid axis alignment? (big gripper fingers, more obstruction when grasping along long axis)
+                R_1_2 = R1.inv() @ R2
+                r = R.from_matrix(R_1_2)
+                angle_of_rotation = np.linalg.norm(r.as_rotvec())
+
+                # normalized distance from 90 degree rotation, lower better
+                rot_cost = np.abs(np.pi/2 - (angle_of_rotation % np.pi)) / (np.pi/2)
+
+                total_cost = (
+                    cost1 + 
+                    cost2 + 
+                    10 * dist_cost + 
+                    10 * rot_cost
+                )
+
+                pairs.append((X_WG1, X_WG2))
+                pair_costs.append(total_cost)
+
+        sorted_pair_indices = np.argsort(pair_costs)
+        pair_lst_sorted = [pairs[idx] for idx in sorted_pair_indices]
+
+        # List of grasp pairs
+        self.grasp_candidates: List[Tuple[np.ndarray]] = pair_lst_sorted[:candidate_num]
 
     def get_best_grasps(self, candidate_num=-1) -> List[np.ndarray]:
         """Returns a list of the `candidate_num` grasps with the lowest cost."""
