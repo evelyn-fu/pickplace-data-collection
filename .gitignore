@@ -5,3 +5,4 @@ tests_realsense/
 real2sim_manipulation.egg-info/
 build/
 env/
+**/__pycache__/
