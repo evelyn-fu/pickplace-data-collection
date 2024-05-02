@@ -6,3 +6,4 @@ real2sim_manipulation.egg-info/
 build/
 env/
 **/__pycache__/
+planning/**/__pycache__/
