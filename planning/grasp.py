@@ -905,10 +905,10 @@ class GraspListener():
                 # TODO: maybe try to avoid axis alignment? (big gripper fingers, more obstruction when grasping along long axis)
                 R_1_2 = R1.inv() @ R2
                 r = R.from_matrix(R_1_2)
-                angle_of_rotation = np.linalg.norm(r.as_rotvec())
+                angle_of_rotation = r.magnitude()
 
                 # normalized distance from 90 degree rotation, lower better
-                rot_cost = np.abs(np.pi/2 - (angle_of_rotation % np.pi)) / (np.pi/2)
+                rot_cost = np.abs(np.pi/2 - angle_of_rotation) / (np.pi/2)
 
                 total_cost = (
                     cost1 + 
