@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<sdf version="1.7">
+  <model name="box2">
+    <link name="box2_body">
+      <visual name="box2_visual">
+        <pose> 0 0 0.1 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>0.15 0.15 0.2</size>
+          </box>
+        </geometry>
+        <material>
+          <diffuse>0.7 0 0 0.3</diffuse>
+        </material>
+      </visual>
+      <collision name="box2">
+        <pose> 0 0 0.1 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>0.15 0.15 0.2</size>
+          </box>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:compliant_hydroelastic/>
+          <drake:hydroelastic_modulus>1e7</drake:hydroelastic_modulus>
+          <drake:mu_dynamic>0.5</drake:mu_dynamic>
+          <drake:hunt_crossley_dissipation>1.25</drake:hunt_crossley_dissipation>
+        </drake:proximity_properties>
+      </collision>
+    </link>
+  </model>
+</sdf>
