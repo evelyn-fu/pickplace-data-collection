@@ -28,7 +28,7 @@ directives:
     file: file://./home/evelyn/sources/Real2SimObjectManipulation/models/006_mustard_bottle.sdf
     default_free_body_pose:
         base_link_mustard:
-            translation: [0.57, 0.01, 0.07]
+            translation: [0.5, 0.01, 0.07]
             rotation: !Rpy { deg: [0, 0, 110] }
 - add_frame:
     name: table_origin
@@ -50,7 +50,7 @@ directives:
     X_PF:
         base_frame: world
         rotation: !Rpy { deg: [0.0, 0.0, 0.0]}
-        translation: [0.6, 0.0, 0]
+        translation: [0.5, 0.0, 0]
 
 - add_model:
     name: box
@@ -67,16 +67,11 @@ directives:
         rotation: !Rpy { deg: [0, 0, 0.0]}
 
 - add_frame:
-    name: camera1_staging
+    name: handeye_camera_staging
     X_PF:
-        base_frame: world
-        rotation: !Rpy { deg: [0, 0, 135.0]}
-
-- add_frame:
-    name: camera2_staging
-    X_PF:
-        base_frame: world
-        rotation: !Rpy { deg: [0, 0, 45.0]}
+        base_frame: iiwa::iiwa_link_7
+        rotation: !Rpy { deg: [3.13656, -3.10567, 1.58405]}
+        translation: [-0.0730357, 0.032904, 0.151341]
 
 - add_frame:
     name: camera0_origin
@@ -94,34 +89,17 @@ directives:
     child: camera_main::base
 
 - add_frame:
-    name: camera1_origin
+    name: handeye_camera_origin
     X_PF:
-        base_frame: camera1_staging
-        rotation: !Rpy { deg: [-100.0, 0, 180.0]}
-        translation: [-.3, 0.3, .24]
+        base_frame: handeye_camera_staging
 
 - add_model:
-    name: camera_1
+    name: handeye_camera
     file: package://manipulation/camera_box.sdf
 
 - add_weld:
-    parent: camera1_origin
-    child: camera_1::base
-
-- add_frame:
-    name: camera2_origin
-    X_PF:
-        base_frame: camera2_staging
-        rotation: !Rpy { deg: [-100.0, 0, 180.0]}
-        translation: [.3, 0.3, .24]
-
-- add_model:
-    name: camera_2
-    file: package://manipulation/camera_box.sdf
-
-- add_weld:
-    parent: camera2_origin
-    child: camera_2::base
+    parent: handeye_camera_origin
+    child: handeye_camera::base
 
 cameras:
     main_camera:
@@ -129,16 +107,11 @@ cameras:
         depth: True
         X_PB:
             base_frame: camera_main::base
-    camera_1:
-        name: camera1
+    handeye_camera:
+        name: handeye_camera
         depth: True
         X_PB:
-            base_frame: camera_1::base
-    camera_2:
-        name: camera2
-        depth: True
-        X_PB:
-            base_frame: camera_2::base
+            base_frame: handeye_camera::base
 
 plant_config:
     time_step: 0.001

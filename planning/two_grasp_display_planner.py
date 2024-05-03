@@ -169,13 +169,15 @@ def compute_principal_minor_components(pcd):
 
 class PlannerState(Enum):
     WAIT_FOR_OBJECTS_TO_SETTLE = 1
-    GO_TO_PREGRASP1 = 2
-    GRASP1 = 3
-    GO_HOME1 = 4 # Reset arm out of the way of cameras in order to plan for next grasp
-    GO_TO_PREGRASP2 = 5
-    GRASP2 = 6
-    GO_HOME2 = 7
-    DONE = 8
+    SCANNING1 = 2
+    GO_TO_PREGRASP1 = 3
+    GRASP1 = 4
+    GO_HOME1 = 5
+    SCANNING2 = 6
+    GO_TO_PREGRASP2 = 7
+    GRASP2 = 8
+    GO_HOME2 = 9
+    DONE = 10
 
 class PickState(Enum):
     IDLE = 1
@@ -185,7 +187,13 @@ class PickState(Enum):
     OPENING = 5
     POSTPLACE = 6
 
-default_home_pose = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0)), [0.5, 0.0, 0.5]) # arm out of the way of depth cameras
+class ScanState(Enum):
+    IDLE = 1
+    GO_TO_1 = 2
+    GO_TO_2 = 3
+    GO_TO_3 = 4
+    GO_HOME = 5
+    DONE = 6
 
 # pregrasp is negative z in the gripper frame
 X_GgraspGpregrasp = RigidTransform([0, 0.0, -0.15])
@@ -205,7 +213,9 @@ class TwoGraspPlanner(LeafSystem):
             self, 
             plant,
             controller_plant, 
-            camera_body_indices,
+            eef_body_index,
+            X_EefC,
+            scanning_traj_dir,
             meshcat, 
             regions1,
             regions2,
@@ -219,10 +229,13 @@ class TwoGraspPlanner(LeafSystem):
 
         # For grasp planner
         model_point_cloud = AbstractValue.Make(PointCloud(0))
-        self.DeclareAbstractInputPort("cloud0_W", model_point_cloud)
-        self.DeclareAbstractInputPort("cloud1_W", model_point_cloud)
-        self.DeclareAbstractInputPort("cloud2_W", model_point_cloud)
-        self._camera_body_indices = camera_body_indices
+        self._point_cloud_index = self.DeclareAbstractState(
+            AbstractValue.Make(model_point_cloud)
+        )
+        self.DeclareAbstractInputPort("cloud_W", model_point_cloud)
+        self._eef_body_index = eef_body_index
+        self._X_EefC = X_EefC
+        self._scanning_traj_dir = scanning_traj_dir
 
         # for getting current positions
         self._ee_index = plant.GetBodyByName("iiwa_link_7").index()
@@ -236,6 +249,9 @@ class TwoGraspPlanner(LeafSystem):
         )
         self._pick_mode_index = self.DeclareAbstractState(
             AbstractValue.Make(PickState.IDLE)
+        )
+        self._scan_mode_index = self.DeclareAbstractState(
+            AbstractValue.Make(ScanState.IDLE)
         )
 
         # Store last calculated grasp pose
@@ -325,8 +341,14 @@ class TwoGraspPlanner(LeafSystem):
             if current_time - times["initial"] > 1.0:
                 state.get_mutable_abstract_state(
                     int(self._mode_index)
-                ).set_value(PlannerState.GO_TO_PREGRASP1)
-                self.PlanToPregrasp(context, state)
+                ).set_value(PlannerState.SCANNING1)
+                # Update scanning state
+                state.get_mutable_abstract_state(
+                    int(self._scan_mode_index)
+                ).set_value(ScanState.IDLE)
+            return
+        if mode == PlannerState.SCANNING1:
+            self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP1)
             return
         if mode == PlannerState.GO_TO_PREGRASP1:
             traj_q= context.get_abstract_state(
@@ -358,8 +380,14 @@ class TwoGraspPlanner(LeafSystem):
             if context.get_time() > traj_q.end_time() + start_time:
                 state.get_mutable_abstract_state(
                     int(self._mode_index)
-                ).set_value(PlannerState.GO_TO_PREGRASP2)
-                self.PlanToPregrasp(context, state)
+                ).set_value(PlannerState.SCANNING2)
+                # Update scanning state
+                state.get_mutable_abstract_state(
+                    int(self._scan_mode_index)
+                ).set_value(ScanState.IDLE)
+            return
+        if mode == PlannerState.SCANNING2:
+            self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP2)
             return
         if mode == PlannerState.GO_TO_PREGRASP2:
             traj_q= context.get_abstract_state(
@@ -439,6 +467,114 @@ class TwoGraspPlanner(LeafSystem):
                 self.GoHome(context, state)
         return
 
+
+    def GetPointCloud(self, context, state, after_scan_state):
+        scan_mode = context.get_abstract_state(int(self._scan_mode_index)).get_value()
+        traj_q = context.get_abstract_state(
+            int(self._current_joint_traj_idx)
+        ).get_value().trajectory
+        start_time = context.get_abstract_state(
+            int(self._current_joint_traj_idx)
+        ).get_value().start_time_s
+
+        def set_traj(scan_traj):
+            breaks = np.linspace(0, scan_traj.end_time(), int(1e3), endpoint=False)
+            knots = scan_traj.vector_values(breaks)
+
+            toppra_traj = reparameterize_with_toppra(
+                trajectory=knots.T,
+                plant=self._iiwa_controller_plant,
+                velocity_limits=self.velocity_limits,
+                acceleration_limits=self.acceleration_limits,
+                num_grid_points=100,
+            )
+
+            current_time = context.get_time()
+            state.get_mutable_abstract_state(self._current_joint_traj_idx).set_value(
+                TrajectoryWithTimingInformation(
+                    trajectory=toppra_traj,
+                    start_time_s=current_time,
+                )
+            )
+        
+        def get_pcd(start_new_pcd = False):
+            current_pcd = context.get_abstract_state(
+                int(self._point_cloud_index)
+            ).get_value()
+
+            body_poses = self.GetInputPort("body_poses").Eval(context)
+            cloud = self.GetInputPort("cloud_W").Eval(context)
+            new_pcd = cloud.Crop(lower_xyz=[0.3, -0.5, 0.071], upper_xyz=[1.0, 0.5, 0.27])
+            new_pcd.EstimateNormals(radius=0.1, num_closest=30)
+            X_WC = body_poses[self._eef_body_index] @ self._X_EefC 
+            new_pcd.FlipNormalsTowardPoint(X_WC.translation())
+            if start_new_pcd:
+                return new_pcd
+            
+            merged_pcd = Concatenate([current_pcd, new_pcd])
+            return merged_pcd
+
+
+        if scan_mode == ScanState.IDLE:
+            if context.get_time() > traj_q.end_time() + start_time:
+                state.get_mutable_abstract_state(
+                    int(self._scan_mode_index)
+                ).set_value(ScanState.GO_TO_1)
+
+                # load trajectory to first camera view
+                traj = CompositeBezierCurveTrajectoryAttributes.load(self._scanning_traj_dir + "/to1/").to_composite_bezier_curve_trajectory()
+                set_traj(traj)
+        if scan_mode == ScanState.GO_TO_1:
+            if context.get_time() > self._gripper_traj_end_time:
+                state.get_mutable_abstract_state(
+                    int(self._scan_mode_index)
+                ).set_value(ScanState.GO_TO_2)
+
+                # update pcd
+                new_pcd = get_pcd(start_new_pcd=True)
+                state.get_mutable_abstract_state(self._point_cloud_index).set_value(new_pcd)
+
+                # load trajectory to next camera view
+                traj = CompositeBezierCurveTrajectoryAttributes.load(self._scanning_traj_dir + "/to2/").to_composite_bezier_curve_trajectory()
+                set_traj(traj)
+        if scan_mode == ScanState.GO_TO_2:
+            if context.get_time() > traj_q.end_time() + start_time:
+                state.get_mutable_abstract_state(
+                    int(self._scan_mode_index)
+                ).set_value(ScanState.GO_TO_3)
+
+                # update pcd
+                new_pcd = get_pcd()
+                state.get_mutable_abstract_state(self._point_cloud_index).set_value(new_pcd)
+
+                # load trajectory to next camera view
+                traj = CompositeBezierCurveTrajectoryAttributes.load(self._scanning_traj_dir + "/to3/").to_composite_bezier_curve_trajectory()
+                set_traj(traj)
+        if scan_mode == ScanState.GO_TO_3:
+            if context.get_time() > self._gripper_traj_end_time:
+                state.get_mutable_abstract_state(
+                    int(self._scan_mode_index)
+                ).set_value(ScanState.GO_HOME)
+
+                # update pcd
+                new_pcd = get_pcd()
+                down_sampled_pcd = new_pcd.VoxelizedDownSample(voxel_size=0.005)
+                state.get_mutable_abstract_state(self._point_cloud_index).set_value(down_sampled_pcd)
+
+                # load trajectory to return home
+                traj = CompositeBezierCurveTrajectoryAttributes.load(self._scanning_traj_dir + "/to_home/").to_composite_bezier_curve_trajectory()
+                set_traj(traj)
+        if scan_mode == ScanState.GO_HOME:
+            if context.get_time() > self._gripper_traj_end_time:
+                state.get_mutable_abstract_state(
+                    int(self._scan_mode_index)
+                ).set_value(ScanState.DONE)
+                state.get_mutable_abstract_state(
+                    int(self._mode_index)
+                ).set_value(after_scan_state)
+                self.PlanToPregrasp(context, state)
+
+        return
 
     def GoHome(self, context, state):
         '''
@@ -630,25 +766,10 @@ class TwoGraspPlanner(LeafSystem):
         Determine grasp pose
         '''
         mode = context.get_abstract_state(int(self._mode_index)).get_value()
-
-        # Get pcd and select grasp
-        body_poses = self.get_input_port(3).Eval(context)
-        pcd = []
-        for i in range(3):
-            cloud = self.get_input_port(i).Eval(context)
-
-            # Crop to region of interest.
-            pcd.append(cloud.Crop(lower_xyz=[0.3, -0.5, 0.071], upper_xyz=[1.0, 0.5, 0.27]))
-            # Estimate normals
-            pcd[i].EstimateNormals(radius=0.1, num_closest=30)
-
-            # Flip normals toward camera
-            X_WC = body_poses[self._camera_body_indices[i]]
-            pcd[i].FlipNormalsTowardPoint(X_WC.translation())
-        merged_pcd = Concatenate(pcd)
-
-        down_sampled_pcd = merged_pcd.VoxelizedDownSample(voxel_size=0.005)
-        self.meshcat.SetObject("cloud", down_sampled_pcd, point_size=0.001)
+        
+        down_sampled_pcd = context.get_abstract_state(
+                                int(self._point_cloud_index)
+                            ).get_value()
 
         pcd_points = down_sampled_pcd.xyzs().T
         principal_component, secondary_component, minor_component = compute_principal_minor_components(pcd_points)

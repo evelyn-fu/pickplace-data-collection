@@ -57,14 +57,41 @@ X_GgraspGpregrasp = RigidTransform([0, 0.0, -0.15])
 #   p=[0.5287979356327239, -0.09737849855328161, 0.23556644990216116],
 # )
 
+# X_G = RigidTransform(
+#   R=RotationMatrix([
+#     [0.20681969377898063, 0.9685467022240954, 0.1383578688618696],
+#     [0.9774142324949082, -0.21081815591263353, 0.014735102781668053],
+#     [0.043439985975579215, 0.13218544075814884, -0.9902726780387395],
+#   ]),
+#   p=[0.5798396344223478, -0.0008122595958626092, 0.3250179079887979],
+# )
+
 X_G = RigidTransform(
   R=RotationMatrix([
-    [0.20681969377898063, 0.9685467022240954, 0.1383578688618696],
-    [0.9774142324949082, -0.21081815591263353, 0.014735102781668053],
-    [0.043439985975579215, 0.13218544075814884, -0.9902726780387395],
+    [0.11162136988045723, -0.6118578909427193, 0.7830520998484956],
+    [-0.9899924966004459, 2.4162665739032216e-16, 0.14112000805986755],
+    [-0.08634539050133017, -0.7909677119144172, -0.6057347210190658],
   ]),
-  p=[0.5798396344223478, -0.0008122595958626092, 0.3250179079887979],
-)
+  p=[0.5951102100418808, 1.9525797814217972e-16, 0.2552401151123305],
+) # q = [0, 1, 0, -1, 0, 1.8, 3.0]
+
+X_G = RigidTransform(
+  R=RotationMatrix([
+    [0.7241199295848425, 0.5971874186123144, -0.3449891514659612],
+    [0.6834126756784046, -0.6885730425216102, 0.24251655579489312],
+    [-0.09272239373596361, -0.41138103038873125, -0.90673491470009],
+  ]),
+  p=[0.07129913273973337, 0.3783192220042352, 0.2677729463033564],
+) # q = [2.5, 1.3, 1.8, 1.8, 0.2, -1.5, -1.4]
+
+X_G = RigidTransform(
+  R=RotationMatrix([
+    [-0.7536161473974042, 0.59819944231936, -0.2724337159580315],
+    [0.65730679904535, 0.6878723749385145, -0.30786257928693544],
+    [0.003236403968931164, -0.4110827447184517, -0.9115922897239176],
+  ]),
+  p=[0.07046840429505286, -0.3783725206382699, 0.2672424814188106],
+) # q = [0.64, -1.3, 1.34, 1.8, -0.2, -1.5, 1.3]
 
 rot = X_G.GetAsMatrix4()[:3, :3]
 t = X_G.GetAsMatrix4()[:3, 3]
@@ -94,12 +121,12 @@ gripper_minor_alignment_cost = -np.abs(eff_horizontal_vec @ align_minor_axis)
 
 print(gripper_axis_alignment_cost, gripper_minor_alignment_cost)
 
-X_mustard = RigidTransform(RotationMatrix(RollPitchYaw(-np.pi/2, 0, np.pi/2)), [0.57, 0.0, 0.16])
+X_mustard = RigidTransform(RotationMatrix(RollPitchYaw(-np.pi/2, 0, np.pi/2)), [0.4, 0.0, 0.07])
 X_WGfix = RigidTransform(RotationMatrix(RollPitchYaw(np.pi/2, 0, np.pi/2)))
 rot_180 = RigidTransform(RotationMatrix(RollPitchYaw(0, np.pi, 0)))
 context = diagram.CreateDefaultContext()
 plant_context = plant.GetMyContextFromRoot(context)
-plant.SetFreeBodyPose(plant_context, plant.GetBodyByName("body"), X_G.multiply(X_WGfix) @ rot_180)
+plant.SetFreeBodyPose(plant_context, plant.GetBodyByName("body"), X_G)
 plant.SetFreeBodyPose(plant_context, plant.GetBodyByName("base_link_mustard"), X_mustard)
 
 diagram.ForcedPublish(context)
