@@ -24,17 +24,17 @@ directives:
         rotation: !Rpy { deg: [90, 0, 90]}
         
 - add_model:
-    name: mustard_bottle
-    file: package://drake/manipulation/models/ycb/sdf/006_mustard_bottle.sdf
+    name: box_2
+    file: file://./home/evelyn/sources/Real2SimObjectManipulation/models/box_2.sdf
 - add_frame:
-    name: mustard_origin
+    name: box_2_origin
     X_PF:
         base_frame: world
-        translation: [0.4, 0.0, 0.12]
-        rotation: !Rpy { deg: [0, 0, 110] }
+        translation: [0.4, 0.0, 0.07]
+        rotation: !Rpy { deg: [0, 0, 0] }
 - add_weld:
-    parent: mustard_origin
-    child: mustard_bottle::base_link_mustard
+    parent: box_2_origin
+    child: box_2::box2_body
 
 - add_frame:
     name: table_origin

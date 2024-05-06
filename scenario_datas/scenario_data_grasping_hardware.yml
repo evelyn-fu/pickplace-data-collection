@@ -28,7 +28,7 @@ directives:
     file: file://./home/real2sim/src/Real2SimObjectManipulation/models/006_mustard_bottle.sdf
     default_free_body_pose:
         base_link_mustard:
-            translation: [0.57, 0.01, 0.16]
+            translation: [0.4, 0.01, 0.16]
             rotation: !Rpy { deg: [0, 0, 110] }
 - add_frame:
     name: table_origin
@@ -50,7 +50,7 @@ directives:
     X_PF:
         base_frame: world
         rotation: !Rpy { deg: [0.0, 0.0, 0.0]}
-        translation: [0.6, 0.0, 0]
+        translation: [0.4, 0.0, 0]
 
 - add_model:
     name: box

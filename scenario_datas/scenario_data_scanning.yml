@@ -24,12 +24,12 @@ directives:
         rotation: !Rpy { deg: [90, 0, 90]}
         
 - add_model:
-    name: mustard_bottle
-    file: file://./home/evelyn/sources/Real2SimObjectManipulation/models/006_mustard_bottle.sdf
+    name: box_2
+    file: file://./home/evelyn/sources/Real2SimObjectManipulation/models/box_2.sdf
     default_free_body_pose:
-        base_link_mustard:
-            translation: [0.4, 0.01, 0.07]
-            rotation: !Rpy { deg: [0, 0, 110] }
+        box2_body:
+            translation: [0.4, 0.0, 0.07]
+            rotation: !Rpy { deg: [0, 0, 0] }
 - add_frame:
     name: table_origin
     X_PF:
@@ -59,51 +59,6 @@ directives:
 - add_weld:
     parent: box_origin
     child: box::box_body
-
-- add_frame:
-    name: camera0_staging
-    X_PF:
-        base_frame: world
-        rotation: !Rpy { deg: [0, 0, 0.0]}
-
-- add_frame:
-    name: handeye_camera_staging
-    X_PF:
-        base_frame: iiwa::iiwa_link_7
-        rotation: !Rpy { deg: [3.13656, -3.10567, 1.58405]}
-        translation: [-0.0730357, 0.032904, 0.151341]
-
-- add_frame:
-    name: camera0_origin
-    X_PF:
-        base_frame: camera0_staging
-        rotation: !Rpy { deg: [-110, 0, 90]}
-        translation: [1.2, 0.0, 0.54]
-
-- add_model:
-    name: camera_main
-    file: package://manipulation/camera_box.sdf
-
-- add_weld:
-    parent: camera0_origin
-    child: camera_main::base
-
-- add_frame:
-    name: handeye_camera_origin
-    X_PF:
-        base_frame: handeye_camera_staging
-
-cameras:
-    main_camera:
-        name: camera0
-        depth: True
-        X_PB:
-            base_frame: camera_main::base
-    handeye_camera:
-        name: handeye_camera
-        depth: True
-        X_PB:
-            base_frame: handeye_camera_origin
 
 plant_config:
     time_step: 0.001
