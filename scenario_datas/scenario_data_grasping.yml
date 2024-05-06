@@ -67,10 +67,10 @@ directives:
         rotation: !Rpy { deg: [0, 0, 0.0]}
 
 - add_frame:
-    name: handeye_camera_staging
+    name: handeye_camera_origin
     X_PF:
         base_frame: iiwa::iiwa_link_7
-        rotation: !Rpy { deg: [3.13656, -3.10567, 1.58405]}
+        rotation: !Rpy { deg: [  2.0540215 ,  -0.31583718, -89.24078404]}
         translation: [-0.0730357, 0.032904, 0.151341]
 
 - add_frame:
@@ -87,11 +87,6 @@ directives:
 - add_weld:
     parent: camera0_origin
     child: camera_main::base
-
-- add_frame:
-    name: handeye_camera_origin
-    X_PF:
-        base_frame: handeye_camera_staging
 
 cameras:
     main_camera:

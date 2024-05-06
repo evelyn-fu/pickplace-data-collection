@@ -36,7 +36,7 @@ builder = DiagramBuilder()
 plant, scene_graph = AddMultibodyPlantSceneGraph(builder, time_step=0.0005)
 parser = Parser(plant)
 ConfigureParser(parser)
-parser.AddModelsFromUrl("file://./home/real2sim/src/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_buffer.sdf")
+parser.AddModelsFromUrl("file://./home/evelyn/sources/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_buffer.sdf")
 plant.Finalize()
 
 params = MeshcatVisualizerParams()
@@ -58,7 +58,7 @@ X_G = RigidTransform(
 r = R.from_quat([0.010822, -0.0145512, -0.702256, 0.711694])
 x_ee_camera = RigidTransform(
     R=RotationMatrix(r.as_matrix()),
-    p = [-0.0730357, 0.032904, -0.151341]
+    p = [-0.0730357, 0.032904, 0.151341]
 )
 X_WCamera = X_G @ x_ee_camera
 

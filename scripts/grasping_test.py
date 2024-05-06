@@ -156,7 +156,7 @@ def start_scenario(
     r = R.from_quat([0.010822, -0.0145512, -0.702256, 0.711694])
     x_ee_camera = RigidTransform(
         R=RotationMatrix(r.as_matrix()),
-        p = [-0.0730357, 0.032904, -0.151341]
+        p = [-0.0730357, 0.032904, 0.151341]
     )
 
     handeye_camera_pcd = builder.AddSystem(DepthImageToPointCloud(handeye_camera.depth_camera_info()))
@@ -164,7 +164,7 @@ def start_scenario(
     camera_pose_source = builder.AddSystem(CameraPoseInWorldSource(x_ee_camera))
     eef_pose = builder.AddSystem(
         ExtractPose(
-            plant.GetBodyIndices(plant.GetModelInstanceByName("camera_main"))[0]
+            plant.GetBodyByName("iiwa_link_7").index()
         )
     )
     builder.Connect(
@@ -203,7 +203,7 @@ def start_scenario(
     planner = builder.AddSystem(TwoGraspPlanner(
             plant=plant, 
             controller_plant=controller_plant,
-            eef_body_index=plant.GetBodyIndices(plant.GetModelInstanceByName("iiwa"))[7],
+            eef_body_index=plant.GetBodyByName("iiwa_link_7").index(),
             X_EefC=x_ee_camera,
             scanning_traj_dir=scanning_traj_dir,
             meshcat=meshcat,
