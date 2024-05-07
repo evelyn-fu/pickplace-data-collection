@@ -144,8 +144,12 @@ def start_scenario(
             os.makedirs(dirstr+"/masks/")
         np.savetxt(dirstr+"/cam_K.txt", K)
 
-        # save drake simulated images
-        img_saver = builder.AddSystem(ImageSaver(dirstr))
+        # save images
+        if use_hardware:
+            img_saver = builder.AddSystem(ImageSaver(dirstr))
+        else:
+            img_saver = builder.AddSystem(ImageSaver("32F", dirstr))
+
         builder.Connect(station.GetOutputPort("camera0.rgb_image"), img_saver.GetInputPort("rgb_in"))
         builder.Connect(station.GetOutputPort("camera0.depth_image"), img_saver.GetInputPort("depth_in"))
         builder.Connect(station.GetOutputPort("camera0.label_image"), img_saver.GetInputPort("label_in"))
