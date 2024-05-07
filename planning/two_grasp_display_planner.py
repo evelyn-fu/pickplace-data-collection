@@ -611,12 +611,16 @@ class TwoGraspPlanner(LeafSystem):
         q = self.get_input_port(self._iiwa_position_index).Eval(context)
         q_goal = context.get_discrete_state(self._q0_index).get_value().copy() # initial pose
 
+        loaded_traj = False
         if mode != PlannerState.WAIT_FOR_OBJECTS_TO_SETTLE and self.traj_dir is not None:
-            if mode == PlannerState.GRASP1:
+            if mode == PlannerState.GRASP1 and os.path.exists(os.path.join(self.traj_dir, "grasp1_gohome_traj")):
                 traj = CompositeBezierCurveTrajectoryAttributes.load(self.traj_dir + "/grasp1_gohome_traj/").to_composite_bezier_curve_trajectory()
-        elif mode == PlannerState.GRASP2:
+                loaded_traj = True
+            if mode == PlannerState.GRASP2 and os.path.exists(os.path.join(self.traj_dir, "grasp2_gohome_traj")):
                 traj = CompositeBezierCurveTrajectoryAttributes.load(self.traj_dir + "/grasp2_gohome_traj/").to_composite_bezier_curve_trajectory()
-        else:
+                loaded_traj = True
+
+        if not loaded_traj:
             if mode == PlannerState.WAIT_FOR_OBJECTS_TO_SETTLE:
                 traj = plan_unconstrained_gcs_path_start_to_goal(
                     plant=self._iiwa_controller_plant, q_start=q, q_goal=q_goal, regions=None, no_obstacles=True
@@ -699,9 +703,18 @@ class TwoGraspPlanner(LeafSystem):
             exit(1)
         print(q_goal)
 
-        # Set gcs regions or generate if not given or not ignoring obstacles
-        if mode == PlannerState.WAIT_FOR_OBJECTS_TO_SETTLE:
-            if not self.use_offline_regions1 and not self.no_obstacles:
+        loaded_traj = False
+        if self.traj_dir is not None:
+            if mode == PlannerState.SCANNING1 and os.path.exists(os.path.join(self.traj_dir, "grasp1_pregrasp_traj")):
+                traj = CompositeBezierCurveTrajectoryAttributes.load(self.traj_dir + "/grasp1_pregrasp_traj/").to_composite_bezier_curve_trajectory()
+                loaded_traj = True
+            if mode == PlannerState.SCANNING2 and os.path.exists(os.path.join(self.traj_dir, "grasp2_pregrasp_traj")):
+                traj = CompositeBezierCurveTrajectoryAttributes.load(self.traj_dir + "/grasp2_pregrasp_traj/").to_composite_bezier_curve_trajectory()
+                loaded_traj = True
+
+        # Set gcs regions or generate if not given or not ignoring obstacles/loading trajectories
+        if mode == PlannerState.SCANNING1:
+            if not self.use_offline_regions1 and not self.no_obstacles and not loaded_traj:
                 self.regions = get_regions(self.models_path, self.object_com, self.object_rot, self.object_dims)
 
                 # make sure the start and pregrasp positions are in the regions
@@ -728,7 +741,7 @@ class TwoGraspPlanner(LeafSystem):
             else:
                 self.regions = self.regions1
         else:
-            if not self.use_offline_regions2 and not self.no_obstacles:
+            if not self.use_offline_regions2 and not self.no_obstacles and not loaded_traj:
                 self.regions = get_regions(self.models_path, self.object_com, self.object_rot, self.object_dims)
 
                 q_in_regions = False
@@ -751,12 +764,7 @@ class TwoGraspPlanner(LeafSystem):
             else:
                 self.regions = self.regions2
 
-        if self.traj_dir is not None:
-            if mode == PlannerState.WAIT_FOR_OBJECTS_TO_SETTLE:
-                traj = CompositeBezierCurveTrajectoryAttributes.load(self.traj_dir + "/grasp1_pregrasp_traj/").to_composite_bezier_curve_trajectory()
-            else:
-                traj = CompositeBezierCurveTrajectoryAttributes.load(self.traj_dir + "/grasp2_pregrasp_traj/").to_composite_bezier_curve_trajectory()
-        else:
+        if not loaded_traj:
             traj = plan_unconstrained_gcs_path_start_to_goal(
                 plant=self._iiwa_controller_plant, q_start=q, q_goal=q_goal, regions=self.regions, no_obstacles=self.no_obstacles
             )
@@ -764,7 +772,7 @@ class TwoGraspPlanner(LeafSystem):
                 logging.error("Failed to find a path to the grasping start positions.")
                 exit(1)
 
-        if mode == PlannerState.WAIT_FOR_OBJECTS_TO_SETTLE:
+        if mode == PlannerState.SCANNING1:
             make_trajectory_save_dirs(self.savedir, "grasp1_pregrasp_traj")
             traj_attr = CompositeBezierCurveTrajectoryAttributes.from_composite_bezier_curve_trajectory(traj)
             traj_attr.log(self.savedir + "/grasp1_pregrasp_traj/")
@@ -819,7 +827,7 @@ class TwoGraspPlanner(LeafSystem):
                         X_PT=RigidTransform(rot,
                         [com[0], com[1], com[2]]))
 
-        if mode == PlannerState.WAIT_FOR_OBJECTS_TO_SETTLE:
+        if mode == PlannerState.SCANNING1:
             # Planning first grasping trajectory
             self.grasp_node.compute_candidate_grasps(
                 down_sampled_pcd, 
@@ -834,7 +842,7 @@ class TwoGraspPlanner(LeafSystem):
             # Planning second grasping trajectory
             self.grasp_node.compute_candidate_grasps(
                 down_sampled_pcd, 
-                num_samples=1,
+                num_samples=5,
                 random_seed=1, 
                 align_grasp_axis=secondary_component,
                 align_minor_axis=minor_component, 
@@ -859,7 +867,7 @@ class TwoGraspPlanner(LeafSystem):
         manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
         viz_geoms = [manipuland_cloud]
         viz_geoms.append(self.grasp_node.make_gripper_line_set(grasps[0].GetAsMatrix4(), [0.0, 1.0, 0.0]))
-        o3d.visualization.draw_geometries(viz_geoms)
+        # o3d.visualization.draw_geometries(viz_geoms)
 
         return ee_grasps[0]
 
@@ -869,7 +877,7 @@ class TwoGraspPlanner(LeafSystem):
         X_G_pick = context.get_abstract_state(
             int(self._grasp_X_G_index)
         ).get_value()
-        X_G_prepick = self.get_input_port(3).Eval(context)[int(self._ee_index)]
+        X_G_prepick = self.GetInputPort("body_poses").Eval(context)[int(self._ee_index)]
 
         X_G = {
             "pick": X_G_pick,
@@ -988,7 +996,7 @@ class TwoGraspPlanner(LeafSystem):
 
         # Command the current position (note: this is not particularly good if the velocity is non-zero)
         output.set_value(
-            self.get_input_port(3).Eval(context)[int(self._ee_index)]
+            self.GetInputPort("body_poses")[int(self._ee_index)]
         )
     
     def GetCurrentJointPositionTrajectory(self, context, output):

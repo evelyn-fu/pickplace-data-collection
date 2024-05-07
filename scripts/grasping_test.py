@@ -436,6 +436,6 @@ if __name__ == "__main__":
         load_pkl_region2=args.load_pkl_region2,
         use_same_pkl_regions=args.use_same_pkl_regions,
         static_regions=args.static_regions,
-        no_obstacles=(args.no_obstacles or args.load_trajectories),
+        no_obstacles=args.no_obstacles,
         load_trajectories=args.load_trajectories
     )
