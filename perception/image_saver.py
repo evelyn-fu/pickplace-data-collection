@@ -20,14 +20,21 @@ import tty
 import termios
 
 class ImageSaver(LeafSystem):
-    def __init__(self, dirstr = "test2"):
+    def __init__(self, depth_format="16U", dirstr = "test2"):
         super().__init__()
 
+        self.depth_format = depth_format
         self.dirstr = dirstr
         self.DeclareAbstractInputPort(name="rgb_in",
                                       model_value=Value(ImageRgba8U()))
-        self.DeclareAbstractInputPort(name="depth_in",
-                                      model_value=Value(ImageDepth32F()))
+        
+        if depth_format == "32F":
+            self.DeclareAbstractInputPort(name="depth_in",
+                                        model_value=Value(ImageDepth32F()))
+        else:
+            self.DeclareAbstractInputPort(name="depth_in",
+                                        model_value=Value(ImageDepth16U()))
+            
         self.DeclareAbstractInputPort(name="label_in",
                                       model_value=Value(ImageLabel16I()))
 
@@ -45,10 +52,13 @@ class ImageSaver(LeafSystem):
         
         color = self.GetInputPort("rgb_in").Eval(context).data
 
-        depth_32f = self.GetInputPort("depth_in").Eval(context)
+        if self.depth_format != "16U":
+            depth_32f = self.GetInputPort("depth_in").Eval(context)
 
-        depth_16u = ImageDepth16U()
-        ConvertDepth32FTo16U(depth_32f, depth_16u)
+            depth_16u = ImageDepth16U()
+            ConvertDepth32FTo16U(depth_32f, depth_16u)
+        else:
+            depth_16u = self.GetInputPort("depth_in").Eval(context)
 
         depth = copy.deepcopy(depth_16u.data.squeeze())
 

@@ -41,6 +41,8 @@ class GraspListener():
         self.plant, self.scene_graph = AddMultibodyPlantSceneGraph(builder, time_step=0.0005)
         parser = Parser(self.plant)
         ConfigureParser(parser)
+        if gripper_model_path == None:
+            gripper_model_path = "package://manipulation/schunk_wsg_50_welded_fingers.sdf"
         parser.AddModelsFromUrl(gripper_model_path)
         self.plant.Finalize()
 

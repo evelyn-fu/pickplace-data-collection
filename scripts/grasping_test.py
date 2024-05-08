@@ -4,6 +4,7 @@ import os
 import copy
 import pickle
 import datetime
+from scipy.spatial.transform import Rotation as R
 from pydrake.geometry import (
     StartMeshcat,
     RenderLabel,
@@ -29,10 +30,15 @@ from pydrake.common import RandomGenerator, Parallelism, use_native_cpp_logging
 from pydrake.planning import (RobotDiagramBuilder,
                               SceneGraphCollisionChecker,
                               CollisionCheckerParams)
+from pydrake.math import (
+    RigidTransform,
+    RotationMatrix
+)
 from pydrake.solvers import MosekSolver, GurobiSolver
 
 from planning.two_grasp_display_planner import TwoGraspPlanner
 from perception.image_saver import ImageSaver
+from perception.camera_in_world import CameraPoseInWorldSource
 from planning.trajectory_sources import TrajectoryWithTimingInformationSource, DummyTrajSource
 
 def get_regions_static(scenario_path, dirstr):
@@ -79,6 +85,7 @@ def start_scenario(
         scenario_path="scenario_data_grasping.yml", 
         models_path="scenario_data_grasping_no_object.dmd.yaml", 
         gripper_model_path="",
+        scanning_traj_dir="scanning_traj",
         pkl1_path="", 
         pkl2_path="", 
         traj_dir="",
@@ -123,8 +130,7 @@ def start_scenario(
 
     # initialize image writer and save directories
     camera0 = station.GetSubsystemByName("rgbd_sensor_camera0")
-    camera1 = station.GetSubsystemByName("rgbd_sensor_camera1")
-    camera2 = station.GetSubsystemByName("rgbd_sensor_camera2")
+    handeye_camera = station.GetSubsystemByName("rgbd_sensor_handeye_camera")
     K = camera0.color_camera_info().intrinsic_matrix()
 
     if not os.path.exists(dirstr):
@@ -138,60 +144,45 @@ def start_scenario(
             os.makedirs(dirstr+"/masks/")
         np.savetxt(dirstr+"/cam_K.txt", K)
 
-        # save drake simulated images
-        img_saver = builder.AddSystem(ImageSaver(dirstr))
+        # save images
+        if use_hardware:
+            img_saver = builder.AddSystem(ImageSaver(dirstr))
+        else:
+            img_saver = builder.AddSystem(ImageSaver("32F", dirstr))
+
         builder.Connect(station.GetOutputPort("camera0.rgb_image"), img_saver.GetInputPort("rgb_in"))
         builder.Connect(station.GetOutputPort("camera0.depth_image"), img_saver.GetInputPort("depth_in"))
         builder.Connect(station.GetOutputPort("camera0.label_image"), img_saver.GetInputPort("label_in"))
 
     # initialize point cloud output ports
-    camera0_pcd = builder.AddSystem(DepthImageToPointCloud(camera0.depth_camera_info()))
-    camera1_pcd = builder.AddSystem(DepthImageToPointCloud(camera1.depth_camera_info()))
-    camera2_pcd = builder.AddSystem(DepthImageToPointCloud(camera2.depth_camera_info()))
+    
+    # from camera calibation
+    r = R.from_quat([0.010822, -0.0145512, -0.702256, 0.711694])
+    x_ee_camera = RigidTransform(
+        R=RotationMatrix(r.as_matrix()),
+        p = [-0.0730357, 0.032904, 0.151341]
+    )
 
-    builder.Connect(station.GetOutputPort("camera0.depth_image"), camera0_pcd.GetInputPort("depth_image"))
-    camera_pose0 = builder.AddSystem(
+    handeye_camera_pcd = builder.AddSystem(DepthImageToPointCloud(handeye_camera.depth_camera_info()))
+    builder.Connect(station.GetOutputPort("handeye_camera.depth_image"), handeye_camera_pcd.GetInputPort("depth_image"))
+    camera_pose_source = builder.AddSystem(CameraPoseInWorldSource(x_ee_camera))
+    eef_pose = builder.AddSystem(
         ExtractPose(
-            plant.GetBodyIndices(plant.GetModelInstanceByName("camera_main"))[0]
+            plant.GetBodyByName("iiwa_link_7").index()
         )
     )
     builder.Connect(
         station.GetOutputPort("body_poses"),
-        camera_pose0.get_input_port(),
+        eef_pose.get_input_port(),
     )
     builder.Connect(
-        camera_pose0.get_output_port(),
-        camera0_pcd.GetInputPort("camera_pose"),
+        eef_pose.get_output_port(),
+        camera_pose_source.GetInputPort("X_EE")
     )
 
-    builder.Connect(station.GetOutputPort("camera1.depth_image"), camera1_pcd.GetInputPort("depth_image"))
-    camera_pose1 = builder.AddSystem(
-        ExtractPose(
-            plant.GetBodyIndices(plant.GetModelInstanceByName("camera_1"))[0]
-        )
-    )
     builder.Connect(
-        station.GetOutputPort("body_poses"),
-        camera_pose1.get_input_port(),
-    )
-    builder.Connect(
-        camera_pose1.get_output_port(),
-        camera1_pcd.GetInputPort("camera_pose"),
-    )
-
-    builder.Connect(station.GetOutputPort("camera2.depth_image"), camera2_pcd.GetInputPort("depth_image"))
-    camera_pose2 = builder.AddSystem(
-        ExtractPose(
-            plant.GetBodyIndices(plant.GetModelInstanceByName("camera_2"))[0]
-        )
-    )
-    builder.Connect(
-        station.GetOutputPort("body_poses"),
-        camera_pose2.get_input_port(),
-    )
-    builder.Connect(
-        camera_pose2.get_output_port(),
-        camera2_pcd.GetInputPort("camera_pose"),
+        camera_pose_source.GetOutputPort("X_WC"),
+        handeye_camera_pcd.GetInputPort("camera_pose"),
     )
 
     controller_plant = station.GetSubsystemByName(
@@ -211,28 +202,20 @@ def start_scenario(
     if load_pkl_region2 and iris_regions2 is None:
         with open(pkl2_path, 'rb') as f:
             iris_regions2 = pickle.load(f)
-    
+
     # Set up planner
     planner = builder.AddSystem(TwoGraspPlanner(
-            plant, 
-            controller_plant,
-            camera_body_indices=[
-                plant.GetBodyIndices(plant.GetModelInstanceByName("camera_main"))[
-                    0
-                ],
-                plant.GetBodyIndices(plant.GetModelInstanceByName("camera_1"))[
-                    0
-                ],
-                plant.GetBodyIndices(plant.GetModelInstanceByName("camera_2"))[
-                    0
-                ]
-            ],
+            plant=plant, 
+            controller_plant=controller_plant,
+            eef_body_index=plant.GetBodyByName("iiwa_link_7").index(),
+            X_EefC=x_ee_camera,
+            scanning_traj_dir=scanning_traj_dir,
             meshcat=meshcat,
+            dirstr=dirstr,
             regions1=iris_regions1,
             regions2=iris_regions2,
             traj_dir=traj_dir,
             models_path=os.path.join(dir_path, os.path.join("scenario_datas", models_path)),
-            dirstr=dirstr,
             no_obstacles=no_obstacles,
             gripper_model_path=gripper_model_path))
 
@@ -309,16 +292,8 @@ def start_scenario(
         )
 
     builder.Connect(
-        camera0_pcd.GetOutputPort("point_cloud"),
-        planner.GetInputPort("cloud0_W"),
-    )
-    builder.Connect(
-        camera1_pcd.GetOutputPort("point_cloud"),
-        planner.GetInputPort("cloud1_W"),
-    )
-    builder.Connect(
-        camera2_pcd.GetOutputPort("point_cloud"),
-        planner.GetInputPort("cloud2_W"),
+        handeye_camera_pcd.GetOutputPort("point_cloud"),
+        planner.GetInputPort("cloud_W"),
     )
     builder.Connect(
         station.GetOutputPort("body_poses"),
@@ -372,7 +347,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "models_path",
         default="scenario_data_grasping.dmd.yaml",
-        help="yaml file with scenario",
+        help="dmd.yaml file with scenario, used for generating iris regions",
         nargs='?',
     )
     parser.add_argument(
@@ -449,11 +424,13 @@ if __name__ == "__main__":
     meshcat = StartMeshcat()
 
     save_dir_path = os.path.abspath(os.path.join(os.path.dirname( __file__ ), '..', 'tests', args.save_dir))
+    scanning_traj_path = os.path.abspath(os.path.join(os.path.dirname( __file__ ), '..', 'scanning_traj'))
     start_scenario(
         save_dir_path, 
         scenario_path= args.scenario_path, 
         gripper_model_path=gripper_model_path,
         models_path=args.models_path, 
+        scanning_traj_dir=scanning_traj_path,
         pkl1_path=args.pkl1_path,
         pkl2_path=args.pkl2_path,
         traj_dir=args.traj_dir,
@@ -463,6 +440,6 @@ if __name__ == "__main__":
         load_pkl_region2=args.load_pkl_region2,
         use_same_pkl_regions=args.use_same_pkl_regions,
         static_regions=args.static_regions,
-        no_obstacles=(args.no_obstacles or args.load_trajectories),
+        no_obstacles=args.no_obstacles,
         load_trajectories=args.load_trajectories
     )
