@@ -129,10 +129,6 @@ def start_scenario(
     plant = station.GetSubsystemByName("plant")
 
     # initialize image writer and save directories
-    camera0 = station.GetSubsystemByName("rgbd_sensor_camera0")
-    handeye_camera = station.GetSubsystemByName("rgbd_sensor_handeye_camera")
-    K = camera0.color_camera_info().intrinsic_matrix()
-
     if not os.path.exists(dirstr):
         os.makedirs(dirstr)
     if save_imgs:
@@ -142,7 +138,6 @@ def start_scenario(
             os.makedirs(dirstr+"/depth/")
         if not os.path.exists(dirstr+"/masks/"):
             os.makedirs(dirstr+"/masks/")
-        np.savetxt(dirstr+"/cam_K.txt", K)
 
         # save images
         if use_hardware:
@@ -154,7 +149,32 @@ def start_scenario(
         builder.Connect(station.GetOutputPort("camera0.depth_image"), img_saver.GetInputPort("depth_in"))
         builder.Connect(station.GetOutputPort("camera0.label_image"), img_saver.GetInputPort("label_in"))
 
-    # initialize point cloud output ports
+
+    # initialize point cloud output ports and save camera instrinsics
+    if not use_hardware:
+        camera0 = station.GetSubsystemByName("rgbd_sensor_camera0")
+        handeye_camera = station.GetSubsystemByName("rgbd_sensor_handeye_camera")
+        K = camera0.color_camera_info().intrinsic_matrix()
+        if save_imgs:
+            np.savetxt(dirstr+"/cam_K.txt", K)
+
+        handeye_camera_pcd = builder.AddSystem(DepthImageToPointCloud(handeye_camera.depth_camera_info()))
+    else:
+        # from random/get_realsense_intrinsics.py
+        K_color =   [[920.9085083,    0.,         624.40759277],
+                    [  0.,         920.36639404, 352.77072144],
+                    [  0.,           0.,           1.        ]]
+        K_depth =   [[958.55426025,   0.,         641.69720459],
+                    [  0.,         958.55426025, 366.24783325],
+                    [  0.,           0.,           1.        ]]
+        
+        if save_imgs:
+            np.savetxt(dirstr+"/cam_K.txt", K_color)
+            
+        handeye_camera_pcd = builder.AddSystem(DepthImageToPointCloud(K_depth))
+
+    builder.Connect(station.GetOutputPort("handeye_camera.depth_image"), handeye_camera_pcd.GetInputPort("depth_image"))
+
     
     # from camera calibation
     r = R.from_quat([0.010822, -0.0145512, -0.702256, 0.711694])
@@ -163,8 +183,6 @@ def start_scenario(
         p = [-0.0730357, 0.032904, 0.151341]
     )
 
-    handeye_camera_pcd = builder.AddSystem(DepthImageToPointCloud(handeye_camera.depth_camera_info()))
-    builder.Connect(station.GetOutputPort("handeye_camera.depth_image"), handeye_camera_pcd.GetInputPort("depth_image"))
     camera_pose_source = builder.AddSystem(CameraPoseInWorldSource(x_ee_camera))
     eef_pose = builder.AddSystem(
         ExtractPose(

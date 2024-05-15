@@ -61,8 +61,8 @@ def realsense(dirstr="temp"):
     fx = intr.fx
     fy = intr.fy
     K = np.array([[fx, 0.0, ppx],
-                                 [0.0, fy, ppy],
-                                 [0.0, 0.0, 1.0]])
+                    [0.0, fy, ppy],
+                    [0.0, 0.0, 1.0]])
     np.savetxt(dirstr+"/cam_K.txt", K)
 
     # Getting the depth sensor's depth scale (see rs-align example for explanation)

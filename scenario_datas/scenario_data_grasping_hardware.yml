@@ -103,3 +103,9 @@ model_drivers:
       lcm_bus: "default"
       hand_model_name: wsg
     wsg: !SchunkWsgDriver {}
+    handeye_camera: !RealsenseDriver
+      lcm_bus: "default"
+      sensor_id: "810512062206"
+    # camera0: !RealsenseDriver
+    #   lcm_bus: "default"
+    #   sensor_id: ""
