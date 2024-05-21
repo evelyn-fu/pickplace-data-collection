@@ -1,7 +1,7 @@
 directives:
 - add_model:
     name: iiwa
-    file: package://drake/manipulation/models/iiwa_description/iiwa7/iiwa7_no_collision.sdf
+    file: package://drake_models/iiwa_description/sdf/iiwa7_no_collision.sdf
     default_joint_positions:
         iiwa_joint_1: [0.0]
         iiwa_joint_2: [0.4]
@@ -98,14 +98,21 @@ plant_config:
     contact_model: "hydroelastic"
     discrete_contact_approximation: "sap"
 
+lcm_buses:
+    driver_traffic:
+        # Use a non-default LCM url to communicate with the robot.
+        lcm_url: udpm://239.255.76.67:7667?ttl=0
+        
 model_drivers:
     iiwa: !IiwaDriver
-      lcm_bus: "default"
+      lcm_bus: driver_traffic
       hand_model_name: wsg
-    wsg: !SchunkWsgDriver {}
+      control_mode: position_only
+    wsg: !SchunkWsgDriver 
+      lcm_bus: driver_traffic
     handeye_camera: !RealsenseDriver
-      lcm_bus: "default"
+      lcm_bus: driver_traffic
       sensor_id: "810512062206"
-    # camera0: !RealsenseDriver
-    #   lcm_bus: "default"
-    #   sensor_id: ""
+    camera0: !RealsenseDriver
+      lcm_bus: driver_traffic
+      sensor_id: "822512060233"

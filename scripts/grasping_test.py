@@ -12,6 +12,7 @@ from pydrake.geometry import (
 )
 from pydrake.systems.analysis import Simulator
 from pydrake.systems.framework import DiagramBuilder
+from pydrake.systems.sensors import CameraInfo
 from pydrake.systems.primitives import (
     PortSwitch,
     Multiplexer,
@@ -141,13 +142,13 @@ def start_scenario(
 
         # save images
         if use_hardware:
-            img_saver = builder.AddSystem(ImageSaver(dirstr))
+            img_saver = builder.AddSystem(ImageSaver(depth_format="32F", dirstr=dirstr, labels=False))
         else:
-            img_saver = builder.AddSystem(ImageSaver("32F", dirstr))
+            img_saver = builder.AddSystem(ImageSaver(depth_format="16U", dirstr=dirstr, labels=True))
+            builder.Connect(station.GetOutputPort("camera0.label_image"), img_saver.GetInputPort("label_in"))
 
         builder.Connect(station.GetOutputPort("camera0.rgb_image"), img_saver.GetInputPort("rgb_in"))
         builder.Connect(station.GetOutputPort("camera0.depth_image"), img_saver.GetInputPort("depth_in"))
-        builder.Connect(station.GetOutputPort("camera0.label_image"), img_saver.GetInputPort("label_in"))
 
 
     # initialize point cloud output ports and save camera instrinsics
@@ -170,8 +171,8 @@ def start_scenario(
         
         if save_imgs:
             np.savetxt(dirstr+"/cam_K.txt", K_color)
-            
-        handeye_camera_pcd = builder.AddSystem(DepthImageToPointCloud(K_depth))
+
+        handeye_camera_pcd = builder.AddSystem(DepthImageToPointCloud(CameraInfo(1280, 720, K_depth)))
 
     builder.Connect(station.GetOutputPort("handeye_camera.depth_image"), handeye_camera_pcd.GetInputPort("depth_image"))
 
@@ -204,8 +205,8 @@ def start_scenario(
     )
 
     controller_plant = station.GetSubsystemByName(
-        "iiwa.controller"
-    ).get_multibody_plant_for_control()
+        "iiwa_controller_plant_pointer_system"
+    ).get()
 
     iris_regions1 = None
     iris_regions2 = None
@@ -327,23 +328,24 @@ def start_scenario(
     simulator_context = simulator.get_mutable_context()
 
     # Remove labels of anything but mustard
-    scene_graph = station.GetSubsystemByName("scene_graph")
-    source_id = plant.get_source_id()
-    scene_graph_context = scene_graph.GetMyMutableContextFromRoot(simulator_context)
-    query_object = scene_graph.get_query_output_port().Eval(scene_graph_context)
-    inspector = query_object.inspector()
-    for geometry_id in inspector.GetAllGeometryIds():
-        properties = copy.deepcopy(inspector.GetPerceptionProperties(geometry_id))
-        if properties is None:
-            continue
-        frame_id = inspector.GetFrameId(geometry_id)
-        body = plant.GetBodyFromFrameId(frame_id)
-        if body.model_instance() == plant.GetModelInstanceByName("mustard_bottle"):
-            properties.UpdateProperty("label", "id", RenderLabel(0)) # Make mustard label 0
-        else:
-            properties.UpdateProperty("label", "id", RenderLabel.kDontCare)
-        scene_graph.RemoveRole(scene_graph_context, source_id, geometry_id, Role.kPerception)
-        scene_graph.AssignRole(scene_graph_context, source_id, geometry_id, properties)
+    # if not use_hardware:
+    #     scene_graph = station.GetSubsystemByName("scene_graph")
+    #     source_id = plant.get_source_id()
+    #     scene_graph_context = scene_graph.GetMyMutableContextFromRoot(simulator_context)
+    #     query_object = scene_graph.get_query_output_port().Eval(scene_graph_context)
+    #     inspector = query_object.inspector()
+    #     for geometry_id in inspector.GetAllGeometryIds():
+    #         properties = copy.deepcopy(inspector.GetPerceptionProperties(geometry_id))
+    #         if properties is None:
+    #             continue
+    #         frame_id = inspector.GetFrameId(geometry_id)
+    #         body = plant.GetBodyFromFrameId(frame_id)
+    #         if body.model_instance() == plant.GetModelInstanceByName("mustard_bottle"):
+    #             properties.UpdateProperty("label", "id", RenderLabel(0)) # Make mustard label 0
+    #         else:
+    #             properties.UpdateProperty("label", "id", RenderLabel.kDontCare)
+    #         scene_graph.RemoveRole(scene_graph_context, source_id, geometry_id, Role.kPerception)
+    #         scene_graph.AssignRole(scene_graph_context, source_id, geometry_id, properties)
 
     simulator.set_target_realtime_rate(1.0)
 
