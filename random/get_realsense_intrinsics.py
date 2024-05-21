@@ -22,6 +22,7 @@ if __name__ == "__main__":
                     [0.0, 0.0, 1.0]])
     
     print("rgb intrinsics", K)
+    print("rgb width, height", w, h)
 
     intr = profile.get_stream(rs.stream.depth).as_video_stream_profile().get_intrinsics()
     w = intr.width
@@ -35,4 +36,5 @@ if __name__ == "__main__":
                     [0.0, 0.0, 1.0]])
     
     print("depth intrinsics", K)
+    print("depth width, height", w, h)
     pipeline.stop()

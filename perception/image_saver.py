@@ -20,11 +20,12 @@ import tty
 import termios
 
 class ImageSaver(LeafSystem):
-    def __init__(self, depth_format="16U", dirstr = "test2"):
+    def __init__(self, depth_format="16U", dirstr = "test2", labels=False):
         super().__init__()
 
         self.depth_format = depth_format
         self.dirstr = dirstr
+        self.labels = labels
         self.DeclareAbstractInputPort(name="rgb_in",
                                       model_value=Value(ImageRgba8U()))
         
@@ -34,9 +35,10 @@ class ImageSaver(LeafSystem):
         else:
             self.DeclareAbstractInputPort(name="depth_in",
                                         model_value=Value(ImageDepth16U()))
-            
-        self.DeclareAbstractInputPort(name="label_in",
-                                      model_value=Value(ImageLabel16I()))
+        
+        if labels:
+            self.DeclareAbstractInputPort(name="label_in",
+                                        model_value=Value(ImageLabel16I()))
 
         # Calling `ForcePublish()` will trigger the callback.
         self.DeclareForcedPublishEvent(self.Publish)
@@ -50,8 +52,15 @@ class ImageSaver(LeafSystem):
         time_ms = int(context.get_time() * 1000)
         timestr = f"{time_ms:06d}"
         
+        # color
         color = self.GetInputPort("rgb_in").Eval(context).data
 
+        # remove alpha
+        color = color[:, :, :3]
+        color_pil = Image.fromarray(color)
+        color_pil.save(self.dirstr+"/rgb/"+timestr+".png")
+
+        # depth
         if self.depth_format != "16U":
             depth_32f = self.GetInputPort("depth_in").Eval(context)
 
@@ -62,27 +71,24 @@ class ImageSaver(LeafSystem):
 
         depth = copy.deepcopy(depth_16u.data.squeeze())
 
-        label_image = copy.deepcopy(
-            self.GetInputPort("label_in").Eval(context).data.squeeze()
-        )
-
-        # remove alpha
-        color = color[:, :, :3]
-        color_pil = Image.fromarray(color)
-        color_pil.save(self.dirstr+"/rgb/"+timestr+".png")
-        
-        # get mask for bottle
-        object_labels = np.unique(label_image)
-        masks = [
-            np.uint8(np.where(label_image == label, 255, 0)) for label in object_labels
-        ]
-        mask_pil = Image.fromarray(masks[0])
-        mask_pil.save(self.dirstr+"/masks/"+timestr+".png")
-
         # cap depth at 3000mm
         depth[depth > 3000] = 3000
         depth_pil = Image.fromarray(depth)
         depth_pil.save(self.dirstr+"/depth/"+timestr+".png")
+
+        # labels
+        if self.labels:
+            label_image = copy.deepcopy(
+                self.GetInputPort("label_in").Eval(context).data.squeeze()
+            )
+        
+            # get mask for bottle
+            object_labels = np.unique(label_image)
+            masks = [
+                np.uint8(np.where(label_image == label, 255, 0)) for label in object_labels
+            ]
+            mask_pil = Image.fromarray(masks[0])
+            mask_pil.save(self.dirstr+"/masks/"+timestr+".png")
 
 
 class RealsenseImageSaver(LeafSystem):

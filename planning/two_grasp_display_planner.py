@@ -315,10 +315,10 @@ class TwoGraspPlanner(LeafSystem):
         self.meshcat = meshcat
         self.plant = plant
         self._iiwa_controller_plant = controller_plant
-        self.velocity_limits = 0.4 * np.ones(7)
-        self.velocity_limits[6] = 1.0
-        self.acceleration_limits = 0.4 * np.ones(7)
-        self.acceleration_limits[6] = 1.0
+        self.velocity_limits = 0.1 * np.ones(7)
+        # self.velocity_limits[6] = 1.0
+        self.acceleration_limits = 0.1 * np.ones(7)
+        # self.acceleration_limits[6] = 1.0
         self.regions = None #regions
         self.object_com = None
         self.object_dims = None
