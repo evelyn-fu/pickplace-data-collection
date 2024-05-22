@@ -2,6 +2,7 @@ import numpy as np
 import copy
 from PIL import Image
 from pydrake.systems.framework import LeafSystem
+from pydrake.systems.sensors import CameraInfo
 from pydrake.systems.sensors import (
     ImageRgba8U,
     ImageDepth16U,
@@ -20,7 +21,7 @@ import tty
 import termios
 
 class ImageSaver(LeafSystem):
-    def __init__(self, depth_format="16U", dirstr = "test2", labels=False):
+    def __init__(self, depth_format="16U", dirstr = "test2", labels=False, camera_info=False):
         super().__init__()
 
         self.depth_format = depth_format
@@ -39,6 +40,14 @@ class ImageSaver(LeafSystem):
         if labels:
             self.DeclareAbstractInputPort(name="label_in",
                                         model_value=Value(ImageLabel16I()))
+        
+        if camera_info:
+            camera_info_model = CameraInfo(width=640, height=480, fov_y=np.pi / 4.0)
+            self.DeclareAbstractInputPort(name="rgb_info_in",
+                                        model_value=Value(camera_info_model))
+            self.DeclareAbstractInputPort(name="depth_info_in",
+                                        model_value=Value(camera_info_model))
+            self.DeclareInitializationPublishEvent(self.Initialize)
 
         # Calling `ForcePublish()` will trigger the callback.
         self.DeclareForcedPublishEvent(self.Publish)
@@ -89,6 +98,16 @@ class ImageSaver(LeafSystem):
             ]
             mask_pil = Image.fromarray(masks[0])
             mask_pil.save(self.dirstr+"/masks/"+timestr+".png")
+
+    def Initialize(self, context):
+        rgb_info = self.GetInputPort("rgb_info_in").Eval(context)
+        depth_info = self.GetInputPort("depth_info_in").Eval(context)
+
+        K_color = rgb_info.intrinsic_matrix()
+        K_depth = depth_info.intrinsic_matrix()
+
+        np.savetxt(self.dirstr+"/cam_K.txt", K_color)
+        np.savetxt(self.dirstr+"/cam_K_depth.txt", K_depth)
 
 
 class RealsenseImageSaver(LeafSystem):
