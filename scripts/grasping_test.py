@@ -142,13 +142,16 @@ def start_scenario(
 
         # save images
         if use_hardware:
-            img_saver = builder.AddSystem(ImageSaver(depth_format="32F", dirstr=dirstr, labels=False))
+            img_saver = builder.AddSystem(ImageSaver(depth_format="32F", dirstr=dirstr, labels=False, camera_info=True))
+            builder.Connect(external_station.GetOutputPort("camera0.rgb_image"), img_saver.GetInputPort("rgb_in"))
+            builder.Connect(external_station.GetOutputPort("camera0.depth_image"), img_saver.GetInputPort("depth_in"))
+            builder.Connect(external_station.GetOutputPort("camera0.rgb_camera_info"), img_saver.GetInputPort("rgb_info_in"))
+            builder.Connect(external_station.GetOutputPort("handeye_camera.depth_camera_info"), img_saver.GetInputPort("depth_info_in"))
         else:
-            img_saver = builder.AddSystem(ImageSaver(depth_format="16U", dirstr=dirstr, labels=True))
+            img_saver = builder.AddSystem(ImageSaver(depth_format="32F", dirstr=dirstr, labels=True, camera_info=False))
             builder.Connect(station.GetOutputPort("camera0.label_image"), img_saver.GetInputPort("label_in"))
-
-        builder.Connect(station.GetOutputPort("camera0.rgb_image"), img_saver.GetInputPort("rgb_in"))
-        builder.Connect(station.GetOutputPort("camera0.depth_image"), img_saver.GetInputPort("depth_in"))
+            builder.Connect(station.GetOutputPort("camera0.rgb_image"), img_saver.GetInputPort("rgb_in"))
+            builder.Connect(station.GetOutputPort("camera0.depth_image"), img_saver.GetInputPort("depth_in"))
 
 
     # initialize point cloud output ports and save camera instrinsics
@@ -160,21 +163,12 @@ def start_scenario(
             np.savetxt(dirstr+"/cam_K.txt", K)
 
         handeye_camera_pcd = builder.AddSystem(DepthImageToPointCloud(handeye_camera.depth_camera_info()))
+        builder.Connect(station.GetOutputPort("handeye_camera.depth_image"), handeye_camera_pcd.GetInputPort("depth_image"))
+
     else:
-        # from random/get_realsense_intrinsics.py
-        K_color =   [[920.9085083,    0.,         624.40759277],
-                    [  0.,         920.36639404, 352.77072144],
-                    [  0.,           0.,           1.        ]]
-        K_depth =   [[958.55426025,   0.,         641.69720459],
-                    [  0.,         958.55426025, 366.24783325],
-                    [  0.,           0.,           1.        ]]
-        
-        if save_imgs:
-            np.savetxt(dirstr+"/cam_K.txt", K_color)
+        handeye_camera_pcd = builder.AddSystem(DepthImageToPointCloud(CameraInfo(848, 480, 639.036, 639.036, 425.131, 244.165)))
 
-        handeye_camera_pcd = builder.AddSystem(DepthImageToPointCloud(CameraInfo(1280, 720, K_depth)))
-
-    builder.Connect(station.GetOutputPort("handeye_camera.depth_image"), handeye_camera_pcd.GetInputPort("depth_image"))
+        builder.Connect(external_station.GetOutputPort("handeye_camera.depth_image"), handeye_camera_pcd.GetInputPort("depth_image"))
 
     
     # from camera calibation
