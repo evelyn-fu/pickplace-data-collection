@@ -14,7 +14,7 @@ def isData():
     return select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], [])
 
 
-def realsense(dirstr="temp"):
+def realsense(dirstr="temp", serial="822512060233"):
     if not os.path.exists(dirstr):
         os.makedirs(dirstr)
     if not os.path.exists(dirstr+"/rgb/"):
@@ -28,6 +28,7 @@ def realsense(dirstr="temp"):
     # Create a config and configure the pipeline to stream
     #  different resolutions of color and depth streams
     config = rs.config()
+    config.enable_device(serial)
 
     # Get device product line for setting a supporting resolution
     pipeline_wrapper = rs.pipeline_wrapper(pipeline)
@@ -138,6 +139,12 @@ if __name__ == "__main__":
         help="directory to save images in",
         nargs='?',
     )
+    parser.add_argument(
+        "serial",
+        default="822512060233",
+        help="serial number of camera to save from",
+        nargs='?',
+    )
     args = parser.parse_args()
     save_dir_path = os.path.abspath(os.path.join(os.path.dirname( __file__ ), '..', 'tests_realsense', args.save_dir))
-    realsense(save_dir_path)
+    realsense(save_dir_path, args.serial)

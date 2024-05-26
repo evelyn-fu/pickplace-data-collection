@@ -132,7 +132,7 @@ def start_scenario(
     # initialize image writer and save directories
     if not os.path.exists(dirstr):
         os.makedirs(dirstr)
-    if save_imgs:
+    if not use_hardware and save_imgs:
         if not os.path.exists(dirstr+"/rgb/"):
             os.makedirs(dirstr+"/rgb/")
         if not os.path.exists(dirstr+"/depth/"):
@@ -142,6 +142,8 @@ def start_scenario(
 
         # save images
         if use_hardware:
+            # this doesn't work because saving images takes too long and bottlenecks the whole system
+            # please use scripts/realsense.py instead in parallel
             img_saver = builder.AddSystem(ImageSaver(depth_format="32F", dirstr=dirstr, labels=False, camera_info=True))
             builder.Connect(external_station.GetOutputPort("camera0.rgb_image"), img_saver.GetInputPort("rgb_in"))
             builder.Connect(external_station.GetOutputPort("camera0.depth_image"), img_saver.GetInputPort("depth_in"))
@@ -322,24 +324,24 @@ def start_scenario(
     simulator_context = simulator.get_mutable_context()
 
     # Remove labels of anything but mustard
-    # if not use_hardware:
-    #     scene_graph = station.GetSubsystemByName("scene_graph")
-    #     source_id = plant.get_source_id()
-    #     scene_graph_context = scene_graph.GetMyMutableContextFromRoot(simulator_context)
-    #     query_object = scene_graph.get_query_output_port().Eval(scene_graph_context)
-    #     inspector = query_object.inspector()
-    #     for geometry_id in inspector.GetAllGeometryIds():
-    #         properties = copy.deepcopy(inspector.GetPerceptionProperties(geometry_id))
-    #         if properties is None:
-    #             continue
-    #         frame_id = inspector.GetFrameId(geometry_id)
-    #         body = plant.GetBodyFromFrameId(frame_id)
-    #         if body.model_instance() == plant.GetModelInstanceByName("mustard_bottle"):
-    #             properties.UpdateProperty("label", "id", RenderLabel(0)) # Make mustard label 0
-    #         else:
-    #             properties.UpdateProperty("label", "id", RenderLabel.kDontCare)
-    #         scene_graph.RemoveRole(scene_graph_context, source_id, geometry_id, Role.kPerception)
-    #         scene_graph.AssignRole(scene_graph_context, source_id, geometry_id, properties)
+    if not use_hardware:
+        scene_graph = station.GetSubsystemByName("scene_graph")
+        source_id = plant.get_source_id()
+        scene_graph_context = scene_graph.GetMyMutableContextFromRoot(simulator_context)
+        query_object = scene_graph.get_query_output_port().Eval(scene_graph_context)
+        inspector = query_object.inspector()
+        for geometry_id in inspector.GetAllGeometryIds():
+            properties = copy.deepcopy(inspector.GetPerceptionProperties(geometry_id))
+            if properties is None:
+                continue
+            frame_id = inspector.GetFrameId(geometry_id)
+            body = plant.GetBodyFromFrameId(frame_id)
+            if body.model_instance() == plant.GetModelInstanceByName("mustard_bottle"):
+                properties.UpdateProperty("label", "id", RenderLabel(0)) # Make mustard label 0
+            else:
+                properties.UpdateProperty("label", "id", RenderLabel.kDontCare)
+            scene_graph.RemoveRole(scene_graph_context, source_id, geometry_id, Role.kPerception)
+            scene_graph.AssignRole(scene_graph_context, source_id, geometry_id, properties)
 
     simulator.set_target_realtime_rate(1.0)
 
