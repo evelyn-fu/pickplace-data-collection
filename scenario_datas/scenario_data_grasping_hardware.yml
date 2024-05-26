@@ -113,6 +113,6 @@ model_drivers:
     handeye_camera: !RealsenseDriver
       lcm_bus: driver_traffic
       sensor_id: "810512062206"
-    camera0: !RealsenseDriver
-      lcm_bus: driver_traffic
-      sensor_id: "822512060233"
+    # camera0: !RealsenseDriver
+    #   lcm_bus: driver_traffic
+    #   sensor_id: "822512060233"
