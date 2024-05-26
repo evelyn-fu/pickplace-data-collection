@@ -174,10 +174,10 @@ def start_scenario(
 
     
     # from camera calibation
-    r = R.from_quat([0.010822, -0.0145512, -0.702256, 0.711694])
+    r = R.from_quat([0.00969807, -0.0140297, -0.70331, 0.710679])
     x_ee_camera = RigidTransform(
         R=RotationMatrix(r.as_matrix()),
-        p = [-0.0730357, 0.032904, 0.151341]
+        p = [-0.074597, 0.0324164, 0.155892]
     )
 
     camera_pose_source = builder.AddSystem(CameraPoseInWorldSource(x_ee_camera))

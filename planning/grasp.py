@@ -762,6 +762,12 @@ class GraspListener():
                                     o3d.visualization.draw_geometries([manipuland_cloud, self.make_triad_line_set(X_WP.GetAsMatrix4(), [0.0, 1.0, 0.0])])
                                     print("darboux frame", X_WP)
 
+                
+                                R_WPnew = X_WPnew.GetAsMatrix4()[:3, :3]
+                                eff_vertical_vec = R_WPnew.dot(np.array([0, 0, 1])) # don't want it to face up
+                                if eff_vertical_vec[2] > 0:
+                                    continue
+                                
                                 # Compute a new transform that minimizes y-direction distance without penetration
                                 distance, X_WPnew = self.find_minimum_distance(pcd, X_WPnew)
                                 # If distance cannot be found, go over to the next iteration
