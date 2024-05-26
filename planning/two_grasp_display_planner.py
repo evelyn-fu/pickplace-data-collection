@@ -525,7 +525,7 @@ class TwoGraspPlanner(LeafSystem):
         def get_pcd(start_new_pcd = False):
             body_poses = self.GetInputPort("body_poses").Eval(context)
             cloud = self.GetInputPort("cloud_W").Eval(context)
-            new_pcd = cloud.Crop(lower_xyz=[0.2, -0.2, 0.071], upper_xyz=[0.6, 0.2, 0.27])
+            new_pcd = cloud.Crop(lower_xyz=[0.23, -0.17, 0.071], upper_xyz=[0.57, 0.17, 0.27])
             new_pcd.EstimateNormals(radius=0.1, num_closest=30)
             X_WC = body_poses[self._eef_body_index] @ self._X_EefC 
             new_pcd.FlipNormalsTowardPoint(X_WC.translation())
