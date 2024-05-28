@@ -63,8 +63,8 @@ directives:
     name: handeye_camera_origin
     X_PF:
         base_frame: iiwa::iiwa_link_7
-        rotation: !Rpy { deg: [  2.0540215 ,  -0.31583718, -89.24078404]}
-        translation: [-0.0730357, 0.032904, 0.151341]
+        rotation: !Rpy { deg: [1.92088771, -0.36094999, -89.40886295]}
+        translation: [-0.074597, 0.0324164, 0.155892]
 
 - add_frame:
     name: camera0_origin
