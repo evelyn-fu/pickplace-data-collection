@@ -1,0 +1,112 @@
+directives:
+- add_model:
+    name: iiwa
+    file: package://drake/manipulation/models/iiwa_description/iiwa7/iiwa7_no_collision.sdf
+    default_joint_positions:
+        iiwa_joint_1: [0.0]
+        iiwa_joint_2: [0.4]
+        iiwa_joint_3: [0]
+        iiwa_joint_4: [-1.2]
+        iiwa_joint_5: [0]
+        iiwa_joint_6: [1.0]
+        iiwa_joint_7: [-1.57]
+- add_weld:
+    parent: world
+    child: iiwa::iiwa_link_0
+- add_model:
+    name: wsg
+    file: file://./home/evelyn/sources/Real2SimObjectManipulation/models/schunk_wsg_50_large_grippers_w_buffer.sdf
+- add_weld:
+    parent: iiwa::iiwa_link_7
+    child: wsg::body
+    X_PC:
+        translation: [0, 0, 0.09]
+        rotation: !Rpy { deg: [90, 0, 90]}
+        
+- add_model:
+    name: 
+    file: file://./home/evelyn/sources/models/veggies/yellow_bell_pepper_no_stem_low.sdf
+    default_free_body_pose:
+        yellow_bell_pepper_no_stem:
+            translation: [0.4, 0.01, 0.07]
+            rotation: !Rpy { deg: [0, 0, 110] }
+- add_frame:
+    name: table_origin
+    X_PF:
+        base_frame: world
+        rotation: !Rpy { deg: [0.0, 0.0, 90.0 ]}
+        translation: [0, 0, 0]
+
+- add_model:
+    name: table
+    file: file://./home/evelyn/sources/Real2SimObjectManipulation/models/table_wide.sdf
+
+- add_weld:
+    parent: table_origin
+    child: table::table_body
+
+- add_frame:
+    name: box_origin
+    X_PF:
+        base_frame: world
+        rotation: !Rpy { deg: [0.0, 0.0, 0.0]}
+        translation: [0.4, 0.0, 0]
+
+- add_model:
+    name: box
+    file: file://./home/evelyn/sources/Real2SimObjectManipulation/models/box.sdf
+
+- add_weld:
+    parent: box_origin
+    child: box::box_body
+
+- add_frame:
+    name: camera0_staging
+    X_PF:
+        base_frame: world
+        rotation: !Rpy { deg: [0, 0, 0.0]}
+
+- add_frame:
+    name: handeye_camera_origin
+    X_PF:
+        base_frame: iiwa::iiwa_link_7
+        rotation: !Rpy { deg: [  2.0540215 ,  -0.31583718, -89.24078404]}
+        translation: [-0.0730357, 0.032904, 0.151341]
+
+- add_frame:
+    name: camera0_origin
+    X_PF:
+        base_frame: camera0_staging
+        rotation: !Rpy { deg: [-110, 0, 90]}
+        translation: [1.2, 0.0, 0.54]
+
+- add_model:
+    name: camera_main
+    file: package://manipulation/camera_box.sdf
+
+- add_weld:
+    parent: camera0_origin
+    child: camera_main::base
+
+cameras:
+    main_camera:
+        name: camera0
+        depth: True
+        X_PB:
+            base_frame: camera_main::base
+    handeye_camera:
+        name: handeye_camera
+        depth: True
+        X_PB:
+            base_frame: handeye_camera_origin
+
+plant_config:
+    time_step: 0.001
+    contact_model: "hydroelastic"
+    discrete_contact_approximation: "sap"
+
+model_drivers:
+    iiwa: !IiwaDriver
+      lcm_bus: "default"
+      hand_model_name: wsg
+    wsg: !SchunkWsgDriver {}
