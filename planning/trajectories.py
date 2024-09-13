@@ -79,8 +79,8 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q, max_display
     Returns three piecewise polynomial trajectories. One for before grasp, one for during, one for after.
     This is in order to close the gripper between these two trajectories.
 
-    X_G: map of gripper poses for each frame, with X_G["display_traj"] being a tuple of two lists, one with frames
-        of the display trajectory in one direction, and one with frames of the display trajectory in the other direction
+    X_G: map of gripper poses for each frame, with X_G["display_traj"] being a list of possible poses
+        to center the display trajectory at
     times: map of time to get to each frame
     plant: plant with iiwa to solve for global IK
     q: iiwa starting position
@@ -111,6 +111,7 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q, max_display
         if name == "display_traj":
             center_found = False
             for i in range(len(X_G["display_traj"])):
+                # find one display pose to act as center
                 q_display_center = solve_global_inverse_kinematics(
                     plant=plant,
                     X_G=X_G["display_traj"][i],
@@ -135,6 +136,7 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q, max_display
                             sample_times2.append((sample_times2[-1] if len(sample_times2) != 0 else 0) + times[name][1])
 
                     center_found = True
+                    q_prev = q_temp
                     break
             if not center_found:
                 raise Exception("Failed to solve global IK for display trajectory center")

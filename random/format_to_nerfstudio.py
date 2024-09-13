@@ -17,7 +17,7 @@ def main(argv):
     K = np.loadtxt(camera_intrinsics, delimiter=' ')
 
     transforms_json = {
-        "camera_model": "OPENCV_FISHEYE",
+        "camera_model": "OPENCV",
         "fl_x": K[0, 0], 
         "fl_y": K[1, 1], 
         "cx": K[0, 2],
@@ -30,6 +30,7 @@ def main(argv):
         "k4": 0.0,
         "p1": 0.0,
         "p2": 0.0,
+        "aabb_scale": 1.0,
         "frames": []
     }
         
@@ -42,10 +43,13 @@ def main(argv):
 
         transforms_filename = os.path.splitext(image_path)[0] + ".txt"
         
-        T = np.loadtxt(os.path.join(transforms_path, transforms_filename))
-        r = R.from_matrix(T[:3, :3])
+        T_cv = np.loadtxt(os.path.join(transforms_path, transforms_filename))
+        # Convert from OpenCV coordinate system to OpenGL
+        T_cv_to_gl = np.array([[1,0,0,0],[0,-1,0,0],[0,0,-1,0],[0,0,0,1]])
+        T_gl = T_cv_to_gl @ T_cv @ np.linalg.inv(T_cv_to_gl)
+        r = R.from_matrix(T_gl[:3, :3])
         r_inv = r.inv().as_matrix()
-        p_inv = -(r_inv @ np.expand_dims(T[:3, 3], 1))
+        p_inv = -(r_inv @ np.expand_dims(T_gl[:3, 3], 1))
         T_inv = np.vstack([np.hstack([r_inv, p_inv]), np.array([0, 0, 0, 1])])
 
         frame = {
