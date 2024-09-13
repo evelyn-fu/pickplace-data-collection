@@ -14,19 +14,34 @@ from pydrake.common.value import Value
 from pydrake.common.value import (
     Value
 )
+from pydrake.math import (
+    RigidTransform,
+)
 import pyrealsense2 as rs
 import sys
-import select
 import tty
 import termios
+from planning.two_grasp_display_planner import PlannerState
 
 class ImageSaver(LeafSystem):
-    def __init__(self, depth_format="16U", dirstr = "test2", labels=False, camera_info=False):
+    def __init__(
+            self, 
+            depth_format="16U", 
+            dirstr = "test2", 
+            labels=False, 
+            camera_info=False, 
+            ob_in_cam=False, 
+            object_index=None, 
+            camera_index=None
+        ):
         super().__init__()
 
         self.depth_format = depth_format
         self.dirstr = dirstr
         self.labels = labels
+        self.ob_in_cam = ob_in_cam
+        self.object_index = object_index
+        self.camera_index = camera_index
         self.DeclareAbstractInputPort(name="rgb_in",
                                       model_value=Value(ImageRgba8U()))
         
@@ -48,6 +63,13 @@ class ImageSaver(LeafSystem):
             self.DeclareAbstractInputPort(name="depth_info_in",
                                         model_value=Value(camera_info_model))
             self.DeclareInitializationPublishEvent(self.Initialize)
+        
+        if ob_in_cam:
+            self.DeclareAbstractInputPort(
+                "body_poses", model_value=Value([RigidTransform()])
+            )
+        
+        self.DeclareAbstractInputPort("planner_state", model_value=Value(PlannerState.START))
 
         # Calling `ForcePublish()` will trigger the callback.
         self.DeclareForcedPublishEvent(self.Publish)
@@ -58,6 +80,14 @@ class ImageSaver(LeafSystem):
                                          publish=self.Publish)
         
     def Publish(self, context):
+        no_save_states = [
+            PlannerState.WAIT_FOR_OBJECTS_TO_SETTLE,
+            PlannerState.START,
+            PlannerState.SCANNING1, 
+            PlannerState.SCANNING2]
+        if self.GetInputPort("planner_state").Eval(context) in no_save_states:
+            return
+        
         time_ms = int(context.get_time() * 1000)
         timestr = f"{time_ms:06d}"
         
@@ -98,6 +128,15 @@ class ImageSaver(LeafSystem):
             ]
             mask_pil = Image.fromarray(masks[0])
             mask_pil.save(self.dirstr+"/masks/"+timestr+".png")
+        
+        # ob_in_cam pose
+        if self.ob_in_cam:
+            o2w = self.GetInputPort("body_poses").Eval(context)[int(self.object_index)]
+            c2w = self.GetInputPort("body_poses").Eval(context)[int(self.camera_index)]
+
+            o2c = o2w @ c2w.inverse()
+            T = o2c.GetAsMatrix4()
+            np.savetxt(self.dirstr+"/ob_in_cam/"+timestr+".txt", T)
 
     def Initialize(self, context):
         rgb_info = self.GetInputPort("rgb_info_in").Eval(context)

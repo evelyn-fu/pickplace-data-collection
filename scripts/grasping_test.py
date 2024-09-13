@@ -139,6 +139,8 @@ def start_scenario(
             os.makedirs(dirstr+"/depth/")
         if not os.path.exists(dirstr+"/masks/"):
             os.makedirs(dirstr+"/masks/")
+        if not os.path.exists(dirstr+"/ob_in_cam/"):
+            os.makedirs(dirstr+"/ob_in_cam/")
 
         # save images
         if use_hardware:
@@ -150,10 +152,21 @@ def start_scenario(
             builder.Connect(external_station.GetOutputPort("camera0.rgb_camera_info"), img_saver.GetInputPort("rgb_info_in"))
             builder.Connect(external_station.GetOutputPort("handeye_camera.depth_camera_info"), img_saver.GetInputPort("depth_info_in"))
         else:
-            img_saver = builder.AddSystem(ImageSaver(depth_format="32F", dirstr=dirstr, labels=True, camera_info=False))
+            img_saver = builder.AddSystem(
+                ImageSaver(
+                    depth_format="32F",
+                    dirstr=dirstr, 
+                    labels=True, 
+                    camera_info=False, 
+                    ob_in_cam=True,
+                    object_index=plant.GetBodyByName("base_link_mustard").index(),
+                    camera_index=plant.GetBodyByName("base").index()
+                )
+            )
             builder.Connect(station.GetOutputPort("camera0.label_image"), img_saver.GetInputPort("label_in"))
             builder.Connect(station.GetOutputPort("camera0.rgb_image"), img_saver.GetInputPort("rgb_in"))
             builder.Connect(station.GetOutputPort("camera0.depth_image"), img_saver.GetInputPort("depth_in"))
+            builder.Connect(station.GetOutputPort("body_poses"), img_saver.GetInputPort("body_poses"))
 
 
     # initialize point cloud output ports and save camera instrinsics
@@ -233,6 +246,9 @@ def start_scenario(
             models_path=os.path.join(dir_path, os.path.join("scenario_datas", models_path)),
             no_obstacles=no_obstacles,
             gripper_model_path=gripper_model_path))
+
+    if save_imgs:
+        builder.Connect(planner.GetOutputPort("planner_state"), img_saver.GetInputPort("planner_state"))
 
     if use_hardware:
         # Connect the output of external station to the input of internal station
