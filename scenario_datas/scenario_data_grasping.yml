@@ -92,6 +92,8 @@ cameras:
     main_camera:
         name: camera0
         depth: True
+        width: 1920
+        height: 1440
         X_PB:
             base_frame: camera_main::base
     handeye_camera:

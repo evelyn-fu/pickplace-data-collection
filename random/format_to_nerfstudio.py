@@ -8,6 +8,13 @@ from PIL import Image
 import json
 from pathlib import Path
 
+def transform_pose_opengl_to_opencv(pose):
+    # Inverse transform is identical
+    flip_yz = np.eye(4)
+    flip_yz[1, 1] = -1
+    flip_yz[2, 2] = -1
+    return pose @ flip_yz
+
 def main(argv):
     data_path = Path(argv[0])
     transforms_path = os.path.join(data_path, "ob_in_cam/")
@@ -43,20 +50,15 @@ def main(argv):
 
         transforms_filename = os.path.splitext(image_path)[0] + ".txt"
         
-        T_cv = np.loadtxt(os.path.join(transforms_path, transforms_filename))
-        # Convert from OpenCV coordinate system to OpenGL
-        T_cv_to_gl = np.array([[1,0,0,0],[0,-1,0,0],[0,0,-1,0],[0,0,0,1]])
-        T_gl = T_cv_to_gl @ T_cv @ np.linalg.inv(T_cv_to_gl)
-        r = R.from_matrix(T_gl[:3, :3])
-        r_inv = r.inv().as_matrix()
-        p_inv = -(r_inv @ np.expand_dims(T_gl[:3, 3], 1))
-        T_inv = np.vstack([np.hstack([r_inv, p_inv]), np.array([0, 0, 0, 1])])
-
+        pose_opencv = np.loadtxt(os.path.join(transforms_path, transforms_filename))
+        pose_opencv = np.linalg.inv(pose_opencv)
+        pose_opengl = transform_pose_opengl_to_opencv(pose_opencv)
+        
         frame = {
             "file_path": "rgb/" + image_path,
             "depth_file_path": "depth/" + image_path,
             "mask_path": "masks/" + image_path,
-            "transform_matrix": T_inv.tolist()
+            "transform_matrix": pose_opengl.tolist()
         }
 
         transforms_json["frames"].append(frame)

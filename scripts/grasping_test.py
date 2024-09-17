@@ -135,11 +135,15 @@ def start_scenario(
     if not use_hardware and save_imgs:
         if not os.path.exists(dirstr+"/rgb/"):
             os.makedirs(dirstr+"/rgb/")
+        if not os.path.exists(dirstr+"/rgb_alpha/"):
+            os.makedirs(dirstr+"/rgb_alpha/")
         if not os.path.exists(dirstr+"/depth/"):
             os.makedirs(dirstr+"/depth/")
         if not os.path.exists(dirstr+"/masks/"):
             os.makedirs(dirstr+"/masks/")
-        if not os.path.exists(dirstr+"/ob_in_cam/"):
+        if not os.path.exists(dirstr+"/gripper_masks/"):
+            os.makedirs(dirstr+"/gripper_masks/")
+        if not use_hardware and not os.path.exists(dirstr+"/ob_in_cam/"):
             os.makedirs(dirstr+"/ob_in_cam/")
 
         # save images
@@ -339,7 +343,7 @@ def start_scenario(
     simulator = Simulator(diagram)
     simulator_context = simulator.get_mutable_context()
 
-    # Remove labels of anything but mustard
+    # Remove labels of anything but mustard and gripper
     if not use_hardware:
         scene_graph = station.GetSubsystemByName("scene_graph")
         source_id = plant.get_source_id()
@@ -354,6 +358,8 @@ def start_scenario(
             body = plant.GetBodyFromFrameId(frame_id)
             if body.model_instance() == plant.GetModelInstanceByName("mustard_bottle"):
                 properties.UpdateProperty("label", "id", RenderLabel(0)) # Make mustard label 0
+            elif body.model_instance() == plant.GetModelInstanceByName("wsg"):
+                properties.UpdateProperty("label", "id", RenderLabel(1)) # Make gripper label 1
             else:
                 properties.UpdateProperty("label", "id", RenderLabel.kDontCare)
             scene_graph.RemoveRole(scene_graph_context, source_id, geometry_id, Role.kPerception)

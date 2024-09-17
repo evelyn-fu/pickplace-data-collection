@@ -93,11 +93,13 @@ class ImageSaver(LeafSystem):
         
         # color
         color = self.GetInputPort("rgb_in").Eval(context).data
+        color_pil = Image.fromarray(color)
+        color_pil.save(self.dirstr+"/rgb_alpha/"+timestr+".png")
 
         # remove alpha
-        color = color[:, :, :3]
-        color_pil = Image.fromarray(color)
-        color_pil.save(self.dirstr+"/rgb/"+timestr+".png")
+        color_no_alpha = color[:, :, :3]
+        color_no_alpha_pil = Image.fromarray(color)
+        color_no_alpha_pil.save(self.dirstr+"/rgb/"+timestr+".png")
 
         # depth
         if self.depth_format != "16U":
@@ -128,13 +130,16 @@ class ImageSaver(LeafSystem):
             ]
             mask_pil = Image.fromarray(masks[0])
             mask_pil.save(self.dirstr+"/masks/"+timestr+".png")
+
+            gripper_mask_pil = Image.fromarray(masks[1])
+            gripper_mask_pil.save(self.dirstr+"/gripper_masks/"+timestr+".png")
         
         # ob_in_cam pose
         if self.ob_in_cam:
             o2w = self.GetInputPort("body_poses").Eval(context)[int(self.object_index)]
             c2w = self.GetInputPort("body_poses").Eval(context)[int(self.camera_index)]
 
-            o2c = o2w @ c2w.inverse()
+            o2c = c2w.inverse() @ o2w
             T = o2c.GetAsMatrix4()
             np.savetxt(self.dirstr+"/ob_in_cam/"+timestr+".txt", T)
 

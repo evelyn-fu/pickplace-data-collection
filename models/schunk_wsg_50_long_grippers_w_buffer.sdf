@@ -43,7 +43,7 @@
       <pose relative_to="body"/>
     </frame>
     <link name="left_finger">
-      <pose>-0.02 0.0625 0 0 3.141592 0</pose>
+      <pose>-0.02 0.0525 0 0 3.141592 0</pose>
       <inertial>
         <mass>0.05</mass>
         <inertia>
@@ -59,7 +59,7 @@
       <visual name="visual">
         <geometry>
           <box>
-            <size>0.02 0.12 0.035</size>
+            <size>0.02 0.13 0.035</size>
           </box>
         </geometry>
         <material>
@@ -69,7 +69,7 @@
       <collision name="collision">
         <geometry>
           <box>
-            <size>0.02 0.12 0.035</size>
+            <size>0.02 0.13 0.035</size>
           </box>
         </geometry>
         <drake:proximity_properties>
@@ -81,7 +81,7 @@
       </collision>
     </link>
     <link name="right_finger"> 
-      <pose>0.02 0.0625 0 0 0 0</pose>
+      <pose>0.02 0.0525 0 0 0 0</pose>
       <inertial>
         <mass>0.05</mass>
         <inertia>
@@ -97,7 +97,7 @@
       <visual name="visual">
         <geometry>
           <box>
-            <size>0.02 0.12 0.035</size>
+            <size>0.02 0.13 0.035</size>
           </box>
         </geometry>
         <material>
@@ -107,7 +107,7 @@
       <collision name="collision">
         <geometry>
           <box>
-            <size>0.02 0.12 0.035</size>
+            <size>0.02 0.13 0.035</size>
           </box>
         </geometry>
         <drake:proximity_properties>
