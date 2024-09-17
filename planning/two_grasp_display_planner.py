@@ -4,6 +4,8 @@ import pickle
 import datetime
 import open3d as o3d
 import os
+import copy
+from PIL import Image
 from scipy.spatial.transform import Rotation as R
 from planning.grasp import GraspListener
 from planning.toppra import reparameterize_with_toppra
@@ -32,6 +34,13 @@ from pydrake.common.value import (
 from pydrake.trajectories import (
     PiecewisePose,
     PiecewisePolynomial,
+)
+from pydrake.systems.sensors import (
+    ImageRgba8U,
+    ImageDepth16U,
+    ImageLabel16I,
+    ImageDepth32F,
+    ConvertDepth32FTo16U
 )
 
 import pydrake.planning as mut
@@ -227,7 +236,9 @@ class TwoGraspPlanner(LeafSystem):
             models_path=None,
             no_obstacles=False,
             gripper_model_path=None,
-            default_home=q_home
+            default_home=q_home, 
+            depth_format="32F",
+            save_images=False
         ):
         LeafSystem.__init__(self)
 
@@ -243,6 +254,16 @@ class TwoGraspPlanner(LeafSystem):
         self.DeclareAbstractInputPort(
             "body_poses", AbstractValue.Make([RigidTransform()])
         )
+
+        # for getting wrist camera images
+        self.DeclareAbstractInputPort(name="wrist_rgb_in",
+                                      model_value=AbstractValue.Make(ImageRgba8U()))
+        if depth_format == "32F":
+            self.DeclareAbstractInputPort(name="wrist_depth_in",
+                                        model_value=AbstractValue.Make(ImageDepth32F()))
+        else:
+            self.DeclareAbstractInputPort(name="wrist_depth_in",
+                                        model_value=AbstractValue.Make(ImageDepth16U()))
 
         # FSM state
         self._mode_index = self.DeclareAbstractState(
@@ -326,6 +347,7 @@ class TwoGraspPlanner(LeafSystem):
         self.regions1 = regions1
         self.regions2 = regions2
         self.traj_dir = traj_dir
+        self.depth_format = depth_format
         self.use_offline_regions1 = False if regions1 is None else True
         self.use_offline_regions2 = False if regions1 is None else True
 
@@ -336,6 +358,7 @@ class TwoGraspPlanner(LeafSystem):
         self.models_path = models_path
         self.savedir = dirstr
         self.no_obstacles = no_obstacles
+        self.save_images = save_images
         self.done = False
 
     def Update(self, context, state):
@@ -522,7 +545,33 @@ class TwoGraspPlanner(LeafSystem):
                 )
             )
         
-        def get_pcd(start_new_pcd = False):
+        def get_pcd(start_new_pcd = False, image_name="scan_1"):
+            if self.save_images:
+                # save image from wrist camera
+                # color
+                color = self.GetInputPort("wrist_rgb_in").Eval(context).data
+
+                # remove alpha
+                color = color[:, :, :3]
+                color_pil = Image.fromarray(color)
+                color_pil.save(self.savedir+"/scans/"+image_name+"_rgb.png")
+
+                # depth
+                if self.depth_format != "16U":
+                    depth_32f = self.GetInputPort("wrist_depth_in").Eval(context)
+
+                    depth_16u = ImageDepth16U()
+                    ConvertDepth32FTo16U(depth_32f, depth_16u)
+                else:
+                    depth_16u = self.GetInputPort("wrist_depth_in").Eval(context)
+
+                depth = copy.deepcopy(depth_16u.data.squeeze())
+
+            # cap depth at 3000mm
+            depth[depth > 3000] = 3000
+            depth_pil = Image.fromarray(depth)
+            depth_pil.save(self.savedir+"/scans/"+image_name+"_depth.png")
+            
             body_poses = self.GetInputPort("body_poses").Eval(context)
             cloud = self.GetInputPort("cloud_W").Eval(context)
             new_pcd = cloud.Crop(lower_xyz=[0.23, -0.17, 0.071], upper_xyz=[0.57, 0.17, 0.27])
@@ -547,47 +596,56 @@ class TwoGraspPlanner(LeafSystem):
                 set_traj(traj)
                 return
         if scan_mode == ScanState.GO_TO_1:
-            if context.get_time() > traj_q.end_time() + start_time:
+            if context.get_time() > traj_q.end_time() + start_time + 1.0: 
+                # wait a second to move on
                 state.get_mutable_abstract_state(
                     int(self._scan_mode_index)
                 ).set_value(ScanState.GO_TO_2)
-
-                # update pcd
-                new_pcd = get_pcd(start_new_pcd=True)
-                self.current_pcd = new_pcd
 
                 # load trajectory to next camera view
                 traj = CompositeBezierCurveTrajectoryAttributes.load(self._scanning_traj_dir + "/to2/").to_composite_bezier_curve_trajectory()
                 set_traj(traj)
                 return
+            if context.get_time() > traj_q.end_time() + start_time + 0.5:
+                # wait a second to take pcd
+                # update pcd
+                new_pcd = get_pcd(start_new_pcd=True, image_name="scan_1")
+                self.current_pcd = new_pcd
+                return
         if scan_mode == ScanState.GO_TO_2:
-            if context.get_time() > traj_q.end_time() + start_time:
+            if context.get_time() > traj_q.end_time() + start_time + 1.0:
+                # wait a second to move on
                 state.get_mutable_abstract_state(
                     int(self._scan_mode_index)
                 ).set_value(ScanState.GO_TO_3)
-
-                # update pcd
-                new_pcd = get_pcd()
-                self.current_pcd = new_pcd
 
                 # load trajectory to next camera view
                 traj = CompositeBezierCurveTrajectoryAttributes.load(self._scanning_traj_dir + "/to3/").to_composite_bezier_curve_trajectory()
                 set_traj(traj)
                 return
+            if context.get_time() > traj_q.end_time() + start_time + 0.5:
+                # wait a second to take pcd
+                # update pcd
+                new_pcd = get_pcd(image_name="scan_2")
+                self.current_pcd = new_pcd
+                return
         if scan_mode == ScanState.GO_TO_3:
-            if context.get_time() > traj_q.end_time() + start_time:
+            if context.get_time() > traj_q.end_time() + start_time + 1.0:
+                # wait a second to move on
                 state.get_mutable_abstract_state(
                     int(self._scan_mode_index)
                 ).set_value(ScanState.GO_HOME)
 
-                # update pcd
-                new_pcd = get_pcd()
-                down_sampled_pcd = new_pcd.VoxelizedDownSample(voxel_size=0.005)
-                self.current_pcd = down_sampled_pcd
-
                 # load trajectory to return home
                 traj = CompositeBezierCurveTrajectoryAttributes.load(self._scanning_traj_dir + "/to_home/").to_composite_bezier_curve_trajectory()
                 set_traj(traj)
+                return
+            if context.get_time() > traj_q.end_time() + start_time + 0.5:
+                # wait a second to take pcd
+                # update pcd
+                new_pcd = get_pcd(image_name="scan_3")
+                down_sampled_pcd = new_pcd.VoxelizedDownSample(voxel_size=0.005)
+                self.current_pcd = down_sampled_pcd
                 return
         if scan_mode == ScanState.GO_HOME:
             if context.get_time() > traj_q.end_time() + start_time:

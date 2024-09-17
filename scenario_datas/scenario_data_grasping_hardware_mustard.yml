@@ -1,7 +1,7 @@
 directives:
 - add_model:
     name: iiwa
-    file: package://drake/manipulation/models/iiwa_description/iiwa7/iiwa7_no_collision.sdf
+    file: package://drake_models/iiwa_description/sdf/iiwa7_no_collision.sdf
     default_joint_positions:
         iiwa_joint_1: [0.0]
         iiwa_joint_2: [0.4]
@@ -22,7 +22,7 @@ directives:
     X_PC:
         translation: [0, 0, 0.09]
         rotation: !Rpy { deg: [90, 0, 90]}
-        
+
 - add_model:
     name: mustard_bottle
     file: file://./home/real2sim/src/Real2SimObjectManipulation/models/006_mustard_bottle.sdf
@@ -67,16 +67,11 @@ directives:
         rotation: !Rpy { deg: [0, 0, 0.0]}
 
 - add_frame:
-    name: camera1_staging
+    name: handeye_camera_origin
     X_PF:
-        base_frame: world
-        rotation: !Rpy { deg: [0, 0, 135.0]}
-
-- add_frame:
-    name: camera2_staging
-    X_PF:
-        base_frame: world
-        rotation: !Rpy { deg: [0, 0, 45.0]}
+        base_frame: iiwa::iiwa_link_7
+        rotation: !Rpy { deg: [2.1243414 ,  -0.45993413, -89.88104678]}
+        translation: [-0.0697802, 0.0297534, 0.159606]
 
 - add_frame:
     name: camera0_origin
@@ -93,61 +88,37 @@ directives:
     parent: camera0_origin
     child: camera_main::base
 
-- add_frame:
-    name: camera1_origin
-    X_PF:
-        base_frame: camera1_staging
-        rotation: !Rpy { deg: [-100.0, 0, 180.0]}
-        translation: [-.3, 0.3, .24]
+cameras:
+    main_camera:
+        name: camera0
+        lcm_bus: driver_traffic
+        depth: True
+        X_PB:
+            base_frame: camera_main::base
+    handeye_camera:
+        name: handeye_camera
+        lcm_bus: driver_traffic
+        depth: True
+        X_PB:
+            base_frame: handeye_camera_origin
 
-- add_model:
-    name: camera_1
-    file: package://manipulation/camera_box.sdf
-
-- add_weld:
-    parent: camera1_origin
-    child: camera_1::base
-
-- add_frame:
-    name: camera2_origin
-    X_PF:
-        base_frame: camera2_staging
-        rotation: !Rpy { deg: [-100.0, 0, 180.0]}
-        translation: [.3, 0.3, .24]
-
-- add_model:
-    name: camera_2
-    file: package://manipulation/camera_box.sdf
-
-- add_weld:
-    parent: camera2_origin
-    child: camera_2::base
+plant_config:
+    time_step: 0.001
+    contact_model: "hydroelastic"
+    discrete_contact_approximation: "sap"
 
 lcm_buses:
     driver_traffic:
         # Use a non-default LCM url to communicate with the robot.
         lcm_url: udpm://239.255.76.67:7667?ttl=0
-
-cameras:
-    main_camera:
-        name: camera0
-        depth: True
-        X_PB:
-            base_frame: camera_main::base
-    camera_1:
-        name: camera1
-        depth: True
-        X_PB:
-            base_frame: camera_1::base
-    camera_2:
-        name: camera2
-        depth: True
-        X_PB:
-            base_frame: camera_2::base
-
+        
 model_drivers:
     iiwa: !IiwaDriver
       lcm_bus: driver_traffic
       hand_model_name: wsg
-    wsg: !SchunkWsgDriver
+      control_mode: position_only
+    wsg: !SchunkWsgDriver 
       lcm_bus: driver_traffic
+
+camera_ids:
+    handeye_camera: DRAKE_RGBD_CAMERA_IMAGES_810512062206
