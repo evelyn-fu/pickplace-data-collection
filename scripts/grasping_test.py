@@ -132,7 +132,9 @@ def start_scenario(
     # initialize image writer and save directories
     if not os.path.exists(dirstr):
         os.makedirs(dirstr)
-    if not use_hardware and save_imgs:
+    if not os.path.exists(dirstr+"/scans/"):
+        os.makedirs(dirstr+"/scans/")
+    if not use_hardware and save_imgs: # not use_hardware condition temporarily here to stop bottlenecking
         if not os.path.exists(dirstr+"/rgb/"):
             os.makedirs(dirstr+"/rgb/")
         if not os.path.exists(dirstr+"/depth/"):
@@ -148,7 +150,7 @@ def start_scenario(
             builder.Connect(external_station.GetOutputPort("camera0.rgb_image"), img_saver.GetInputPort("rgb_in"))
             builder.Connect(external_station.GetOutputPort("camera0.depth_image"), img_saver.GetInputPort("depth_in"))
             builder.Connect(external_station.GetOutputPort("camera0.rgb_camera_info"), img_saver.GetInputPort("rgb_info_in"))
-            builder.Connect(external_station.GetOutputPort("handeye_camera.depth_camera_info"), img_saver.GetInputPort("depth_info_in"))
+            builder.Connect(external_station.GetOutputPort("camera0.depth_camera_info"), img_saver.GetInputPort("depth_info_in"))
         else:
             img_saver = builder.AddSystem(ImageSaver(depth_format="32F", dirstr=dirstr, labels=True, camera_info=False))
             builder.Connect(station.GetOutputPort("camera0.label_image"), img_saver.GetInputPort("label_in"))
@@ -174,10 +176,10 @@ def start_scenario(
 
     
     # from camera calibation
-    r = R.from_quat([0.00969807, -0.0140297, -0.70331, 0.710679])
+    r = R.from_quat([0.0102867, -0.0159347, -0.706193, 0.707766])
     x_ee_camera = RigidTransform(
         R=RotationMatrix(r.as_matrix()),
-        p = [-0.074597, 0.0324164, 0.155892]
+        p = [-0.0697802, 0.0297534, 0.159606]
     )
 
     camera_pose_source = builder.AddSystem(CameraPoseInWorldSource(x_ee_camera))
@@ -232,7 +234,16 @@ def start_scenario(
             traj_dir=traj_dir,
             models_path=os.path.join(dir_path, os.path.join("scenario_datas", models_path)),
             no_obstacles=no_obstacles,
-            gripper_model_path=gripper_model_path))
+            gripper_model_path=gripper_model_path,
+            save_images=save_imgs))
+    
+    # connect wrist camera images to be saved in planner
+    if use_hardware:
+        builder.Connect(external_station.GetOutputPort("handeye_camera.rgb_image"), planner.GetInputPort("wrist_rgb_in"))
+        builder.Connect(external_station.GetOutputPort("handeye_camera.depth_image"), planner.GetInputPort("wrist_depth_in"))
+    else:
+        builder.Connect(station.GetOutputPort("handeye_camera.rgb_image"), planner.GetInputPort("wrist_rgb_in"))
+        builder.Connect(station.GetOutputPort("handeye_camera.depth_image"), planner.GetInputPort("wrist_depth_in"))
 
     if use_hardware:
         # Connect the output of external station to the input of internal station
@@ -432,7 +443,8 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    gripper_model_path = "file://./home/evelyn/sources/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_buffer.sdf"
+    # gripper_model_path = "file://./home/evelyn/sources/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_buffer.sdf"
+    gripper_model_path = "file://./home/real2sim/src/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_buffer.sdf"
     if args.use_hardware:
         gripper_model_path = "file://./home/real2sim/src/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_buffer.sdf"
 

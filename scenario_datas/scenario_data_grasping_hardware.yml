@@ -63,8 +63,8 @@ directives:
     name: handeye_camera_origin
     X_PF:
         base_frame: iiwa::iiwa_link_7
-        rotation: !Rpy { deg: [1.92088771, -0.36094999, -89.40886295]}
-        translation: [-0.074597, 0.0324164, 0.155892]
+        rotation: !Rpy { deg: [2.1243414 ,  -0.45993413, -89.88104678]}
+        translation: [-0.0697802, 0.0297534, 0.159606]
 
 - add_frame:
     name: camera0_origin
@@ -84,11 +84,13 @@ directives:
 cameras:
     main_camera:
         name: camera0
+        lcm_bus: driver_traffic
         depth: True
         X_PB:
             base_frame: camera_main::base
     handeye_camera:
         name: handeye_camera
+        lcm_bus: driver_traffic
         depth: True
         X_PB:
             base_frame: handeye_camera_origin
@@ -110,9 +112,6 @@ model_drivers:
       control_mode: position_only
     wsg: !SchunkWsgDriver 
       lcm_bus: driver_traffic
-    handeye_camera: !RealsenseDriver
-      lcm_bus: driver_traffic
-      sensor_id: "810512062206"
-    # camera0: !RealsenseDriver
-    #   lcm_bus: driver_traffic
-    #   sensor_id: "822512060233"
+
+camera_ids:
+    handeye_camera: DRAKE_RGBD_CAMERA_IMAGES_810512062206
