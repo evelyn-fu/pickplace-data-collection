@@ -1,0 +1,15 @@
+{
+    "delta": 0.001,
+    "finger_width": 0.04,
+    "finger_height": 0.035,
+    "finger_length": 0.15,
+    "finger_spacing": 0.15,
+    "base_width": 0.146,
+    "base_height": 0.05,
+    "base_depth": 0.0725,
+    "origin": [0, 0.049133, 0],
+    "buffer": 0.05,
+    "extras": [
+        {"box": [0, 0, -0.055, 0.073, 0.03625, 0.03]}
+    ]
+}

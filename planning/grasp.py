@@ -34,8 +34,8 @@ class GraspListener():
 
     def __init__(self, hand_finger_path=None, gripper_model_path=None):
         if hand_finger_path == None:
-            hand_finger_path = os.path.abspath(os.path.join(os.path.dirname( __file__ ), 'misc', 'hand_finger.sdf'))
-        self.hand_collision_model = SignedDensityField.from_sdf(hand_finger_path)
+            hand_finger_path = os.path.abspath(os.path.join(os.path.dirname( __file__ ), '..', 'scenario_datas', 'gripper_sdf.pkl'))
+        self.hand_collision_model = SignedDensityField.from_pkl(hand_finger_path)
 
         builder = DiagramBuilder()
         self.plant, self.scene_graph = AddMultibodyPlantSceneGraph(builder, time_step=0.0005)
@@ -55,7 +55,7 @@ class GraspListener():
     def check_collision(self, pcd, X_G, visualize=False):
         """Returns true if not in collision and false otherwise."""
         thre = 0.0
-        sdf = self.compute_sdf(pcd, X_G, visualize)
+        sdf = self.compute_sdf_fast(pcd, X_G, visualize)
         return sdf > thre
 
     def compute_darboux_frame(self, point, normal, pcd, kdtree, ball_radius=0.002, max_nn=50):
@@ -200,7 +200,7 @@ class GraspListener():
             # viz_geoms = [manipuland_cloud]
             # viz_geoms.append(self.make_gripper_line_set(X_WGnew.GetAsMatrix4(), [0.0, 1.0, 0.0]))
 
-            signed_distance = self.compute_sdf(pcd, X_WGnew)
+            signed_distance = self.compute_sdf_fast(pcd, X_WGnew)
 
             # visualize 
             # o3d.visualization.draw_geometries(viz_geoms)
@@ -749,9 +749,12 @@ class GraspListener():
                     for pitch in np.linspace(pitch_min, pitch_max, num_pitch_samples):
                         for roll in np.linspace(roll_min, roll_max, num_roll_samples):
                             for yaw in np.linspace(yaw_min, yaw_max, num_yaw_samples):
+                                start = time.time()
                                 # TODO: Explore whether it is faster to do this transform in numpy
+                                transform_start = time.time()
                                 X_PPnew = RigidTransform(RollPitchYaw(roll, pitch, yaw), np.array([0, y, 0]))
                                 X_WPnew = X_WP.multiply(X_PPnew)
+                                # print("transform time", time.time()-transform_start)
 
                                 if VISUALIZE:
                                     # visualize
@@ -761,13 +764,17 @@ class GraspListener():
                                     print("darboux frame", X_WP)
 
                 
+                                check_vertical_start = time.time()
                                 R_WPnew = X_WPnew.GetAsMatrix4()[:3, :3]
                                 eff_vertical_vec = R_WPnew.dot(np.array([0, 0, 1])) # don't want it to face up
+                                # print("check_vertical time", time.time()-check_vertical_start)
                                 if eff_vertical_vec[2] > 0:
                                     continue
                                 
+                                min_dist_start = time.time()
                                 # Compute a new transform that minimizes y-direction distance without penetration
                                 distance, X_WPnew = self.find_minimum_distance(pcd, X_WPnew)
+                                # print("find_minimum_distance time", time.time()-min_dist_start)
                                 # If distance cannot be found, go over to the next iteration
                                 if np.isnan(distance):
                                     continue
@@ -778,6 +785,7 @@ class GraspListener():
                                 if is_nonempty:
                                     candidate_lst.append(X_WPnew)
                                     viz_geoms.append(self.make_gripper_line_set(X_WPnew.GetAsMatrix4(), color))
+                                    costs_start = time.time()
                                     candidate_costs.append(
                                         self.compute_costs(
                                             X_WPnew, 
@@ -786,12 +794,12 @@ class GraspListener():
                                             split_axes
                                         )
                                     )
+                                    # print("costs time", time.time()-costs_start)
                                     if VISUALIZE_EACH:
                                         print(candidate_costs[-1])
                                         o3d.visualization.draw_geometries([manipuland_cloud, self.make_triad_line_set(X_WP.GetAsMatrix4(), [0.0, 1.0, 0.0]), self.make_gripper_line_set(X_WPnew.GetAsMatrix4(), [1.0, 0.0, 0.0])])
-                                else:
-                                    continue
 
+                                # print("inner loop time", time.time()-start)
             if VISUALIZE:
                 o3d.visualization.draw_geometries(viz_geoms)
             print("sequential antipodal grasp time: {:.3f}".format(time.time() - start_time))
