@@ -812,68 +812,68 @@ class TwoGraspPlanner(LeafSystem):
         '''
         mode = context.get_abstract_state(int(self._mode_index)).get_value()
         
-        # down_sampled_pcd = self.current_pcd
-        # self.meshcat.SetObject("cloud", down_sampled_pcd, point_size=0.001)
+        down_sampled_pcd = self.current_pcd
+        self.meshcat.SetObject("cloud", down_sampled_pcd, point_size=0.001)
 
-        # pcd_points = down_sampled_pcd.xyzs().T
-        # principal_component, secondary_component, minor_component = compute_principal_minor_components(pcd_points)
+        pcd_points = down_sampled_pcd.xyzs().T
+        principal_component, secondary_component, minor_component = compute_principal_minor_components(pcd_points)
 
-        # # visualize axes, principal axis is z axis (blue), minor axis is x axis (red)
-        # z_axis, x_axis = [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]
-        # rot_principal_component_to_axes, _ = R.align_vectors(
-        #     np.array([z_axis, x_axis]), np.stack([principal_component, minor_component])
-        # )
-        # com = np.mean(pcd_points, axis=0)
-        # self.object_com = com
-        # pcd_points_axis_aligned = pcd_points @ rot_principal_component_to_axes.as_matrix().T
-        # dims = np.max(pcd_points_axis_aligned, axis=0) - np.min(pcd_points_axis_aligned, axis=0)
-        # self.object_dims = dims
-        # rot = RotationMatrix(rot_principal_component_to_axes.as_matrix().T)
-        # self.object_rot = rot
-        # AddMeshcatTriad(self.meshcat, "principal axis", 
-        #                 X_PT=RigidTransform(rot,
-        #                 [com[0], com[1], com[2]]))
+        # visualize axes, principal axis is z axis (blue), minor axis is x axis (red)
+        z_axis, x_axis = [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]
+        rot_principal_component_to_axes, _ = R.align_vectors(
+            np.array([z_axis, x_axis]), np.stack([principal_component, minor_component])
+        )
+        com = np.mean(pcd_points, axis=0)
+        self.object_com = com
+        pcd_points_axis_aligned = pcd_points @ rot_principal_component_to_axes.as_matrix().T
+        dims = np.max(pcd_points_axis_aligned, axis=0) - np.min(pcd_points_axis_aligned, axis=0)
+        self.object_dims = dims
+        rot = RotationMatrix(rot_principal_component_to_axes.as_matrix().T)
+        self.object_rot = rot
+        AddMeshcatTriad(self.meshcat, "principal axis", 
+                        X_PT=RigidTransform(rot,
+                        [com[0], com[1], com[2]]))
 
         if mode == PlannerState.SCANNING1:
-            # # Planning first grasping trajectory
-            # self.grasp_node.compute_candidate_grasps(
-            #     down_sampled_pcd, 
-            #     num_samples=5,
-            #     random_seed=5, 
-            #     align_grasp_axis=principal_component,  
-            #     align_minor_axis=minor_component,
-            #     split_axis=1, 
-            #     minor_split_axis=0
-            # )
-            grasps = [RigidTransform(
-            R=RotationMatrix([
-                [0.20681969377898063, 0.9685467022240954, 0.1383578688618696],
-                [0.9774142324949082, -0.21081815591263353, 0.014735102781668053],
-                [0.043439985975579215, 0.13218544075814884, -0.9902726780387395],
-            ]),
-            p=[0.5798396344223478, -0.0008122595958626092, 0.3250179079887979],
-            )]
+            # Planning first grasping trajectory
+            self.grasp_node.compute_candidate_grasps(
+                down_sampled_pcd, 
+                num_samples=5,
+                random_seed=5, 
+                align_grasp_axis=principal_component,  
+                align_minor_axis=minor_component,
+                split_axis=1, 
+                minor_split_axis=0
+            )
+            # grasps = [RigidTransform(
+            # R=RotationMatrix([
+            #     [0.20681969377898063, 0.9685467022240954, 0.1383578688618696],
+            #     [0.9774142324949082, -0.21081815591263353, 0.014735102781668053],
+            #     [0.043439985975579215, 0.13218544075814884, -0.9902726780387395],
+            # ]),
+            # p=[0.5798396344223478, -0.0008122595958626092, 0.3250179079887979],
+            # )]
         else:
-            # # Planning second grasping trajectory
-            # self.grasp_node.compute_candidate_grasps(
-            #     down_sampled_pcd, 
-            #     num_samples=5,
-            #     random_seed=1, 
-            #     align_grasp_axis=secondary_component,
-            #     align_minor_axis=minor_component, 
-            #     split_axis=2, 
-            #     minor_split_axis=0
-            # )
-            grasps = [RigidTransform(
-            R=RotationMatrix([
-                [0.12572403407217733, 0.9917884232805839, 0.023434818182183535],
-                [0.2661806471800798, -0.056479645509977305, 0.9622670693263183],
-                [0.9556889296854982, -0.11474220274023483, -0.2710957332510173],
-            ]),
-            p=[0.5768087034926264, -0.11622951972991928, 0.19546535154771355],
-            )]
+            # Planning second grasping trajectory
+            self.grasp_node.compute_candidate_grasps(
+                down_sampled_pcd, 
+                num_samples=5,
+                random_seed=1, 
+                align_grasp_axis=secondary_component,
+                align_minor_axis=minor_component, 
+                split_axis=2, 
+                minor_split_axis=0
+            )
+            # grasps = [RigidTransform(
+            # R=RotationMatrix([
+            #     [0.12572403407217733, 0.9917884232805839, 0.023434818182183535],
+            #     [0.2661806471800798, -0.056479645509977305, 0.9622670693263183],
+            #     [0.9556889296854982, -0.11474220274023483, -0.2710957332510173],
+            # ]),
+            # p=[0.5768087034926264, -0.11622951972991928, 0.19546535154771355],
+            # )]
         
-        # grasps = self.grasp_node.get_best_grasps(candidate_num=1)
+        grasps = self.grasp_node.get_best_grasps(candidate_num=1)
 
         print(grasps)
         

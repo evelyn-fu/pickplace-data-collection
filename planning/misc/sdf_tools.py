@@ -190,7 +190,7 @@ class SignedDensityField(object):
 
     @classmethod
     def from_pkl(cls, pkl_file):
-        data = pickle.load(open(pkl_file, "r"))
+        data = pickle.load(open(pkl_file, "rb"))
         return cls(data["data"], data["origin"], data["delta"])
 
 
