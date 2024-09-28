@@ -262,11 +262,13 @@ class TwoGraspPlanner(LeafSystem):
 
         # Store the path parameterized display trajectory
         self._display_traj_index = self.DeclareAbstractState(
-            AbstractValue.Make(PiecewisePolynomial())
+            AbstractValue.Make([PiecewisePolynomial()])
         )
         self._place_traj_index = self.DeclareAbstractState(
             AbstractValue.Make(PiecewisePolynomial())
         )
+        self.display_traj_cur_segment = 0
+        self.display_traj_num_segments = 0
 
         self._gripper_traj_end_time = None
 
@@ -460,7 +462,10 @@ class TwoGraspPlanner(LeafSystem):
         ).get_value().start_time_s
 
         if pick_mode == PickState.PREPICK:
-            if context.get_time() > traj_q.end_time() + start_time:
+            wait_time = 0
+            if self.display_traj_cur_segment > 0:
+                wait_time = 1.0
+            if context.get_time() > traj_q.end_time() + start_time + wait_time:
                 state.get_mutable_abstract_state(
                     int(self._pick_mode_index)
                 ).set_value(PickState.CLOSING)
@@ -473,9 +478,15 @@ class TwoGraspPlanner(LeafSystem):
                 self.DoDisplay(context, state)
         if pick_mode == PickState.MOVE:
             if context.get_time() > traj_q.end_time() + start_time:
-                state.get_mutable_abstract_state(
-                    int(self._pick_mode_index)
-                ).set_value(PickState.OPENING)
+                if self.display_traj_cur_segment == self.display_traj_num_segments - 1:
+                    state.get_mutable_abstract_state(
+                        int(self._pick_mode_index)
+                    ).set_value(PickState.OPENING)
+                else:
+                    state.get_mutable_abstract_state(
+                        int(self._pick_mode_index)
+                    ).set_value(PickState.PREPICK)
+                    self.display_traj_cur_segment += 1
                 self.PlanGripper(context, state, "open")
         if pick_mode == PickState.OPENING:
             if context.get_time() > self._gripper_traj_end_time:
@@ -916,7 +927,11 @@ class TwoGraspPlanner(LeafSystem):
         )
 
         q = self.get_input_port(self._iiwa_position_index).Eval(context)
-        traj_q1, traj_q2, traj_q3 = MakePickAndDisplayJointPositionsTrajectory(X_G, times, self._iiwa_controller_plant, q, 8)
+
+        if mode == PlannerState.GO_TO_PREGRASP1:
+            traj_q1, traj_q2, traj_q3 = MakePickAndDisplayJointPositionsTrajectory(X_G, times, self._iiwa_controller_plant, q, 8, True)
+        else:
+            traj_q1, traj_q2, traj_q3 = MakePickAndDisplayJointPositionsTrajectory(X_G, times, self._iiwa_controller_plant, q, 8, False)
         
         toppra_traj_pick = reparameterize_with_toppra(
             trajectory=traj_q1,
@@ -943,10 +958,12 @@ class TwoGraspPlanner(LeafSystem):
         state.get_mutable_abstract_state(self._place_traj_index).set_value(
             traj_q3
         )
+        self.display_traj_cur_segment = 0
+        self.display_traj_num_segments = len(traj_q2)
 
     def DoDisplay(self, context, state):
         current_time = context.get_time()
-        display_traj = context.get_abstract_state(int(self._display_traj_index)).get_value()
+        display_traj = context.get_abstract_state(int(self._display_traj_index)).get_value()[self.display_traj_cur_segment]
         toppra_traj = reparameterize_with_toppra(
             trajectory=display_traj,
             plant=self._iiwa_controller_plant,
