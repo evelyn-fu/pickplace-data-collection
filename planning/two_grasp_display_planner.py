@@ -323,9 +323,9 @@ class TwoGraspPlanner(LeafSystem):
         self.plant = plant
         self._iiwa_controller_plant = controller_plant
         self.velocity_limits = 0.4 * np.ones(7)
-        self.velocity_limits[6] = 1.0
+        self.velocity_limits[6] = 0.2
         self.acceleration_limits = 0.4 * np.ones(7)
-        self.acceleration_limits[6] = 1.0
+        self.acceleration_limits[6] = 0.2
         self.regions = None #regions
         self.object_com = None
         self.object_dims = None
@@ -375,7 +375,11 @@ class TwoGraspPlanner(LeafSystem):
                 ).set_value(ScanState.IDLE)
             return
         if mode == PlannerState.SCANNING1:
-            self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP1)
+            self.PlanToPregrasp(context, state)
+            state.get_mutable_abstract_state(
+                int(self._mode_index)
+            ).set_value(PlannerState.GO_TO_PREGRASP1)
+            # self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP1)
             return
         if mode == PlannerState.GO_TO_PREGRASP1:
             traj_q= context.get_abstract_state(
@@ -414,7 +418,11 @@ class TwoGraspPlanner(LeafSystem):
                 ).set_value(ScanState.IDLE)
             return
         if mode == PlannerState.SCANNING2:
-            self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP2)
+            self.PlanToPregrasp(context, state)
+            state.get_mutable_abstract_state(
+                int(self._mode_index)
+            ).set_value(PlannerState.GO_TO_PREGRASP2)
+            # self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP2)
             return
         if mode == PlannerState.GO_TO_PREGRASP2:
             traj_q= context.get_abstract_state(

@@ -15,7 +15,7 @@ directives:
     child: iiwa::iiwa_link_0
 - add_model:
     name: wsg
-    file: file://./home/real2sim/src/Real2SimObjectManipulation/models/schunk_wsg_50_large_grippers_w_buffer.sdf
+    file: file://./home/real2sim/src/Real2SimObjectManipulation/models/schunk_wsg_50_long_grippers_w_buffer.sdf
 - add_weld:
     parent: iiwa::iiwa_link_7
     child: wsg::body
@@ -82,16 +82,22 @@ directives:
     child: camera_main::base
 
 cameras:
-    main_camera:
-        name: camera0
-        depth: True
-        X_PB:
-            base_frame: camera_main::base
+    # main_camera:
+    #     name: camera0
+    #     lcm_bus: driver_traffic
+    #     depth: True
+    #     X_PB:
+    #         base_frame: camera_main::base
     handeye_camera:
         name: handeye_camera
+        lcm_bus: driver_traffic
         depth: True
         X_PB:
             base_frame: handeye_camera_origin
+
+camera_ids:
+    # main_camera: DRAKE_RGBD_CAMERA_IMAGES_822512060233
+    handeye_camera: DRAKE_RGBD_CAMERA_IMAGES_810512062206
 
 plant_config:
     time_step: 0.001
@@ -110,9 +116,3 @@ model_drivers:
       control_mode: position_only
     wsg: !SchunkWsgDriver 
       lcm_bus: driver_traffic
-    handeye_camera: !RealsenseDriver
-      lcm_bus: driver_traffic
-      sensor_id: "810512062206"
-    # camera0: !RealsenseDriver
-    #   lcm_bus: driver_traffic
-    #   sensor_id: "822512060233"
