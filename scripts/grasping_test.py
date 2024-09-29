@@ -97,7 +97,8 @@ def start_scenario(
         use_same_pkl_regions=False,
         static_regions=False,
         no_obstacles=False,
-        load_trajectories=False
+        load_trajectories=False,
+        regrasp=False,
     ):
     if load_pkl_region1:
         if pkl1_path == "":
@@ -135,8 +136,6 @@ def start_scenario(
     if not use_hardware and save_imgs:
         if not os.path.exists(dirstr+"/rgb/"):
             os.makedirs(dirstr+"/rgb/")
-        if not os.path.exists(dirstr+"/rgb_alpha/"):
-            os.makedirs(dirstr+"/rgb_alpha/")
         if not os.path.exists(dirstr+"/depth/"):
             os.makedirs(dirstr+"/depth/")
         if not os.path.exists(dirstr+"/masks/"):
@@ -249,6 +248,7 @@ def start_scenario(
             traj_dir=traj_dir,
             models_path=os.path.join(dir_path, os.path.join("scenario_datas", models_path)),
             no_obstacles=no_obstacles,
+            regrasp=regrasp,
             gripper_model_path=gripper_model_path))
 
     if save_imgs:
@@ -378,36 +378,42 @@ def start_scenario(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "scenario_path",
+        "--scenario_path",
+        type=str,
         default="scenario_data_grasping.yml",
         help="yaml file with scenario",
     )
     parser.add_argument(
-        "models_path",
+        "--models_path",
+        type=str,
         default="scenario_data_grasping.dmd.yaml",
         help="dmd.yaml file with scenario, used for generating iris regions",
         nargs='?',
     )
     parser.add_argument(
-        "save_dir",
+        "--save_dir",
+        type=str,
         default="temp",
         help="directory to save images in",
         nargs='?',
     )
     parser.add_argument(
-        "pkl1_path",
+        "--pkl1_path",
+        type=str,
         default="",
         help="path to first regions pkl file",
         nargs='?',
     )
     parser.add_argument(
-        "pkl2_path",
+        "--pkl2_path",
+        type=str,
         default="",
         help="path to first regions pkl file",
         nargs='?',
     )
     parser.add_argument(
-        "traj_dir",
+        "--traj_dir",
+        type=str,
         default="",
         help="path to directory with saved gcs trajectories",
         nargs='?',
@@ -452,6 +458,11 @@ if __name__ == "__main__":
         action='store_true',
         help="whether to load gcs trajectories from traj_dir",
     )
+    parser.add_argument(
+        "--regrasp",
+        action='store_true',
+        help="whether to regrasp when displaying",
+    )
     args = parser.parse_args()
 
     gripper_model_path = "file://./home/real2sim/src/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_buffer.sdf"
@@ -480,5 +491,6 @@ if __name__ == "__main__":
         use_same_pkl_regions=args.use_same_pkl_regions,
         static_regions=args.static_regions,
         no_obstacles=args.no_obstacles,
-        load_trajectories=args.load_trajectories
+        load_trajectories=args.load_trajectories,
+        regrasp=args.regrasp,
     )

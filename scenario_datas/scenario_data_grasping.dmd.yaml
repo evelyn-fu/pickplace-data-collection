@@ -6,7 +6,7 @@ directives:
         iiwa_joint_1: [0.0]
         iiwa_joint_2: [0.4]
         iiwa_joint_3: [0]
-        iiwa_joint_4: [-1.2]
+        iiwa_joint_4: [-0.6]
         iiwa_joint_5: [0]
         iiwa_joint_6: [1.0]
         iiwa_joint_7: [-1.57]
@@ -25,16 +25,16 @@ directives:
         
 - add_model:
     name: mustard_bottle
-    file: package://drake/manipulation/models/ycb/sdf/006_mustard_bottle.sdf
+    file: package://drake_models/ycb/006_mustard_bottle.sdf
 - add_frame:
     name: mustard_origin
     X_PF:
         base_frame: world
         translation: [0.4, 0.0, 0.12]
         rotation: !Rpy { deg: [0, 0, 110] }
-- add_weld:
-    parent: mustard_origin
-    child: mustard_bottle::base_link_mustard
+# - add_weld:
+#     parent: mustard_origin
+#     child: mustard_bottle::base_link_mustard
 
 - add_frame:
     name: table_origin

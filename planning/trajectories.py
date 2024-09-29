@@ -5,7 +5,7 @@ from pydrake.all import (
     RotationMatrix,
     RollPitchYaw
 )
-from planning.inverse_kinematics import solve_global_inverse_kinematics
+from planning.inverse_kinematics import solve_global_inverse_kinematics, forward_kinematics
 
 def MakePickAndDisplayGripperFrames(X_G, place_flipped=False):
     """
@@ -73,7 +73,7 @@ def MakePickAndDisplayGripperFrames(X_G, place_flipped=False):
 
     return X_G, times
 
-def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q, max_display_frames=6):
+def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q, max_display_frames=6, place_intermediate=False):
     """
     Constructs a gripper position trajectory from the plan "sketch".
     Returns three piecewise polynomial trajectories. One for before grasp, one for during, one for after.
@@ -96,6 +96,8 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q, max_display
     q_prev = q
     positions3_failed = False
     q_prepick = None
+
+    place_height = X_G["pick_start"].translation()[2]
     for name in [
         "prepick",
         "pick_start",
@@ -126,15 +128,44 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q, max_display
                                3*np.pi/4, np.pi/2, np.pi/4, 
                                0.0, -np.pi/4, -np.pi/2, -3*np.pi/4, -np.pi * 165.0 / 180.0]
                     for i in range(len(q7s)):
+                        current_traj_positions = positions2[-1]
+                        current_traj_times = sample_times2[-1]
+
                         q_temp = q_display_center.copy()
                         q_temp[6] = q7s[i]
-                        positions2.append(q_temp)
-                        
-                        if i == 0:
-                            sample_times2.append((sample_times2[-1] if len(sample_times2) != 0 else 0) + times[name][0])
+                        current_traj_positions.append(q_temp)
+                        if place_intermediate or i == 0:
+                            current_traj_times.append(current_traj_times[-1] + times[name][0])
                         else:
-                            sample_times2.append((sample_times2[-1] if len(sample_times2) != 0 else 0) + times[name][1])
+                            current_traj_times.append(current_traj_times[-1] + times[name][1])
 
+                        if place_intermediate:
+                            X_hover = forward_kinematics(
+                                plant=plant,
+                                q=q_temp,
+                                gripper_frame_name="iiwa_link_7",
+                            )
+
+                            new_translation = X_hover.translation().copy()
+                            new_translation[2] = place_height
+                            X_place = RigidTransform(X_hover.rotation(), new_translation)
+
+                            q_place = solve_global_inverse_kinematics(
+                                plant=plant,
+                                X_G=X_place,
+                                initial_guess=q_temp,
+                                position_tolerance=0.0,
+                                orientation_tolerance=0.0,
+                                gripper_frame_name="iiwa_link_7",
+                            )
+                            current_traj_positions.append(q_place)
+                            current_traj_times.append(current_traj_times[-1] + times[name][0])
+
+                            next_traj_positions = [q_place]
+                            next_traj_times = [0.0]
+
+                            positions2.append(next_traj_positions)
+                            sample_times2.append(next_traj_times)
                     center_found = True
                     q_prev = q_temp
                     break
@@ -145,8 +176,11 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q, max_display
                 sample_times1.append((sample_times1[-1] if len(sample_times1) != 0 else 0) + times[name])
             elif name == "place_end" or name == "postplace" or name == "postpostplace":
                 sample_times3.append((sample_times3[-1] if len(sample_times3) != 0 else 0) + times[name])
+            elif name == "pick_end":
+                sample_times2.append([times[name]])
             else:
-                sample_times2.append((sample_times2[-1] if len(sample_times2) != 0 else 0) + times[name])
+                sample_times2[-1].append((sample_times2[-1][-1] if len(sample_times2[-1]) != 0 else 0) + times[name])
+
 
             if name == "postpostplace":
                 positions3.append(q_prepick)
@@ -195,13 +229,14 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q, max_display
                     positions3_failed = True
                 else:
                     positions3.append(q_next)
+            elif name == "pick_end":
+                positions2.append([q_next])
             else:
-                positions2.append(q_next)
-
-    sample_times2 = [t - sample_times2[0] for t in sample_times2]
-    sample_times3 = [t - sample_times3[0] for t in sample_times3]
+                positions2[-1].append(q_next)
     
     t1 = PiecewisePolynomial.FirstOrderHold(sample_times1, np.array(positions1).T)
-    t2 = PiecewisePolynomial.FirstOrderHold(sample_times2, np.array(positions2).T)
+    t2 = []
+    for i in range(len(sample_times2)):
+        t2.append(PiecewisePolynomial.FirstOrderHold(sample_times2[i], np.array(positions2[i]).T))
     t3 = PiecewisePolynomial.FirstOrderHold(sample_times3, np.array(positions3).T)
     return t1, t2, t3

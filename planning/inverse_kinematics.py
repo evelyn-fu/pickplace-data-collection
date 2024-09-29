@@ -72,3 +72,13 @@ def solve_global_inverse_kinematics(
         return None
     q_sol = result.GetSolution(q_variables)
     return q_sol
+
+def forward_kinematics(
+    plant: MultibodyPlant,
+    q: np.ndarray,
+    gripper_frame_name: str = "body"):
+
+    temp_context = plant.CreateDefaultContext()
+    plant.SetPositions(temp_context, q)
+
+    return plant.EvalBodyPoseInWorld(temp_context, plant.GetBodyByName(gripper_frame_name))
