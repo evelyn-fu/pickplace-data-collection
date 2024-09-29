@@ -227,6 +227,7 @@ class TwoGraspPlanner(LeafSystem):
             models_path=None,
             no_obstacles=False,
             gripper_model_path=None,
+            regrasp=False,
             default_home=q_home
         ):
         LeafSystem.__init__(self)
@@ -337,6 +338,7 @@ class TwoGraspPlanner(LeafSystem):
         self.traj_dir = traj_dir
         self.use_offline_regions1 = False if regions1 is None else True
         self.use_offline_regions2 = False if regions1 is None else True
+        self.regrasp = regrasp
 
         if not self.use_offline_regions1 or not self.use_offline_regions1:
             if models_path == None:
@@ -377,7 +379,11 @@ class TwoGraspPlanner(LeafSystem):
                 ).set_value(ScanState.IDLE)
             return
         if mode == PlannerState.SCANNING1:
-            self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP1)
+            self.PlanToPregrasp(context, state)
+            state.get_mutable_abstract_state(
+                int(self._mode_index)
+            ).set_value(PlannerState.GO_TO_PREGRASP1)
+            # self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP1)
             return
         if mode == PlannerState.GO_TO_PREGRASP1:
             traj_q= context.get_abstract_state(
@@ -416,7 +422,11 @@ class TwoGraspPlanner(LeafSystem):
                 ).set_value(ScanState.IDLE)
             return
         if mode == PlannerState.SCANNING2:
-            self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP2)
+            self.PlanToPregrasp(context, state)
+            state.get_mutable_abstract_state(
+                int(self._mode_index)
+            ).set_value(PlannerState.GO_TO_PREGRASP2)
+            # self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP2)
             return
         if mode == PlannerState.GO_TO_PREGRASP2:
             traj_q= context.get_abstract_state(
@@ -929,7 +939,7 @@ class TwoGraspPlanner(LeafSystem):
         q = self.get_input_port(self._iiwa_position_index).Eval(context)
 
         if mode == PlannerState.GO_TO_PREGRASP1:
-            traj_q1, traj_q2, traj_q3 = MakePickAndDisplayJointPositionsTrajectory(X_G, times, self._iiwa_controller_plant, q, 8, True)
+            traj_q1, traj_q2, traj_q3 = MakePickAndDisplayJointPositionsTrajectory(X_G, times, self._iiwa_controller_plant, q, 8, self.regrasp)
         else:
             traj_q1, traj_q2, traj_q3 = MakePickAndDisplayJointPositionsTrajectory(X_G, times, self._iiwa_controller_plant, q, 8, False)
         

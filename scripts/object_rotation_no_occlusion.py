@@ -1,6 +1,7 @@
 import copy
 import os
 from PIL import Image
+import argparse
 
 import matplotlib.pyplot as plt
 import matplotlib as mpl
@@ -169,9 +170,19 @@ def Visualizer(dirstr):
     return visualize
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "save_dir",
+        default="temp",
+        help="directory to save images in",
+        nargs='?',
+    )
+    args = parser.parse_args()
+    save_dir_path = os.path.abspath(os.path.join(os.path.dirname( __file__ ), '..', 'tests', args.save_dir))
+
     meshcat = StartMeshcat()
 
-    visualize = Visualizer("tests/rotation_no_occlusion3")
+    visualize = Visualizer(save_dir_path)
 
     meshcat.AddSlider(name="x", value=0.6, min=-0.5, max=0.6, step=0.01)
     meshcat.AddSlider(name="y", value=0, min=-0.5, max=0.5, step=0.01)

@@ -93,8 +93,6 @@ class ImageSaver(LeafSystem):
         
         # color
         color = self.GetInputPort("rgb_in").Eval(context).data
-        color_pil = Image.fromarray(color)
-        color_pil.save(self.dirstr+"/rgb_alpha/"+timestr+".png")
 
         # remove alpha
         color_no_alpha = color[:, :, :3]
