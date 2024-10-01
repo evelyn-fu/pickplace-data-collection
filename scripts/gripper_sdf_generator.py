@@ -80,7 +80,7 @@ def generate_sdf(delta, origin, boxes, k=16.0):
     # Reshape back to 3D grid
     sdf_grid = sdf_grid.reshape((grid_size_x, grid_size_y, grid_size_z))
     
-    sdf = SignedDensityField(sdf_grid, np.array(origin), delta)
+    sdf = SignedDensityField(sdf_grid, bounds[:,0] - np.array(origin), delta)
 
     return sdf
 
