@@ -49,8 +49,8 @@ def Visualizer(dirstr):
 
     # Make plant, scene graph, add body
     plant, scene_graph = AddMultibodyPlantSceneGraph(builder, time_step=0.0)
-    scenario_url = "file://./home/evelyn/sources/Real2SimObjectManipulation/scenario_datas/scenario_data_grasping.dmd.yaml"
-    Parser(plant).AddModelsFromUrl(scenario_url)
+    scenario_path = os.path.abspath(os.path.join(os.path.dirname( __file__ ), '..', 'scenario_datas', 'scenario_data_grasping.dmd.yaml'))
+    Parser(plant).AddModels(scenario_path)
     # mustard_body = plant.GetBodyByName("base_link_mustard")
     # mustard_joint = plant.AddJoint(
     #     QuaternionFloatingJoint(
