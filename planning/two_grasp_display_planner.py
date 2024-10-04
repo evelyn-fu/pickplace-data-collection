@@ -847,6 +847,7 @@ class TwoGraspPlanner(LeafSystem):
         else:
             X_WG = self.grasp_node.get_best_grasps(candidate_num=1)[0][1]
 
+        X_WG = RigidTransform(X_WG)
         print(X_WG)
         
         # get end effector pose from grasp pose

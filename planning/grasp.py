@@ -24,6 +24,7 @@ from planning.misc.sdf_tools import SignedDensityField
 import time
 import multiprocessing
 from multiprocessing.pool import ThreadPool as Pool
+import torch
 
 lock = threading.Lock()
 
@@ -382,20 +383,29 @@ class GraspListener():
             within_box_pt_normals[1, :] ** 2
         ) / within_box_pt_normals.shape[1]  # along the horizontal axis of the gripper, larger good (antipodal metric)
 
+        # want grasps to avoid alignment with long axes, smaller better
         gripper_vertical_axis_alignment_cost = -np.max(np.abs(eff_vertical_vec @ split_axes))
         gripper_horizontal_axis_alignment_cost = -np.max(np.abs(eff_horizontal_vec @ split_axes))
+
+        # consider lower two split ratio costs (grasp should be even along at least two axes)
         split_ratio_costs = -split_ratios
         split_ratio_costs_sorted = np.sort(split_ratio_costs)
+        split_ratio_cost = split_ratio_costs_sorted[0] + split_ratio_costs_sorted[1]
         cost = (
             10.0 * antipodal_cost
             + 10.0 * gripper_vertical_axis_alignment_cost
             + 5.0 * gripper_horizontal_axis_alignment_cost
-            + 5.0 * split_ratio_costs_sorted[0]
-            + 5.0 * split_ratio_costs_sorted[1]
+            + 5.0 * split_ratio_cost
         )
         return cost
 
-    def compute_costs_batch(self, X_WGs: np.ndarray, within_box_pt_normals: np.ndarray, split_ratios: float, align_grasp_axis: List[float]=[0,0,1]) -> float:
+    def compute_costs_batch(
+            self, 
+            X_WGs: RigidTransform, 
+            within_box_pt_normals: np.ndarray,
+            split_ratios: np.ndarray,
+            split_axes = np.ndarray,
+            ) -> float:
         """
         Computes a grasp candidate cost based on a weighted sum of:
         - Antipodal (grasp normal) cost (prefer more antipodal)
@@ -410,20 +420,24 @@ class GraspListener():
         R = X_WGs[:, :3, :3]
         t = X_WGs[:, :3, 3]
 
-        eff_vertical_vec = R @ np.array([0, 0, 1])
+        eff_vertical_vec = R @ np.array([0, 0, 1]) # vertical axis of gripper (parallel to fingers)
+        eff_horizontal_vec = R @ np.array([0, 1, 0]) # horizontal axis of gripper (line connecting finger tips)
 
-        antipodal_cost = np.asarray([-np.sum(el[1, :] ** 2) for el in within_box_pt_normals])
         # along the y axis of the gripper, larger good (antipodal metric)
-        gripper_vertical_alignment_cost = eff_vertical_vec @ align_grasp_axis  # want z axis of gripper to face down, larger worse
-        grasp_height_cost = -t[:, 2]  # prefer higher position
-        split_ratio_minor_axis_cost = -split_ratios[0]  # prefer higher split ratio
-        split_ratio_major_axis_cost = -split_ratios[2]
+        antipodal_cost = np.asarray([-np.sum(el[1, :] ** 2) for el in within_box_pt_normals])
+        # want grasps to avoid alignment with long axes, smaller better
+        gripper_vertical_axis_alignment_cost = -np.max(np.abs(eff_vertical_vec @ split_axes)) 
+        gripper_horizontal_axis_alignment_cost = -np.max(np.abs(eff_horizontal_vec @ split_axes))
+
+        # consider lower two split ratio costs (grasp should be even along at least two axes)
+        split_ratio_costs = -split_ratios
+        split_ratio_costs_sorted = np.sort(split_ratio_costs)
+        split_ratio_cost = split_ratio_costs_sorted[0] + split_ratio_costs_sorted[1]
         cost = (
-            antipodal_cost
-            + 100.0 * gripper_vertical_alignment_cost
-            + 10.0 * grasp_height_cost
-            + 1.0 * split_ratio_minor_axis_cost
-            + 10.0 * split_ratio_major_axis_cost
+            10.0 * antipodal_cost
+            + 10.0 * gripper_vertical_axis_alignment_cost
+            + 5.0 * gripper_horizontal_axis_alignment_cost
+            + 5.0 * split_ratio_cost
         )
         return cost
 
@@ -698,9 +712,7 @@ class GraspListener():
 
         # Filter pcd based on split ratio: must pass threshold for any 2/3 axes
         split_ratios, split_axes, length = self.compute_pcd_split_ratio(pcd_points, viz_split_ratio_axes=False)
-        mask = (split_ratios[:, 0] > split_ratio_threshold) or (split_ratios[:, 1] > split_ratio_threshold) * (
-            split_ratios[:, 1] > split_ratio_threshold) or (split_ratios[:, 2] > split_ratio_threshold) * (
-            split_ratios[:, 2] > split_ratio_threshold) or (split_ratios[:, 0] > split_ratio_threshold)
+        mask = np.any(split_ratios > split_ratio_threshold, axis=1)
         split_ratio_filtered_points = pcd_points[mask]
         split_ratio_filtered_normals = pcd.normals()[:, mask].T
 
@@ -735,11 +747,12 @@ class GraspListener():
         PARALLEL = False
         VISUALIZE = False
         VISUALIZE_EACH = False
+        VISUALIZE_ALL = True
 
         start_time = time.time()
         if not PARALLEL:
             # Local grid search around darboux frames
-            candidate_lst: List[RigidTransform] = []
+            candidate_lst: List[np.ndarray] = []
             candidate_costs: List[float] = []
             for X_WP, split_ratio in zip(X_WPs, split_ratios[darboux_frame_sample_indices]):
                 color = np.random.rand(3)
@@ -749,12 +762,9 @@ class GraspListener():
                     for pitch in np.linspace(pitch_min, pitch_max, num_pitch_samples):
                         for roll in np.linspace(roll_min, roll_max, num_roll_samples):
                             for yaw in np.linspace(yaw_min, yaw_max, num_yaw_samples):
-                                start = time.time()
                                 # TODO: Explore whether it is faster to do this transform in numpy
-                                transform_start = time.time()
                                 X_PPnew = RigidTransform(RollPitchYaw(roll, pitch, yaw), np.array([0, y, 0]))
                                 X_WPnew = X_WP.multiply(X_PPnew)
-                                # print("transform time", time.time()-transform_start)
 
                                 if VISUALIZE:
                                     # visualize
@@ -764,17 +774,13 @@ class GraspListener():
                                     print("darboux frame", X_WP)
 
                 
-                                check_vertical_start = time.time()
                                 R_WPnew = X_WPnew.GetAsMatrix4()[:3, :3]
                                 eff_vertical_vec = R_WPnew.dot(np.array([0, 0, 1])) # don't want it to face up
-                                # print("check_vertical time", time.time()-check_vertical_start)
                                 if eff_vertical_vec[2] > 0:
                                     continue
                                 
-                                min_dist_start = time.time()
                                 # Compute a new transform that minimizes y-direction distance without penetration
                                 distance, X_WPnew = self.find_minimum_distance(pcd, X_WPnew)
-                                # print("find_minimum_distance time", time.time()-min_dist_start)
                                 # If distance cannot be found, go over to the next iteration
                                 if np.isnan(distance):
                                     continue
@@ -783,9 +789,8 @@ class GraspListener():
                                 # empty, then append it to the list of candidates.
                                 is_nonempty, within_box_pt_normals, _ = self.check_nonempty(pcd, X_WPnew)
                                 if is_nonempty:
-                                    candidate_lst.append(X_WPnew)
+                                    candidate_lst.append(X_WPnew.GetAsMatrix4())
                                     viz_geoms.append(self.make_gripper_line_set(X_WPnew.GetAsMatrix4(), color))
-                                    costs_start = time.time()
                                     candidate_costs.append(
                                         self.compute_costs(
                                             X_WPnew, 
@@ -794,151 +799,139 @@ class GraspListener():
                                             split_axes
                                         )
                                     )
-                                    # print("costs time", time.time()-costs_start)
                                     if VISUALIZE_EACH:
                                         print(candidate_costs[-1])
                                         o3d.visualization.draw_geometries([manipuland_cloud, self.make_triad_line_set(X_WP.GetAsMatrix4(), [0.0, 1.0, 0.0]), self.make_gripper_line_set(X_WPnew.GetAsMatrix4(), [1.0, 0.0, 0.0])])
 
-                                # print("inner loop time", time.time()-start)
-            if VISUALIZE:
-                o3d.visualization.draw_geometries(viz_geoms)
             print("sequential antipodal grasp time: {:.3f}".format(time.time() - start_time))
+            if VISUALIZE_ALL:
+                o3d.visualization.draw_geometries(viz_geoms)
 
         else:
-            # This is literally slower oof
             y_split = np.linspace(y_min, y_max, num_y_samples)
-            pitch_split = np.linspace(pitch_min, pitch_max, num_pitch_samples)
+
             roll_split = np.linspace(roll_min, roll_max, num_roll_samples)
+            pitch_split = np.linspace(pitch_min, pitch_max, num_pitch_samples)
             yaw_split = np.linspace(yaw_min, yaw_max, num_yaw_samples)
+            # List of all possible roll, pitch, yaw combinations
+            rot_list = np.stack(np.meshgrid(roll_split, pitch_split, yaw_split), axis=-1).reshape(-1, 3)
+            batch_rot = to_rotation_matrices(torch.from_numpy(rot_list)).detach().numpy()
 
-            def check_candidate(X_WP, split_ratio, y, pitch, roll, yaw):
-                X_PPnew = RigidTransform(RollPitchYaw(roll, pitch, yaw), np.array([0, y, 0]))
-                X_WPnew = X_WP.multiply(X_PPnew)
+            pcd_W_np = pcd.xyzs()[np.newaxis, :]
+            pcd_W_normals = pcd.normals()[np.newaxis, :]
 
-                # Compute a new transform that minimizes y-direction distance without penetration
-                distance, X_WPnew = self.find_minimum_distance(pcd, X_WPnew)
-                # If distance cannot be found, go over to the next iteration
-                if np.isnan(distance):
-                    return None, None
-
-                # If the candidate has no collisions and the closing region is non
-                # empty, then append it to the list of candidates.
-                is_nonempty, within_box_pt_normals = self.check_nonempty(pcd, X_WPnew)
-                if is_nonempty:
-                    candidate = X_WPnew
-                    candidate_cost = self.compute_costs(
-                                        X_WPnew, 
-                                        within_box_pt_normals, 
-                                        split_ratio,
-                                        split_axes
-                                    )
-                    return candidate, candidate_cost
-                return None, None
-            def check_candidate_star(args):
-                return check_candidate(*args)
-
-            candidate_lst: List[RigidTransform] = []
+            candidate_lst: List[np.ndarray] = []
             candidate_costs: List[float] = []
-            print(f"compute_candidate_grasps PARALLEL. PROCESSES = {PROCESSES}")
-            with Pool(PROCESSES) as pool:
-                tasks = [(X_WP, split_ratio, y, pitch, roll, yaw)
-                         for X_WP, split_ratio in zip(X_WPs, split_ratios[darboux_frame_sample_indices])
-                         for y in y_split
-                         for pitch in pitch_split
-                         for roll in roll_split
-                         for yaw in yaw_split]
-                for candidate, candidate_cost in pool.map(check_candidate_star, tasks):
-                    if candidate != None:
-                        candidate_lst.append(candidate)
-                        candidate_costs.append(candidate_cost)
+            for X_WP, split_ratio in zip(X_WPs, split_ratios[darboux_frame_sample_indices]):
+                batch_delta_transform = np.zeros((len(batch_rot), 4, 4))
+                batch_delta_transform[:, :3, :3] = batch_rot
+                batch_delta_transform[:, :3, 1] = y_split
+                X_WP_batch = X_WP.GetAsMatrix4()[np.newaxis, :] @ batch_delta_transform
 
-            # y_split = np.linspace(y_min, y_max, num_y_samples)
+                distances, X_WPnew_batch = self.find_minimum_distance_batch(pcd_W_np, X_WP_batch)
+                no_penetration_mask = distances > 0.0
+                X_WPnew_batch_no_penetration = X_WPnew_batch[no_penetration_mask]
+                if len(X_WPnew_batch_no_penetration) == 0:
+                    continue
 
-            # roll_split = np.linspace(roll_min, roll_max, num_roll_samples)
-            # pitch_split = np.zeros_like(roll_split)
-            # yaw_split = np.linspace(yaw_min, yaw_max, num_yaw_samples)
-            # # List of all possible roll, pitch, yaw combinations
-            # rot_list = np.stack(np.meshgrid(roll_split, pitch_split, yaw_split), axis=-1).reshape(-1, 3)
-            # batch_rot = to_rotation_matrices(torch.from_numpy(rot_list)).detach().numpy()
+                cage_mask, within_box_pt_normals = self.check_nonempty_batch(
+                    pcd_W_np, pcd_W_normals, X_WPnew_batch_no_penetration
+                )
+                X_WPnew_batch_nonempty = X_WPnew_batch_no_penetration[cage_mask]
+                if len(X_WPnew_batch_nonempty) == 0:
+                    continue
 
-            # pcd_W_np = pcd.xyzs()[np.newaxis, :]
-            # pcd_W_normals = pcd.normals()[np.newaxis, :]
+                grasp_costs = self.compute_costs_batch(X_WPnew_batch_no_penetration, within_box_pt_normals, split_ratio, split_axes)
 
-            # candidate_lst = []
-            # candidate_costs = []
-            # for X_WP, split_ratio in zip(X_WPs, split_ratios[darboux_frame_sample_indices]):
-            #     batch_delta_transform = np.zeros((len(batch_rot), 4, 4))
-            #     batch_delta_transform[:, :3, :3] = batch_rot
-            #     batch_delta_transform[:, :3, 1] = y_split
-            #     X_WP_batch = X_WP.GetAsMatrix4()[np.newaxis, :] @ batch_delta_transform
+                # Pick valid grasps and associated costs
+                candidate_lst.append(X_WPnew_batch_nonempty)
+                candidate_costs.append(grasp_costs[cage_mask])
 
-            #     distances, X_WPnew_batch = self.find_minimum_distance_batch(pcd_W_np, X_WP_batch)
-            #     no_penetration_mask = distances > 0.0
-            #     X_WPnew_batch_no_penetration = X_WPnew_batch[no_penetration_mask]
-            #     if len(X_WPnew_batch_no_penetration) == 0:
-            #         continue
-
-            #     cage_mask, within_box_pt_normals = self.check_nonempty_batch(
-            #         pcd_W_np, pcd_W_normals, X_WPnew_batch_no_penetration
-            #     )
-            #     X_WPnew_batch_nonempty = X_WPnew_batch_no_penetration[cage_mask]
-            #     if len(X_WPnew_batch_nonempty) == 0:
-            #         continue
-
-            #     grasp_costs = self.compute_costs_batch(X_WPnew_batch_no_penetration, within_box_pt_normals, split_ratio, align_grasp_axis)
-
-            #     # Pick valid grasps and associated costs
-            #     candidate_lst.append(X_WPnew_batch_nonempty)
-            #     candidate_costs.append(grasp_costs[cage_mask])
-
-            # candidate_lst = np.concatenate(candidate_lst, axis=0)
-            # candidate_costs = np.concatenate(candidate_costs, axis=0)
+            candidate_lst = np.concatenate(candidate_lst, axis=0)
+            candidate_costs = np.concatenate(candidate_costs, axis=0)
 
             print("parallel antipodal grasp time: {:.3f}".format(time.time() - start_time))
+            if VISUALIZE_ALL:
+                for X_G in candidate_lst:
+                    viz_geoms.append(self.make_gripper_line_set(X_G, [0, 0, 1]))
+                o3d.visualization.draw_geometries(viz_geoms)
 
-        sorted_indices = np.argsort(candidate_costs)
-        candidate_lst_sorted = [candidate_lst[idx] for idx in sorted_indices]
-        candidate_costs_sorted = [candidate_costs[idx] for idx in sorted_indices]
+        start = time.time()
 
         # Two grasp selection
-        pairs = []
-        pair_costs = []
-        for i in range(len(candidate_lst_sorted)-1):
-            for j in range(i+1, len(candidate_lst_sorted)):
-                X_WG1 = candidate_lst_sorted[i]
-                X_WG2 = candidate_lst_sorted[j]
-                cost1 = candidate_costs_sorted[i]
-                cost2 = candidate_costs_sorted[j]
+        candidate_lst = np.array(candidate_lst)
+        N = candidate_lst.shape[0]
+    
+        # Extract translations (last column of each 4x4 matrix)
+        translations = candidate_lst[:, :3, 3]
+        
+        # Compute pairwise translation differences
+        translation_diffs = np.linalg.norm(translations[:, np.newaxis] - translations[np.newaxis, :], axis=-1)
+        translation_cost = -translation_diffs / length
+        
+        # Extract rotations (top-left 3x3 part of each 4x4 matrix)
+        rotations = candidate_lst[:, :3, :3]
+        
+        # Compute pairwise rotational differences
+        # R_relative = R2^T @ R1 (for each pair of rotations R1, R2)
+        relative_rotations = np.einsum('nij,mjk->nmik', rotations, rotations.transpose(0, 2, 1))
+        
+        # Compute the angle of rotation from the relative rotation matrices
+        # Trace(R_relative) = 1 + 2*cos(theta), where theta is the angle of rotation
+        trace_relative_rotations = np.einsum('...ii', relative_rotations)
+        rotation_diffs = np.arccos(np.clip((trace_relative_rotations - 1) / 2, -1.0, 1.0))  # Avoid precision errors
+        rotation_cost = np.abs(np.pi/2 - rotation_diffs) / (np.pi/2)
 
-                R1 = X_WG1.GetAsMatrix4()[:3, :3]
-                t1 = X_WG1.GetAsMatrix4()[:3, 3]
-                R2 = X_WG2.GetAsMatrix4()[:3, :3]
-                t2 = X_WG2.GetAsMatrix4()[:3, 3]
+        candidate_costs = np.array(candidate_costs)
+        grasps_quality = candidate_costs[:, np.newaxis] + candidate_costs[np.newaxis, :]
 
-                # normalized translational distance between grasps, higher better
-                dist_cost = -np.linalg.norm(t1 - t2) / length 
+        pair_costs = grasps_quality + 10 * translation_cost + 10 * rotation_cost
+        pair_costs = np.triu(pair_costs, k=1) + np.tril(np.inf * np.ones_like(pair_costs)) # make lower + diagonal infinity to avoid double counting
+        pair_costs = pair_costs.flatten()
+        pairs = [(X_WG1, X_WG2) for X_WG1 in candidate_lst for X_WG2 in candidate_lst]
+
+        # sorted_indices = np.argsort(candidate_costs)
+        # candidate_lst_sorted = [candidate_lst[idx] for idx in sorted_indices]
+        # candidate_costs_sorted = [candidate_costs[idx] for idx in sorted_indices]
+        # pairs = []
+        # pair_costs = []
+        # for i in range(len(candidate_lst_sorted)-1):
+        #     for j in range(i+1, len(candidate_lst_sorted)):
+        #         X_WG1 = candidate_lst_sorted[i]
+        #         X_WG2 = candidate_lst_sorted[j]
+        #         cost1 = candidate_costs_sorted[i]
+        #         cost2 = candidate_costs_sorted[j]
+
+        #         R1 = X_WG1.GetAsMatrix4()[:3, :3]
+        #         t1 = X_WG1.GetAsMatrix4()[:3, 3]
+        #         R2 = X_WG2.GetAsMatrix4()[:3, :3]
+        #         t2 = X_WG2.GetAsMatrix4()[:3, 3]
+
+        #         # normalized translational distance between grasps, higher better
+        #         dist_cost = -np.linalg.norm(t1 - t2) / length 
                 
-                # TODO: maybe try to avoid axis alignment? (big gripper fingers, more obstruction when grasping along long axis)
-                R_1_2 = R1.inv() @ R2
-                r = R.from_matrix(R_1_2)
-                angle_of_rotation = r.magnitude()
+        #         # TODO: maybe try to avoid axis alignment? (big gripper fingers, more obstruction when grasping along long axis)
+        #         R_1_2 = np.linalg.inv(R1) @ R2
+        #         r = R.from_matrix(R_1_2)
+        #         angle_of_rotation = r.magnitude()
 
-                # normalized distance from 90 degree rotation, lower better
-                rot_cost = np.abs(np.pi/2 - angle_of_rotation) / (np.pi/2)
+        #         # normalized distance from 90 degree rotation, lower better
+        #         rot_cost = np.abs(np.pi/2 - angle_of_rotation) / (np.pi/2)
 
-                total_cost = (
-                    cost1 + 
-                    cost2 + 
-                    10 * dist_cost + 
-                    10 * rot_cost
-                )
+        #         total_cost = (
+        #             cost1 + 
+        #             cost2 + 
+        #             10 * dist_cost + 
+        #             10 * rot_cost
+        #         )
 
-                pairs.append((X_WG1, X_WG2))
-                pair_costs.append(total_cost)
+        #         pairs.append((X_WG1, X_WG2))
+        #         pair_costs.append(total_cost)
 
         sorted_pair_indices = np.argsort(pair_costs)
         pair_lst_sorted = [pairs[idx] for idx in sorted_pair_indices]
 
+        print("pair selection time:", time.time()-start)
         # List of grasp pairs
         self.grasp_candidates: List[Tuple[np.ndarray]] = pair_lst_sorted[:candidate_num]
 
