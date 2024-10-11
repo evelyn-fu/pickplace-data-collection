@@ -1,7 +1,7 @@
 directives:
 - add_model:
     name: iiwa
-    file: package://drake_models/iiwa_description/sdf/iiwa14_no_collision.sdf
+    file: file://./home/evelyn/sources/Real2SimObjectManipulation/models/iiwa14_polytope_collision.sdf
     default_joint_positions:
         iiwa_joint_1: [0.0]
         iiwa_joint_2: [0.4]
@@ -22,19 +22,6 @@ directives:
     X_PC:
         translation: [0, 0, 0.09]
         rotation: !Rpy { deg: [90, 0, 90]}
-        
-- add_model:
-    name: mustard_bottle
-    file: package://drake_models/ycb/006_mustard_bottle.sdf
-- add_frame:
-    name: mustard_origin
-    X_PF:
-        base_frame: world
-        translation: [0.4, 0.0, 0.12]
-        rotation: !Rpy { deg: [0, 0, 110] }
-- add_weld:
-    parent: mustard_origin
-    child: mustard_bottle::base_link_mustard
 
 - add_frame:
     name: table_origin

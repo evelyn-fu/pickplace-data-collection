@@ -99,6 +99,7 @@ def start_scenario(
         no_obstacles=False,
         load_trajectories=False,
         regrasp=False,
+        wrist_camera_images=False,
     ):
     if load_pkl_region1:
         if pkl1_path == "":
@@ -130,6 +131,15 @@ def start_scenario(
         external_station = builder.AddSystem(MakeHardwareStation(scenario, meshcat, hardware=True))
     plant = station.GetSubsystemByName("plant")
 
+    # initialize camera pose source from camera calibation
+    r = R.from_quat([0.00969807, -0.0140297, -0.70331, 0.710679])
+    x_ee_camera = RigidTransform(
+        R=RotationMatrix(r.as_matrix()),
+        p = [-0.074597, 0.0324164, 0.155892]
+    )
+
+    camera_pose_source = builder.AddSystem(CameraPoseInWorldSource(x_ee_camera))
+
     # initialize image writer and save directories
     if not os.path.exists(dirstr):
         os.makedirs(dirstr)
@@ -144,6 +154,18 @@ def start_scenario(
             os.makedirs(dirstr+"/gripper_masks/")
         if not use_hardware and not os.path.exists(dirstr+"/ob_in_cam/"):
             os.makedirs(dirstr+"/ob_in_cam/")
+
+        if wrist_camera_images:
+            if not os.path.exists(dirstr+"/rgb_wrist/"):
+                os.makedirs(dirstr+"/rgb_wrist/")
+            if not os.path.exists(dirstr+"/depth_wrist/"):
+                os.makedirs(dirstr+"/depth_wrist/")
+            if not os.path.exists(dirstr+"/masks_wrist/"):
+                os.makedirs(dirstr+"/masks_wrist/")
+            if not os.path.exists(dirstr+"/gripper_masks_wrist/"):
+                os.makedirs(dirstr+"/gripper_masks_wrist/")
+            if not use_hardware and not os.path.exists(dirstr+"/ob_in_cam_wrist/"):
+                os.makedirs(dirstr+"/ob_in_cam_wrist/")
 
         # save images
         if use_hardware:
@@ -171,6 +193,25 @@ def start_scenario(
             builder.Connect(station.GetOutputPort("camera0.depth_image"), img_saver.GetInputPort("depth_in"))
             builder.Connect(station.GetOutputPort("body_poses"), img_saver.GetInputPort("body_poses"))
 
+            if wrist_camera_images:
+                # handeye image saver
+                wrist_img_saver = builder.AddSystem(
+                    ImageSaver(
+                        depth_format="32F",
+                        dirstr=dirstr, 
+                        labels=True, 
+                        camera_info=False, 
+                        ob_in_cam=True,
+                        object_index=plant.GetBodyByName("base_link_mustard").index(),
+                        camera_name="wrist",
+                        save_scanning=True
+                    )
+                )
+                builder.Connect(station.GetOutputPort("handeye_camera.label_image"), wrist_img_saver.GetInputPort("label_in"))
+                builder.Connect(station.GetOutputPort("handeye_camera.rgb_image"), wrist_img_saver.GetInputPort("rgb_in"))
+                builder.Connect(station.GetOutputPort("handeye_camera.depth_image"), wrist_img_saver.GetInputPort("depth_in"))
+                builder.Connect(camera_pose_source.GetOutputPort("X_WC"), wrist_img_saver.GetInputPort("camera_pose"))
+
 
     # initialize point cloud output ports and save camera instrinsics
     if not use_hardware:
@@ -189,14 +230,6 @@ def start_scenario(
         builder.Connect(external_station.GetOutputPort("handeye_camera.depth_image"), handeye_camera_pcd.GetInputPort("depth_image"))
 
     
-    # from camera calibation
-    r = R.from_quat([0.00969807, -0.0140297, -0.70331, 0.710679])
-    x_ee_camera = RigidTransform(
-        R=RotationMatrix(r.as_matrix()),
-        p = [-0.074597, 0.0324164, 0.155892]
-    )
-
-    camera_pose_source = builder.AddSystem(CameraPoseInWorldSource(x_ee_camera))
     eef_pose = builder.AddSystem(
         ExtractPose(
             plant.GetBodyByName("iiwa_link_7").index()
@@ -253,6 +286,8 @@ def start_scenario(
 
     if save_imgs:
         builder.Connect(planner.GetOutputPort("planner_state"), img_saver.GetInputPort("planner_state"))
+        if wrist_camera_images:
+            builder.Connect(planner.GetOutputPort("planner_state"), wrist_img_saver.GetInputPort("planner_state"))
 
     if use_hardware:
         # Connect the output of external station to the input of internal station
@@ -463,6 +498,11 @@ if __name__ == "__main__":
         action='store_true',
         help="whether to regrasp when displaying",
     )
+    parser.add_argument(
+        "--save_wrist_camera_imgs",
+        action='store_true',
+        help="whether to regrasp when displaying",
+    )
     args = parser.parse_args()
 
     gripper_model_path = None
@@ -474,7 +514,7 @@ if __name__ == "__main__":
     meshcat = StartMeshcat()
 
     save_dir_path = os.path.abspath(os.path.join(os.path.dirname( __file__ ), '..', 'tests', args.save_dir))
-    scanning_traj_path = os.path.abspath(os.path.join(os.path.dirname( __file__ ), '..', 'scanning_traj'))
+    scanning_traj_path = os.path.abspath(os.path.join(os.path.dirname( __file__ ), '..', 'scanning_traj_continuous'))
     start_scenario(
         save_dir_path, 
         scenario_path= args.scenario_path, 
@@ -493,4 +533,5 @@ if __name__ == "__main__":
         no_obstacles=args.no_obstacles,
         load_trajectories=args.load_trajectories,
         regrasp=args.regrasp,
+        wrist_camera_images=args.save_wrist_camera_imgs
     )

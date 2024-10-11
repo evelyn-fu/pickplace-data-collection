@@ -32,7 +32,9 @@ class ImageSaver(LeafSystem):
             camera_info=False, 
             ob_in_cam=False, 
             object_index=None, 
-            camera_index=None
+            camera_index=None,
+            camera_name=None,
+            save_scanning=False,
         ):
         super().__init__()
 
@@ -42,6 +44,8 @@ class ImageSaver(LeafSystem):
         self.ob_in_cam = ob_in_cam
         self.object_index = object_index
         self.camera_index = camera_index
+        self.camera_name = "" if camera_name is None else "_"+camera_name
+        self.save_scanning = save_scanning
         self.DeclareAbstractInputPort(name="rgb_in",
                                       model_value=Value(ImageRgba8U()))
         
@@ -64,9 +68,13 @@ class ImageSaver(LeafSystem):
                                         model_value=Value(camera_info_model))
             self.DeclareInitializationPublishEvent(self.Initialize)
         
-        if ob_in_cam:
+        if ob_in_cam and camera_index is not None:
             self.DeclareAbstractInputPort(
                 "body_poses", model_value=Value([RigidTransform()])
+            )
+        elif ob_in_cam:
+            self.DeclareAbstractInputPort(
+                "camera_pose", model_value=Value(RigidTransform())
             )
         
         self.DeclareAbstractInputPort("planner_state", model_value=Value(PlannerState.START))
@@ -85,7 +93,7 @@ class ImageSaver(LeafSystem):
             PlannerState.START,
             PlannerState.SCANNING1, 
             PlannerState.SCANNING2]
-        if self.GetInputPort("planner_state").Eval(context) in no_save_states:
+        if (self.GetInputPort("planner_state").Eval(context) in no_save_states) ^ self.save_scanning:
             return
         
         time_ms = int(context.get_time() * 1000)
@@ -97,7 +105,7 @@ class ImageSaver(LeafSystem):
         # remove alpha
         color_no_alpha = color[:, :, :3]
         color_no_alpha_pil = Image.fromarray(color)
-        color_no_alpha_pil.save(self.dirstr+"/rgb/"+timestr+".png")
+        color_no_alpha_pil.save(self.dirstr+"/rgb"+self.camera_name+"/"+timestr+".png")
 
         # depth
         if self.depth_format != "16U":
@@ -113,7 +121,7 @@ class ImageSaver(LeafSystem):
         # cap depth at 3000mm
         depth[depth > 3000] = 3000
         depth_pil = Image.fromarray(depth)
-        depth_pil.save(self.dirstr+"/depth/"+timestr+".png")
+        depth_pil.save(self.dirstr+"/depth"+self.camera_name+"/"+timestr+".png")
 
         # labels
         if self.labels:
@@ -127,10 +135,10 @@ class ImageSaver(LeafSystem):
                 np.uint8(np.where(label_image == label, 255, 0)) for label in object_labels
             ]
             mask_pil = Image.fromarray(masks[0])
-            mask_pil.save(self.dirstr+"/masks/"+timestr+".png")
+            mask_pil.save(self.dirstr+"/masks"+self.camera_name+"/"+timestr+".png")
 
             gripper_mask_pil = Image.fromarray(masks[1])
-            gripper_mask_pil.save(self.dirstr+"/gripper_masks/"+timestr+".png")
+            gripper_mask_pil.save(self.dirstr+"/gripper_masks"+self.camera_name+"/"+timestr+".png")
         
         # ob_in_cam pose
         if self.ob_in_cam:
@@ -139,7 +147,7 @@ class ImageSaver(LeafSystem):
 
             o2c = c2w.inverse() @ o2w
             T = o2c.GetAsMatrix4()
-            np.savetxt(self.dirstr+"/ob_in_cam/"+timestr+".txt", T)
+            np.savetxt(self.dirstr+"/ob_in_cam"+self.camera_name+"/"+timestr+".txt", T)
 
     def Initialize(self, context):
         rgb_info = self.GetInputPort("rgb_info_in").Eval(context)
@@ -148,8 +156,8 @@ class ImageSaver(LeafSystem):
         K_color = rgb_info.intrinsic_matrix()
         K_depth = depth_info.intrinsic_matrix()
 
-        np.savetxt(self.dirstr+"/cam_K.txt", K_color)
-        np.savetxt(self.dirstr+"/cam_K_depth.txt", K_depth)
+        np.savetxt(self.dirstr+"/cam_K"+self.camera_name+".txt", K_color)
+        np.savetxt(self.dirstr+"/cam_K_depth"+self.camera_name+".txt", K_depth)
 
 
 class RealsenseImageSaver(LeafSystem):
