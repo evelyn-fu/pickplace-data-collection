@@ -37,7 +37,32 @@ plant, scene_graph = AddMultibodyPlantSceneGraph(builder, time_step=0.0005)
 parser = Parser(plant)
 ConfigureParser(parser)
 parser.AddModelsFromUrl("package://manipulation/iiwa_and_wsg.dmd.yaml")
-parser.AddModelsFromUrl("file://./home/evelyn/sources/Real2SimObjectManipulation/models/006_mustard_bottle.sdf")
+parser.AddModelsFromUrl("package://drake_models/ycb/006_mustard_bottle.sdf")
+
+
+object_area_urdf = """<?xml version="1.0"?>
+<robot name="object_area">
+<link name="object_area">
+<visual name="object_area">
+    <origin rpy="0 0 0" xyz="0.4 0.0 0.15"/>
+    <geometry>
+    <box size="0.4 0.4 0.16"/>
+    </geometry>
+</visual>
+<collision name="object_area">
+    <origin rpy="0 0 0" xyz="0.4 0.0 0.15"/>
+    <geometry>
+    <box size="0.4 0.4 0.16"/>
+    </geometry>
+</collision>
+</link>
+<joint name="fixed_link_weld" type="fixed">
+<parent link="world"/>
+<child link="object_area"/>
+</joint>
+</robot>
+"""
+parser.AddModelsFromString(object_area_urdf, "urdf")
 plant.Finalize()
 
 params = MeshcatVisualizerParams()
@@ -80,8 +105,7 @@ X_G = RigidTransform(
   p=[0.6078755953524031, 0.011975470771703942, 0.5630797220524787],
 )
 
-q = [-0.34925574 , 0.10762179, -0.0287727 , -1.63675343,  1.50665595,  1.93460089,
- -1.76170339] + list(new_positions[7:])
+# q = [0] * 7 + list(new_positions[7:])
 # q_goal = solve_global_inverse_kinematics(
 #     plant=plant,
 #     X_G=X_G,
@@ -90,6 +114,9 @@ q = [-0.34925574 , 0.10762179, -0.0287727 , -1.63675343,  1.50665595,  1.9346008
 #     orientation_tolerance=0.01,
 #     gripper_frame_name="iiwa_link_7",
 # )
+
+q_goal = [ 1.54171116,  1.2877689 ,  1.68350761,  1.21460623 , 0.24698678, -1.85501355,
+ -1.39106498] + list(new_positions[7:])
 
 plant.SetPositions(plant_context, q)
 print(new_positions)

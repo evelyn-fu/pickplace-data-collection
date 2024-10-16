@@ -26,7 +26,7 @@ def main(argv):
     plant, scene_graph = AddMultibodyPlantSceneGraph(builder, time_step=0.0005)
     parser = Parser(plant)
     ConfigureParser(parser)
-    parser.AddModelsFromUrl("package://drake_models/ycb/006_mustard_bottle.sdf")
+    parser.AddModelsFromUrl("file://./home/evelyn/sources/Real2SimObjectManipulation/models/006_mustard_bottle.sdf")
     parser.AddModelsFromUrl("package://manipulation/camera_box.sdf")
     plant.Finalize()
 
