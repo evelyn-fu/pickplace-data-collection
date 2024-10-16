@@ -170,6 +170,8 @@ def compute_principal_minor_components(pcd):
 class PlannerState(Enum):
     WAIT_FOR_OBJECTS_TO_SETTLE = 1
     START = 2
+    PRESCANNING = 12
+    MOVE_FORWARD = 13
     SCANNING1 = 3
     GO_TO_PREGRASP1 = 4
     GRASP1 = 5
@@ -372,18 +374,32 @@ class TwoGraspPlanner(LeafSystem):
             if context.get_time() > traj_q.end_time() + start_time:
                 state.get_mutable_abstract_state(
                     int(self._mode_index)
-                ).set_value(PlannerState.SCANNING1)
-                # Update scanning state
-                state.get_mutable_abstract_state(
-                    int(self._scan_mode_index)
-                ).set_value(ScanState.IDLE)
+                ).set_value(PlannerState.PRESCANNING)
+                # # Update scanning state
+                # state.get_mutable_abstract_state(
+                #     int(self._scan_mode_index)
+                # ).set_value(ScanState.IDLE)
             return
+        if mode == PlannerState.PRESCANNING:
+            traj_q= context.get_abstract_state(
+                int(self._current_joint_traj_idx)
+            ).get_value().trajectory
+            start_time = context.get_abstract_state(
+                int(self._current_joint_traj_idx)
+            ).get_value().start_time_s
+            if context.get_time() > traj_q.end_time() + start_time:
+                state.get_mutable_abstract_state(
+                    int(self._mode_index)
+                ).set_value(PlannerState.MOVE_FORWARD)
+            return
+        if mode == PlannerState.MOVE_FORWARD:
+            self.UpdateInGrasp(context, state, PlannerState.GO_HOME1)
         if mode == PlannerState.SCANNING1:
-            # self.PlanToPregrasp(context, state)
-            # state.get_mutable_abstract_state(
-            #     int(self._mode_index)
-            # ).set_value(PlannerState.GO_TO_PREGRASP1)
-            self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP1)
+            self.PlanToPregrasp(context, state)
+            state.get_mutable_abstract_state(
+                int(self._mode_index)
+            ).set_value(PlannerState.GO_TO_PREGRASP1)
+            # self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP1)
             return
         if mode == PlannerState.GO_TO_PREGRASP1:
             traj_q= context.get_abstract_state(
@@ -422,11 +438,11 @@ class TwoGraspPlanner(LeafSystem):
                 ).set_value(ScanState.IDLE)
             return
         if mode == PlannerState.SCANNING2:
-            # self.PlanToPregrasp(context, state)
-            # state.get_mutable_abstract_state(
-            #     int(self._mode_index)
-            # ).set_value(PlannerState.GO_TO_PREGRASP2)
-            self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP2)
+            self.PlanToPregrasp(context, state)
+            state.get_mutable_abstract_state(
+                int(self._mode_index)
+            ).set_value(PlannerState.GO_TO_PREGRASP2)
+            # self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP2)
             return
         if mode == PlannerState.GO_TO_PREGRASP2:
             traj_q= context.get_abstract_state(
