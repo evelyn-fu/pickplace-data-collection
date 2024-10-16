@@ -10,6 +10,7 @@ from planning.toppra import reparameterize_with_toppra
 from planning.trajectories import (
     MakePickAndDisplayGripperFrames,
     MakePickAndDisplayJointPositionsTrajectory,
+    MakePushingJointPositionsTrajectory,
 )
 from planning.trajectory_sources import TrajectoryWithTimingInformationSource
 from planning.gcs import plan_unconstrained_gcs_path_start_to_goal
@@ -170,6 +171,9 @@ def compute_principal_minor_components(pcd):
 class PlannerState(Enum):
     WAIT_FOR_OBJECTS_TO_SETTLE = 1
     START = 2
+    GO_TO_SPINNING = 13
+    SPINNING = 12
+    GO_HOME0 = 14
     SCANNING1 = 3
     GO_TO_PREGRASP1 = 4
     GRASP1 = 5
@@ -208,6 +212,13 @@ yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -
 yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi)), [0.6, 0.0, 0.54]))
 yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -5*np.pi)), [0.6, 0.0, 0.54]))
 yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -3*np.pi/2)), [0.6, 0.0, 0.54]))
+
+push_traj = []
+reset_traj = []
+for i in range(8):
+    theta = (np.pi/4 * i/8) - np.pi/32
+    push_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 3*np.pi/2)), [0.54 + 0.2*np.sin(theta), 0.2*np.cos(theta), 0.3]))
+    reset_traj.insert(0, RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 3*np.pi/2)), [0.54 + 0.2*np.sin(theta), 0.2*np.cos(theta), 0.4]))
 
 q_home = [0.0, 0.4, 0.0, -1.2, 0.0, 1.0, -1.57]
 
@@ -372,6 +383,47 @@ class LazySusanPlanner(LeafSystem):
             if context.get_time() > traj_q.end_time() + start_time:
                 state.get_mutable_abstract_state(
                     int(self._mode_index)
+                ).set_value(PlannerState.GO_TO_SPINNING)
+                self.GoToSpinStart(context, state)
+                self.PlanGripper(context, state, "close", time=0.1)
+            return
+        if mode == PlannerState.GO_TO_SPINNING:
+            traj_q= context.get_abstract_state(
+                int(self._current_joint_traj_idx)
+            ).get_value().trajectory
+            start_time = context.get_abstract_state(
+                int(self._current_joint_traj_idx)
+            ).get_value().start_time_s
+            if context.get_time() > traj_q.end_time() + start_time:
+                state.get_mutable_abstract_state(
+                    int(self._mode_index)
+                ).set_value(PlannerState.SPINNING)
+                self.PlanPushingSpinner(context, state)
+            return
+        if mode == PlannerState.SPINNING:
+            traj_q= context.get_abstract_state(
+                int(self._current_joint_traj_idx)
+            ).get_value().trajectory
+            start_time = context.get_abstract_state(
+                int(self._current_joint_traj_idx)
+            ).get_value().start_time_s
+            if context.get_time() > traj_q.end_time() + start_time:
+                state.get_mutable_abstract_state(
+                    int(self._mode_index)
+                ).set_value(PlannerState.GO_HOME0)
+                self.GoHome(context, state)
+                self.PlanGripper(context, state, "open", time=0.1)
+            return
+        if mode == PlannerState.GO_HOME0:
+            traj_q= context.get_abstract_state(
+                int(self._current_joint_traj_idx)
+            ).get_value().trajectory
+            start_time = context.get_abstract_state(
+                int(self._current_joint_traj_idx)
+            ).get_value().start_time_s
+            if context.get_time() > traj_q.end_time() + start_time:
+                state.get_mutable_abstract_state(
+                    int(self._mode_index)
                 ).set_value(PlannerState.SCANNING1)
                 # Update scanning state
                 state.get_mutable_abstract_state(
@@ -379,11 +431,11 @@ class LazySusanPlanner(LeafSystem):
                 ).set_value(ScanState.IDLE)
             return
         if mode == PlannerState.SCANNING1:
-            # self.PlanToPregrasp(context, state)
-            # state.get_mutable_abstract_state(
-            #     int(self._mode_index)
-            # ).set_value(PlannerState.GO_TO_PREGRASP1)
-            self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP1)
+            self.PlanToPregrasp(context, state)
+            state.get_mutable_abstract_state(
+                int(self._mode_index)
+            ).set_value(PlannerState.GO_TO_PREGRASP1)
+            # self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP1)
             return
         if mode == PlannerState.GO_TO_PREGRASP1:
             traj_q= context.get_abstract_state(
@@ -422,11 +474,11 @@ class LazySusanPlanner(LeafSystem):
                 ).set_value(ScanState.IDLE)
             return
         if mode == PlannerState.SCANNING2:
-            # self.PlanToPregrasp(context, state)
-            # state.get_mutable_abstract_state(
-            #     int(self._mode_index)
-            # ).set_value(PlannerState.GO_TO_PREGRASP2)
-            self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP2)
+            self.PlanToPregrasp(context, state)
+            state.get_mutable_abstract_state(
+                int(self._mode_index)
+            ).set_value(PlannerState.GO_TO_PREGRASP2)
+            # self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP2)
             return
         if mode == PlannerState.GO_TO_PREGRASP2:
             traj_q= context.get_abstract_state(
@@ -1010,20 +1062,78 @@ class LazySusanPlanner(LeafSystem):
         )
 
 
-    def PlanGripper(self, context, state, direction="open"):
+    def PlanGripper(self, context, state, direction="open", time=1.0):
         opened = np.array([0.107])
         closed = np.array([0.0])
         current_time = context.get_time()
 
         traj_wsg_command = PiecewisePolynomial.FirstOrderHold(
-            [current_time, current_time+1.0],
+            [current_time, current_time+time],
             np.hstack([[closed], [opened]]) if direction == "open" else np.hstack([[opened], [closed]]) 
         )
 
-        self._gripper_traj_end_time = current_time + 1.0
+        self._gripper_traj_end_time = current_time + time
 
         state.get_mutable_abstract_state(int(self._traj_wsg_index)).set_value(
             traj_wsg_command
+        )
+    
+    def GoToSpinStart(self, context, state):
+        q = self.get_input_port(self._iiwa_position_index).Eval(context)
+
+        q_goal = solve_global_inverse_kinematics(
+            plant=self._iiwa_controller_plant,
+            X_G=reset_traj[-1],
+            initial_guess=q,
+            position_tolerance=0.0,
+            orientation_tolerance=0.0,
+            gripper_frame_name="iiwa_link_7",
+        )
+
+        traj = plan_unconstrained_gcs_path_start_to_goal(
+            plant=self._iiwa_controller_plant, q_start=q, q_goal=q_goal, regions=self.regions1, no_obstacles=False
+        )
+
+        breaks = np.linspace(0, traj.end_time(), int(1e3), endpoint=False)
+        knots = traj.vector_values(breaks)
+
+        toppra_traj = reparameterize_with_toppra(
+            trajectory=knots.T,
+            plant=self._iiwa_controller_plant,
+            velocity_limits=self.velocity_limits*5,
+            acceleration_limits=self.acceleration_limits*5,
+            num_grid_points=100,
+        )
+
+        current_time = context.get_time()
+        state.get_mutable_abstract_state(self._current_joint_traj_idx).set_value(
+            TrajectoryWithTimingInformation(
+                trajectory=toppra_traj,
+                start_time_s=current_time,
+            )
+        )
+        
+    
+    def PlanPushingSpinner(self, context, state):
+        q = self.get_input_port(self._iiwa_position_index).Eval(context)
+
+        traj = MakePushingJointPositionsTrajectory(push_traj, reset_traj, self._iiwa_controller_plant, q)
+        
+        toppra_traj = reparameterize_with_toppra(
+            trajectory=traj,
+            plant=self._iiwa_controller_plant,
+            velocity_limits=self.velocity_limits*5,
+            acceleration_limits=self.acceleration_limits*5,
+            num_grid_points=100,
+            is_pl=True,
+        )
+
+        current_time = context.get_time()
+        state.get_mutable_abstract_state(self._current_joint_traj_idx).set_value(
+            TrajectoryWithTimingInformation(
+                trajectory=toppra_traj,
+                start_time_s=current_time,
+            )
         )
 
     def CalcGripperPose(self, context, output):
@@ -1057,6 +1167,7 @@ class LazySusanPlanner(LeafSystem):
 
     def CalcWsgPosition(self, context, output):
         pick_mode = context.get_abstract_state(int(self._pick_mode_index)).get_value()
+        mode = context.get_abstract_state(int(self._mode_index)).get_value()
         opened = np.array([0.107])
         closed = np.array([0.0])
 
@@ -1072,7 +1183,7 @@ class LazySusanPlanner(LeafSystem):
             return
         
         # keep closed if displaying
-        if pick_mode == PickState.MOVE or pick_mode == PickState.CLOSING:
+        if pick_mode == PickState.MOVE or pick_mode == PickState.CLOSING or mode == PlannerState.GO_TO_SPINNING or mode == PlannerState.SPINNING:
             output.SetFromVector([closed])
             return
 

@@ -240,3 +240,56 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q, max_display
         t2.append(PiecewisePolynomial.FirstOrderHold(sample_times2[i], np.array(positions2[i]).T))
     t3 = PiecewisePolynomial.FirstOrderHold(sample_times3, np.array(positions3).T)
     return t1, t2, t3
+
+def MakePushingJointPositionsTrajectory(X_G_push, X_G_reset, plant, q):
+    sample_times = [0.0]
+    positions = [q]
+    q_prev = q
+    for i in range(len(X_G_push)):
+        X_G = X_G_push[i]
+        q_goal = solve_global_inverse_kinematics(
+            plant=plant,
+            X_G=X_G,
+            initial_guess=q_prev,
+            position_tolerance=0.0,
+            orientation_tolerance=0.0,
+            gripper_frame_name="iiwa_link_7",
+        )
+        if q_goal is None:
+            print("Cannot solve IK for", X_G, f"index {i} of push traj")
+        q_prev = q_goal
+        positions.append(q_goal)
+
+        if i == 0:
+            sample_times.append(0.01 + sample_times[-1])
+        else:
+            sample_times.append(0.04 + sample_times[-1])
+
+    for i in range(len(X_G_reset)):
+        X_G = X_G_reset[i]
+        q_goal = solve_global_inverse_kinematics(
+            plant=plant,
+            X_G=X_G,
+            initial_guess=q_prev,
+            position_tolerance=0.0,
+            orientation_tolerance=0.0,
+            gripper_frame_name="iiwa_link_7",
+        )
+        if q_goal is None:
+            print("Cannot solve IK for", X_G, f"index {i} of reset traj")
+        q_prev = q_goal
+        positions.append(q_goal)
+
+        if i == 0:
+            sample_times.append(0.01 + sample_times[-1])
+        else:
+            sample_times.append(0.001 + sample_times[-1])
+    
+    positions += positions[1:] * 7
+    cycle_time = sample_times[-1]
+    for i in range(1, 8):
+        timings = np.array([0.01] + [0.01 + 0.04*j for j in range(1, 8)] + [0.01 + 0.29] + [0.3 + 0.001*j for j in range(1,8)]) + cycle_time * i
+        sample_times += timings.tolist()
+
+    t = PiecewisePolynomial.FirstOrderHold(sample_times, np.array(positions).T)
+    return t

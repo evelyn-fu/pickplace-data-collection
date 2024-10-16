@@ -38,6 +38,7 @@ from pydrake.math import (
 from pydrake.solvers import MosekSolver, GurobiSolver
 
 from planning.two_grasp_display_planner import TwoGraspPlanner
+from planning.lazy_susan_display_planner import LazySusanPlanner
 from perception.image_saver import ImageSaver
 from perception.camera_in_world import CameraPoseInWorldSource
 from planning.trajectory_sources import TrajectoryWithTimingInformationSource, DummyTrajSource
@@ -235,7 +236,7 @@ def start_scenario(
             iris_regions2 = pickle.load(f)
 
     # Set up planner
-    planner = builder.AddSystem(TwoGraspPlanner(
+    planner = builder.AddSystem(LazySusanPlanner(
             plant=plant, 
             controller_plant=controller_plant,
             eef_body_index=plant.GetBodyByName("iiwa_link_7").index(),
