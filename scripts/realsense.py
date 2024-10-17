@@ -1,4 +1,4 @@
-import pyrealsense2 as rs
+import pyrealsense2.pyrealsense2 as rs
 import numpy as np
 from PIL import Image
 import argparse
@@ -14,7 +14,7 @@ def isData():
     return select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], [])
 
 
-def realsense(dirstr="temp", serial="822512060233"):
+def realsense(dirstr="temp", serial="819612073749"):
     if not os.path.exists(dirstr):
         os.makedirs(dirstr)
     if not os.path.exists(dirstr+"/rgb/"):
@@ -46,7 +46,7 @@ def realsense(dirstr="temp", serial="822512060233"):
         exit(0)
 
     config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 30)
-
+ 
     if device_product_line == 'L500':
         config.enable_stream(rs.stream.color, 1920, 1080, rs.format.rgb8, 30)
     else:
@@ -70,6 +70,9 @@ def realsense(dirstr="temp", serial="822512060233"):
     depth_sensor = profile.get_device().first_depth_sensor()
     depth_scale = depth_sensor.get_depth_scale()
     print("Depth Scale is: " , depth_scale)
+    
+    color_sensor = profile.get_device().first_color_sensor()
+    color_sensor.set_option(rs.option.enable_auto_exposure, False)
 
     # We will be removing the background of objects more than
     #  clipping_distance_in_meters meters away
@@ -99,7 +102,7 @@ def realsense(dirstr="temp", serial="822512060233"):
             aligned_frames = align.process(frames)
 
             # Get aligned frames
-            aligned_depth_frame = aligned_frames.get_depth_frame() # aligned_depth_frame is a 640x480 depth image
+            aligned_depth_frame = aligned_frames.get_depth_frame() # aligned_depth_frame is a 1280x720 depth image
             color_frame = aligned_frames.get_color_frame()
 
             # Validate that both frames are valid
@@ -141,7 +144,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "serial",
-        default="822512060233",
+        default="819612073749",
         help="serial number of camera to save from",
         nargs='?',
     )

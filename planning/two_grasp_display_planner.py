@@ -472,10 +472,10 @@ class TwoGraspPlanner(LeafSystem):
         ).get_value().start_time_s
 
         if pick_mode == PickState.PREPICK:
-            wait_time = 0
+            end_time = traj_q.end_time()
             if self.display_traj_cur_segment > 0:
-                wait_time = 1.0
-            if context.get_time() > traj_q.end_time() + start_time + wait_time:
+                end_time = self._gripper_traj_end_time
+            if context.get_time() > end_time:
                 state.get_mutable_abstract_state(
                     int(self._pick_mode_index)
                 ).set_value(PickState.CLOSING)

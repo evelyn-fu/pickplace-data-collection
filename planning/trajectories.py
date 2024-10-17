@@ -97,7 +97,7 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q, max_display
     positions3_failed = False
     q_prepick = None
 
-    place_height = X_G["pick_start"].translation()[2]
+    place_height = X_G["pick_start"].translation()[2] + 0.02
     for name in [
         "prepick",
         "pick_start",
