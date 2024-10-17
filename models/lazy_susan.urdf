@@ -18,54 +18,54 @@
             iyz="0"/>
       </inertial>
       <visual name="plate_round">
-        <origin xyz="0 0 0.06" rpy="0 0 0"/>
+        <origin xyz="0 0 0.11" rpy="0 0 0"/>
         <geometry>
-          <cylinder radius="0.15" length="0.02"/>
+          <cylinder radius="0.075" length="0.01"/>
         </geometry>
         <material name="gray">
           <color rgba="0.5 0.5 0.5 1.0"/>
         </material>
       </visual>
       <visual name="plate_pusher1">
-        <origin xyz="0 0 0.06" rpy="0 0 0"/>
+        <origin xyz="0 0 0.11" rpy="0 0 0"/>
         <geometry>
-          <box size="0.4 0.01 0.02"/>
+          <box size="0.22 0.01 0.01"/>
         </geometry>
         <material name="gray">
           <color rgba="0.5 0.5 0.5 1.0"/>
         </material>
       </visual>
       <visual name="plate_pusher2">
-        <origin xyz="0 0 0.06" rpy="0 0 0"/>
+        <origin xyz="0 0 0.11" rpy="0 0 0"/>
         <geometry>
-          <box size="0.01 0.4 0.02"/>
+          <box size="0.01 0.22 0.01"/>
         </geometry>
         <material name="gray">
           <color rgba="0.5 0.5 0.5 1.0"/>
         </material>
       </visual>
       <visual name="plate_pusher3">
-        <origin xyz="0 0 0.06" rpy="0 0 0.785398"/>
+        <origin xyz="0 0 0.11" rpy="0 0 0.785398"/>
         <geometry>
-          <box size="0.4 0.01 0.02"/>
+          <box size="0.22 0.01 0.01"/>
         </geometry>
         <material name="gray">
           <color rgba="0.5 0.5 0.5 1.0"/>
         </material>
       </visual>
       <visual name="plate_pusher4">
-        <origin xyz="0 0 0.06" rpy="0 0 0.785398"/>
+        <origin xyz="0 0 0.11" rpy="0 0 0.785398"/>
         <geometry>
-          <box size="0.01 0.4 0.02"/>
+          <box size="0.01 0.22 0.01"/>
         </geometry>
         <material name="gray">
           <color rgba="0.5 0.5 0.5 1.0"/>
         </material>
       </visual>
       <collision name="plate_round">
-        <origin xyz="0 0 0.06" rpy="0 0 0"/>
+        <origin xyz="0 0 0.11" rpy="0 0 0"/>
         <geometry>
-          <cylinder radius="0.15" length="0.02"/>
+          <cylinder radius="0.075" length="0.01"/>
         </geometry>
         <drake:proximity_properties>
           <drake:compliant_hydroelastic/>
@@ -75,9 +75,9 @@
         </drake:proximity_properties>
       </collision>
       <collision name="plate_pusher1">
-        <origin xyz="0 0 0.06" rpy="0 0 0"/>
+        <origin xyz="0 0 0.11" rpy="0 0 0"/>
         <geometry>
-          <box size="0.4 0.01 0.02"/>
+          <box size="0.22 0.01 0.01"/>
         </geometry>
         <drake:proximity_properties>
           <drake:compliant_hydroelastic/>
@@ -87,9 +87,9 @@
         </drake:proximity_properties>
       </collision>
       <collision name="plate_pusher2">
-        <origin xyz="0 0 0.06" rpy="0 0 0"/>
+        <origin xyz="0 0 0.11" rpy="0 0 0"/>
         <geometry>
-          <box size="0.01 0.4 0.02"/>
+          <box size="0.01 0.22 0.01"/>
         </geometry>
         <drake:proximity_properties>
           <drake:compliant_hydroelastic/>
@@ -99,9 +99,9 @@
         </drake:proximity_properties>
       </collision>
       <collision name="plate_pusher3">
-        <origin xyz="0 0 0.06" rpy="0 0 0.785398"/>
+        <origin xyz="0 0 0.11" rpy="0 0 0.785398"/>
         <geometry>
-          <box size="0.4 0.01 0.02"/>
+          <box size="0.22 0.01 0.01"/>
         </geometry>
         <drake:proximity_properties>
           <drake:compliant_hydroelastic/>
@@ -111,9 +111,9 @@
         </drake:proximity_properties>
       </collision>
       <collision name="plate_pusher4">
-        <origin xyz="0 0 0.06" rpy="0 0 0.785398"/>
+        <origin xyz="0 0 0.11" rpy="0 0 0.785398"/>
         <geometry>
-          <box size="0.01 0.4 0.02"/>
+          <box size="0.01 0.22 0.01"/>
         </geometry>
         <drake:proximity_properties>
           <drake:compliant_hydroelastic/>
@@ -128,6 +128,6 @@
       <child link="plate_body"/>
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <axis xyz="0 0 1"/>
-      <dynamics damping="0.1" friction="0.0"/>
+      <dynamics damping="0.1" friction="0.01"/>
     </joint>
 </robot>

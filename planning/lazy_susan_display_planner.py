@@ -74,7 +74,8 @@ def get_seeded_region(models_path, com, rot, dims, q_nominal):
 
     context = diagram.CreateDefaultContext()
     plant_context = plant.GetMyContextFromRoot(context)
-    plant.SetPositions(plant_context, q_nominal)
+    q_old = plant.GetPositions(plant_context)
+    plant.SetPositions(plant_context, list(q_nominal) + list(q_old[7:]))
 
     iris_options = IrisOptions(require_sample_point_is_contained=True)
     region = IrisInConfigurationSpace(plant, plant_context, iris_options)
@@ -205,22 +206,22 @@ X_GgraspGpregrasp = RigidTransform([0, 0.0, -0.15])
 
 yaw_display_traj = []
 
-yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0)), [0.6, 0.0, 0.54]))
-yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi/4)), [0.6, 0.0, 0.54]))
-yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi/2)), [0.6, 0.0, 0.54]))
-yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -3*np.pi/4)), [0.6, 0.0, 0.54]))
-yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi)), [0.6, 0.0, 0.54]))
-yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -5*np.pi)), [0.6, 0.0, 0.54]))
-yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -3*np.pi/2)), [0.6, 0.0, 0.54]))
+yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0)), [0.43, 0.0, 0.54]))
+yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi/4)), [0.43, 0.0, 0.54]))
+yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi/2)), [0.43, 0.0, 0.54]))
+yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -3*np.pi/4)), [0.43, 0.0, 0.54]))
+yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi)), [0.43, 0.0, 0.54]))
+yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -5*np.pi)), [0.43, 0.0, 0.54]))
+yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -3*np.pi/2)), [0.43, 0.0, 0.54]))
 
 push_traj = []
 reset_traj = []
 for i in range(8):
-    theta = (np.pi/4 * i/8) - np.pi/32
-    push_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 3*np.pi/2)), [0.54 + 0.2*np.sin(theta), 0.2*np.cos(theta), 0.3]))
-    reset_traj.insert(0, RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 3*np.pi/2)), [0.54 + 0.2*np.sin(theta), 0.2*np.cos(theta), 0.4]))
+    theta = (np.pi/4 * i/8) - np.pi/16
+    push_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 3*np.pi/2)), [0.42 + 0.11*np.sin(theta), 0.11*np.cos(theta), 0.34]))
+    reset_traj.insert(0, RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 3*np.pi/2)), [0.42 + 0.11*np.sin(theta), 0.11*np.cos(theta), 0.44]))
 
-q_home = [0.0, 0.4, 0.0, -1.2, 0.0, 1.0, -1.57]
+q_home = [0.0, 0.2, 0.0, -1.2, 0.0, 1.0, -1.57]
 
 class LazySusanPlanner(LeafSystem):
     def __init__(
@@ -386,6 +387,13 @@ class LazySusanPlanner(LeafSystem):
                 ).set_value(PlannerState.GO_TO_SPINNING)
                 self.GoToSpinStart(context, state)
                 self.PlanGripper(context, state, "close", time=0.1)
+                # state.get_mutable_abstract_state(
+                #     int(self._mode_index)
+                # ).set_value(PlannerState.SCANNING1)
+                # # Update scanning state
+                # state.get_mutable_abstract_state(
+                #     int(self._scan_mode_index)
+                # ).set_value(ScanState.IDLE)
             return
         if mode == PlannerState.GO_TO_SPINNING:
             traj_q= context.get_abstract_state(
@@ -431,11 +439,11 @@ class LazySusanPlanner(LeafSystem):
                 ).set_value(ScanState.IDLE)
             return
         if mode == PlannerState.SCANNING1:
-            self.PlanToPregrasp(context, state)
-            state.get_mutable_abstract_state(
-                int(self._mode_index)
-            ).set_value(PlannerState.GO_TO_PREGRASP1)
-            # self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP1)
+            # self.PlanToPregrasp(context, state)
+            # state.get_mutable_abstract_state(
+            #     int(self._mode_index)
+            # ).set_value(PlannerState.GO_TO_PREGRASP1)
+            self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP1)
             return
         if mode == PlannerState.GO_TO_PREGRASP1:
             traj_q= context.get_abstract_state(
@@ -467,52 +475,53 @@ class LazySusanPlanner(LeafSystem):
             if context.get_time() > traj_q.end_time() + start_time:
                 state.get_mutable_abstract_state(
                     int(self._mode_index)
-                ).set_value(PlannerState.SCANNING2)
-                # Update scanning state
-                state.get_mutable_abstract_state(
-                    int(self._scan_mode_index)
-                ).set_value(ScanState.IDLE)
-            return
-        if mode == PlannerState.SCANNING2:
-            self.PlanToPregrasp(context, state)
-            state.get_mutable_abstract_state(
-                int(self._mode_index)
-            ).set_value(PlannerState.GO_TO_PREGRASP2)
-            # self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP2)
-            return
-        if mode == PlannerState.GO_TO_PREGRASP2:
-            traj_q= context.get_abstract_state(
-                int(self._current_joint_traj_idx)
-            ).get_value().trajectory
-            start_time = context.get_abstract_state(
-                int(self._current_joint_traj_idx)
-            ).get_value().start_time_s
-            if context.get_time() > traj_q.end_time() + start_time:
-                state.get_mutable_abstract_state(
-                    int(self._mode_index)
-                ).set_value(PlannerState.GRASP2)
-                # Update pick + display state
-                state.get_mutable_abstract_state(
-                    int(self._pick_mode_index)
-                ).set_value(PickState.PREPICK)
-                self.PlanPickAndDisplay(context, state)
-            return
-        if mode == PlannerState.GRASP2:
-            self.UpdateInGrasp(context, state, PlannerState.GO_HOME2)
-            return
-        if mode == PlannerState.GO_HOME2:
-            traj_q= context.get_abstract_state(
-                int(self._current_joint_traj_idx)
-            ).get_value().trajectory
-            start_time = context.get_abstract_state(
-                int(self._current_joint_traj_idx)
-            ).get_value().start_time_s
-            if context.get_time() > traj_q.end_time() + start_time:
-                state.get_mutable_abstract_state(
-                    int(self._mode_index)
                 ).set_value(PlannerState.DONE)
                 self.done = True
+                # # Update scanning state
+                # state.get_mutable_abstract_state(
+                #     int(self._scan_mode_index)
+                # ).set_value(ScanState.IDLE)
             return
+        # if mode == PlannerState.SCANNING2:
+        #     # self.PlanToPregrasp(context, state)
+        #     # state.get_mutable_abstract_state(
+        #     #     int(self._mode_index)
+        #     # ).set_value(PlannerState.GO_TO_PREGRASP2)
+        #     self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP2)
+        #     return
+        # if mode == PlannerState.GO_TO_PREGRASP2:
+        #     traj_q= context.get_abstract_state(
+        #         int(self._current_joint_traj_idx)
+        #     ).get_value().trajectory
+        #     start_time = context.get_abstract_state(
+        #         int(self._current_joint_traj_idx)
+        #     ).get_value().start_time_s
+        #     if context.get_time() > traj_q.end_time() + start_time:
+        #         state.get_mutable_abstract_state(
+        #             int(self._mode_index)
+        #         ).set_value(PlannerState.GRASP2)
+        #         # Update pick + display state
+        #         state.get_mutable_abstract_state(
+        #             int(self._pick_mode_index)
+        #         ).set_value(PickState.PREPICK)
+        #         self.PlanPickAndDisplay(context, state)
+        #     return
+        # if mode == PlannerState.GRASP2:
+        #     self.UpdateInGrasp(context, state, PlannerState.GO_HOME2)
+        #     return
+        # if mode == PlannerState.GO_HOME2:
+        #     traj_q= context.get_abstract_state(
+        #         int(self._current_joint_traj_idx)
+        #     ).get_value().trajectory
+        #     start_time = context.get_abstract_state(
+        #         int(self._current_joint_traj_idx)
+        #     ).get_value().start_time_s
+        #     if context.get_time() > traj_q.end_time() + start_time:
+        #         state.get_mutable_abstract_state(
+        #             int(self._mode_index)
+        #         ).set_value(PlannerState.DONE)
+        #         self.done = True
+        #     return
         
     def UpdateInGrasp(self, context, state, after_grasp_state):
         pick_mode = context.get_abstract_state(int(self._pick_mode_index)).get_value()
@@ -605,7 +614,7 @@ class LazySusanPlanner(LeafSystem):
         def get_pcd(start_new_pcd = False):
             body_poses = self.GetInputPort("body_poses").Eval(context)
             cloud = self.GetInputPort("cloud_W").Eval(context)
-            new_pcd = cloud.Crop(lower_xyz=[0.23, -0.17, 0.071], upper_xyz=[0.57, 0.17, 0.27])
+            new_pcd = cloud.Crop(lower_xyz=[0.23, -0.17, 0.116], upper_xyz=[0.57, 0.17, 0.315])
             new_pcd.EstimateNormals(radius=0.1, num_closest=30)
             X_WC = body_poses[self._eef_body_index] @ self._X_EefC 
             new_pcd.FlipNormalsTowardPoint(X_WC.translation())
@@ -795,7 +804,7 @@ class LazySusanPlanner(LeafSystem):
         # Set gcs regions or generate if not given or not ignoring obstacles/loading trajectories
         if mode == PlannerState.SCANNING1:
             if not self.use_offline_regions1 and not self.no_obstacles and not loaded_traj:
-                self.regions = get_regions(self.models_path, self.object_com, self.object_rot, self.object_dims)
+                self.regions = [] # get_regions(self.models_path, self.object_com, self.object_rot, self.object_dims)
 
                 # make sure the start and pregrasp positions are in the regions
                 print("getting seeded region for q")
@@ -822,7 +831,7 @@ class LazySusanPlanner(LeafSystem):
                 self.regions = self.regions1
         else:
             if not self.use_offline_regions2 and not self.no_obstacles and not loaded_traj:
-                self.regions = get_regions(self.models_path, self.object_com, self.object_rot, self.object_dims)
+                self.regions = [] #get_regions(self.models_path, self.object_com, self.object_rot, self.object_dims)
 
                 q_in_regions = False
                 q_goal_in_regions = False
@@ -885,27 +894,27 @@ class LazySusanPlanner(LeafSystem):
         '''
         mode = context.get_abstract_state(int(self._mode_index)).get_value()
         
-        # down_sampled_pcd = self.current_pcd
-        # self.meshcat.SetObject("cloud", down_sampled_pcd, point_size=0.001)
+        down_sampled_pcd = self.current_pcd
+        self.meshcat.SetObject("cloud", down_sampled_pcd, point_size=0.001)
 
-        # pcd_points = down_sampled_pcd.xyzs().T
-        # principal_component, secondary_component, minor_component = compute_principal_minor_components(pcd_points)
+        pcd_points = down_sampled_pcd.xyzs().T
+        principal_component, secondary_component, minor_component = compute_principal_minor_components(pcd_points)
 
-        # # visualize axes, principal axis is z axis (blue), minor axis is x axis (red)
-        # z_axis, x_axis = [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]
-        # rot_principal_component_to_axes, _ = R.align_vectors(
-        #     np.array([z_axis, x_axis]), np.stack([principal_component, minor_component])
-        # )
-        # com = np.mean(pcd_points, axis=0)
-        # self.object_com = com
-        # pcd_points_axis_aligned = pcd_points @ rot_principal_component_to_axes.as_matrix().T
-        # dims = np.max(pcd_points_axis_aligned, axis=0) - np.min(pcd_points_axis_aligned, axis=0)
-        # self.object_dims = dims
-        # rot = RotationMatrix(rot_principal_component_to_axes.as_matrix().T)
-        # self.object_rot = rot
-        # AddMeshcatTriad(self.meshcat, "principal axis", 
-        #                 X_PT=RigidTransform(rot,
-        #                 [com[0], com[1], com[2]]))
+        # visualize axes, principal axis is z axis (blue), minor axis is x axis (red)
+        z_axis, x_axis = [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]
+        rot_principal_component_to_axes, _ = R.align_vectors(
+            np.array([z_axis, x_axis]), np.stack([principal_component, minor_component])
+        )
+        com = np.mean(pcd_points, axis=0)
+        self.object_com = com
+        pcd_points_axis_aligned = pcd_points @ rot_principal_component_to_axes.as_matrix().T
+        dims = np.max(pcd_points_axis_aligned, axis=0) - np.min(pcd_points_axis_aligned, axis=0)
+        self.object_dims = dims
+        rot = RotationMatrix(rot_principal_component_to_axes.as_matrix().T)
+        self.object_rot = rot
+        AddMeshcatTriad(self.meshcat, "principal axis", 
+                        X_PT=RigidTransform(rot,
+                        [com[0], com[1], com[2]]))
 
         if mode == PlannerState.SCANNING1:
             # # Planning first grasping trajectory
@@ -918,16 +927,22 @@ class LazySusanPlanner(LeafSystem):
             #     split_axis=1, 
             #     minor_split_axis=0
             # )
+            # grasps = [RigidTransform(
+            # R=RotationMatrix([
+            #     [-0.16061448546971885, -0.9632646875545086, 0.21523040855746534],
+            #     [-0.9819356272527161, 0.17804124138527605, 0.06406044253520692],
+            #     [-0.10002705128671051, -0.20105337121397807, -0.974459917561713],
+            # ]),
+            # p=[0.41952586654230567, -0.008080488486184622, 0.34967031214171934],
+            # )]
             grasps = [RigidTransform(
             R=RotationMatrix([
-                [0.20681969377898063, 0.9685467022240954, 0.1383578688618696],
-                [0.9774142324949082, -0.21081815591263353, 0.014735102781668053],
-                [0.043439985975579215, 0.13218544075814884, -0.9902726780387395],
+                [0.022282377287587085, -0.9987993865312258, -0.04362661031136746],
+                [-0.09768838513265254, -0.045603821200431924, 0.9941716506228155],
+                [-0.994967574885025, -0.017890694697671787, -0.09858726069146323],
             ]),
-            p=[0.5798396344223478, -0.0008122595958626092, 0.3250179079887979],
+            p=[0.42445722815176673, -0.08550809156030052, 0.23211535453341342],
             )]
-        else:
-            # # Planning second grasping trajectory
             # self.grasp_node.compute_candidate_grasps(
             #     down_sampled_pcd, 
             #     num_samples=5,
@@ -937,14 +952,25 @@ class LazySusanPlanner(LeafSystem):
             #     split_axis=2, 
             #     minor_split_axis=0
             # )
-            grasps = [RigidTransform(
-            R=RotationMatrix([
-                [0.12572403407217733, 0.9917884232805839, 0.023434818182183535],
-                [0.2661806471800798, -0.056479645509977305, 0.9622670693263183],
-                [0.9556889296854982, -0.11474220274023483, -0.2710957332510173],
-            ]),
-            p=[0.5768087034926264, -0.11622951972991928, 0.19546535154771355],
-            )]
+        else:
+            # Planning second grasping trajectory
+            self.grasp_node.compute_candidate_grasps(
+                down_sampled_pcd, 
+                num_samples=5,
+                random_seed=1, 
+                align_grasp_axis=secondary_component,
+                align_minor_axis=minor_component, 
+                split_axis=2, 
+                minor_split_axis=0
+            )
+            # grasps = [RigidTransform(
+            # R=RotationMatrix([
+            #     [0.12572403407217733, 0.9917884232805839, 0.023434818182183535],
+            #     [0.2661806471800798, -0.056479645509977305, 0.9622670693263183],
+            #     [0.9556889296854982, -0.11474220274023483, -0.2710957332510173],
+            # ]),
+            # p=[0.5768087034926264, -0.11622951972991928, 0.19546535154771355],
+            # )]
         
         # grasps = self.grasp_node.get_best_grasps(candidate_num=1)
 
@@ -981,7 +1007,7 @@ class LazySusanPlanner(LeafSystem):
         }
 
         X_G["display_traj"] = yaw_display_traj
-        place_flipped = (mode == PlannerState.GO_TO_PREGRASP1)
+        place_flipped = False #(mode == PlannerState.GO_TO_PREGRASP1)
         X_G, times = MakePickAndDisplayGripperFrames(X_G, place_flipped)
 
         state.get_mutable_abstract_state(int(self._times_index)).set_value(
@@ -1091,7 +1117,7 @@ class LazySusanPlanner(LeafSystem):
         )
 
         traj = plan_unconstrained_gcs_path_start_to_goal(
-            plant=self._iiwa_controller_plant, q_start=q, q_goal=q_goal, regions=self.regions1, no_obstacles=False
+            plant=self._iiwa_controller_plant, q_start=q, q_goal=q_goal, regions=None, no_obstacles=False
         )
 
         breaks = np.linspace(0, traj.end_time(), int(1e3), endpoint=False)
@@ -1122,8 +1148,8 @@ class LazySusanPlanner(LeafSystem):
         toppra_traj = reparameterize_with_toppra(
             trajectory=traj,
             plant=self._iiwa_controller_plant,
-            velocity_limits=self.velocity_limits*5,
-            acceleration_limits=self.acceleration_limits*5,
+            velocity_limits=self.velocity_limits,
+            acceleration_limits=self.acceleration_limits,
             num_grid_points=100,
             is_pl=True,
         )

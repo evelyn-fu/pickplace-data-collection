@@ -32,9 +32,9 @@ directives:
         base_frame: world
         translation: [0.4, 0.0, 0.12]
         rotation: !Rpy { deg: [0, 0, 110] }
-# - add_weld:
-#     parent: mustard_origin
-#     child: mustard_bottle::base_link_mustard
+- add_weld:
+    parent: mustard_origin
+    child: mustard_bottle::base_link_mustard
 
 - add_frame:
     name: table_origin

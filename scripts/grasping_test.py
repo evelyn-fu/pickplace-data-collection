@@ -36,6 +36,7 @@ from pydrake.math import (
     RotationMatrix
 )
 from pydrake.solvers import MosekSolver, GurobiSolver
+from pydrake.geometry import GeometryId
 
 from planning.two_grasp_display_planner import TwoGraspPlanner
 from planning.lazy_susan_display_planner import LazySusanPlanner
