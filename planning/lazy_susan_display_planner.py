@@ -420,7 +420,6 @@ class LazySusanPlanner(LeafSystem):
                     int(self._mode_index)
                 ).set_value(PlannerState.GO_HOME0)
                 self.GoHome(context, state)
-                self.PlanGripper(context, state, "open", time=0.1)
             return
         if mode == PlannerState.GO_HOME0:
             traj_q= context.get_abstract_state(
@@ -437,13 +436,14 @@ class LazySusanPlanner(LeafSystem):
                 state.get_mutable_abstract_state(
                     int(self._scan_mode_index)
                 ).set_value(ScanState.IDLE)
+                self.PlanGripper(context, state, "open", time=0.1)
             return
         if mode == PlannerState.SCANNING1:
-            # self.PlanToPregrasp(context, state)
-            # state.get_mutable_abstract_state(
-            #     int(self._mode_index)
-            # ).set_value(PlannerState.GO_TO_PREGRASP1)
-            self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP1)
+            self.PlanToPregrasp(context, state)
+            state.get_mutable_abstract_state(
+                int(self._mode_index)
+            ).set_value(PlannerState.GO_TO_PREGRASP1)
+            # self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP1)
             return
         if mode == PlannerState.GO_TO_PREGRASP1:
             traj_q= context.get_abstract_state(
@@ -894,27 +894,27 @@ class LazySusanPlanner(LeafSystem):
         '''
         mode = context.get_abstract_state(int(self._mode_index)).get_value()
         
-        down_sampled_pcd = self.current_pcd
-        self.meshcat.SetObject("cloud", down_sampled_pcd, point_size=0.001)
+        # down_sampled_pcd = self.current_pcd
+        # self.meshcat.SetObject("cloud", down_sampled_pcd, point_size=0.001)
 
-        pcd_points = down_sampled_pcd.xyzs().T
-        principal_component, secondary_component, minor_component = compute_principal_minor_components(pcd_points)
+        # pcd_points = down_sampled_pcd.xyzs().T
+        # principal_component, secondary_component, minor_component = compute_principal_minor_components(pcd_points)
 
-        # visualize axes, principal axis is z axis (blue), minor axis is x axis (red)
-        z_axis, x_axis = [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]
-        rot_principal_component_to_axes, _ = R.align_vectors(
-            np.array([z_axis, x_axis]), np.stack([principal_component, minor_component])
-        )
-        com = np.mean(pcd_points, axis=0)
-        self.object_com = com
-        pcd_points_axis_aligned = pcd_points @ rot_principal_component_to_axes.as_matrix().T
-        dims = np.max(pcd_points_axis_aligned, axis=0) - np.min(pcd_points_axis_aligned, axis=0)
-        self.object_dims = dims
-        rot = RotationMatrix(rot_principal_component_to_axes.as_matrix().T)
-        self.object_rot = rot
-        AddMeshcatTriad(self.meshcat, "principal axis", 
-                        X_PT=RigidTransform(rot,
-                        [com[0], com[1], com[2]]))
+        # # visualize axes, principal axis is z axis (blue), minor axis is x axis (red)
+        # z_axis, x_axis = [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]
+        # rot_principal_component_to_axes, _ = R.align_vectors(
+        #     np.array([z_axis, x_axis]), np.stack([principal_component, minor_component])
+        # )
+        # com = np.mean(pcd_points, axis=0)
+        # self.object_com = com
+        # pcd_points_axis_aligned = pcd_points @ rot_principal_component_to_axes.as_matrix().T
+        # dims = np.max(pcd_points_axis_aligned, axis=0) - np.min(pcd_points_axis_aligned, axis=0)
+        # self.object_dims = dims
+        # rot = RotationMatrix(rot_principal_component_to_axes.as_matrix().T)
+        # self.object_rot = rot
+        # AddMeshcatTriad(self.meshcat, "principal axis", 
+        #                 X_PT=RigidTransform(rot,
+        #                 [com[0], com[1], com[2]]))
 
         if mode == PlannerState.SCANNING1:
             # # Planning first grasping trajectory
@@ -1209,7 +1209,7 @@ class LazySusanPlanner(LeafSystem):
             return
         
         # keep closed if displaying
-        if pick_mode == PickState.MOVE or pick_mode == PickState.CLOSING or mode == PlannerState.GO_TO_SPINNING or mode == PlannerState.SPINNING:
+        if pick_mode == PickState.MOVE or pick_mode == PickState.CLOSING or mode == PlannerState.GO_TO_SPINNING or mode == PlannerState.SPINNING or mode == PlannerState.GO_HOME0:
             output.SetFromVector([closed])
             return
 
