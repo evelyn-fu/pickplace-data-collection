@@ -132,7 +132,7 @@ def start_scenario(
     # initialize image writer and save directories
     if not os.path.exists(dirstr):
         os.makedirs(dirstr)
-    if not use_hardware and save_imgs:
+    if not use_hardware and save_imgs: # don't save images while running on hardware for now to avoid bottleneck
         if not os.path.exists(dirstr+"/rgb/"):
             os.makedirs(dirstr+"/rgb/")
         if not os.path.exists(dirstr+"/rgb_alpha/"):
@@ -182,12 +182,16 @@ def start_scenario(
             np.savetxt(dirstr+"/cam_K.txt", K)
 
         handeye_camera_pcd = builder.AddSystem(DepthImageToPointCloud(handeye_camera.depth_camera_info()))
+        camera0_pcd = builder.AddSystem(DepthImageToPointCloud(camera0.depth_camera_info()))
         builder.Connect(station.GetOutputPort("handeye_camera.depth_image"), handeye_camera_pcd.GetInputPort("depth_image"))
+        builder.Connect(station.GetOutputPort("camera0.depth_image"), camera0_pcd.GetInputPort("depth_image"))
 
     else:
         handeye_camera_pcd = builder.AddSystem(DepthImageToPointCloud(CameraInfo(848, 480, 639.036, 639.036, 425.131, 244.165)))
+        camera0_pcd = builder.AddSystem(DepthImageToPointCloud(CameraInfo(848, 480, 600.165, 600.165, 429.152, 232.822)))
 
         builder.Connect(external_station.GetOutputPort("handeye_camera.depth_image"), handeye_camera_pcd.GetInputPort("depth_image"))
+        builder.Connect(external_station.GetOutputPort("camera0.depth_image"), camera0_pcd.GetInputPort("depth_image"))
 
     
     # from camera calibation
@@ -197,7 +201,8 @@ def start_scenario(
         p = [-0.074597, 0.0324164, 0.155892]
     )
 
-    camera_pose_source = builder.AddSystem(CameraPoseInWorldSource(x_ee_camera))
+    # connect handeye camera pcd source
+    handeye_camera_pose_source = builder.AddSystem(CameraPoseInWorldSource(x_ee_camera, handeye=True))
     eef_pose = builder.AddSystem(
         ExtractPose(
             plant.GetBodyByName("iiwa_link_7").index()
@@ -209,12 +214,25 @@ def start_scenario(
     )
     builder.Connect(
         eef_pose.get_output_port(),
-        camera_pose_source.GetInputPort("X_EE")
+        handeye_camera_pose_source.GetInputPort("X_EE")
     )
 
     builder.Connect(
-        camera_pose_source.GetOutputPort("X_WC"),
+        handeye_camera_pose_source.GetOutputPort("X_WC"),
         handeye_camera_pcd.GetInputPort("camera_pose"),
+    )
+    
+    # connect stationary camera pcd source
+    r = R.from_quat([-0.698783, 0.0166324, 0.715101, 0.00750221])
+    x_world_camera0 = RigidTransform(
+        R=RotationMatrix(r.as_matrix()),
+        p = [0.864887, -0.00272318, 0.311732]
+    )
+    camera0_pose_source = builder.AddSystem(CameraPoseInWorldSource(x_world_camera0, handeye=False))
+
+    builder.Connect(
+        camera0_pose_source.GetOutputPort("X_WC"),
+        camera0_pcd.GetInputPort("camera_pose"),
     )
 
     controller_plant = station.GetSubsystemByName(
@@ -328,7 +346,11 @@ def start_scenario(
 
     builder.Connect(
         handeye_camera_pcd.GetOutputPort("point_cloud"),
-        planner.GetInputPort("cloud_W"),
+        planner.GetInputPort("cloud_handeye"),
+    )
+    builder.Connect(
+        camera0_pcd.GetOutputPort("point_cloud"),
+        planner.GetInputPort("cloud_stationary"),
     )
     builder.Connect(
         station.GetOutputPort("body_poses"),
@@ -454,7 +476,8 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    gripper_model_path = "file://./home/evelyn/sources/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_buffer.sdf"
+    gripper_model_path = "file://./home/real2sim/src/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_buffer.sdf"
+    # gripper_model_path = "file://./home/evelyn/sources/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_buffer.sdf"
     if args.use_hardware:
         gripper_model_path = "file://./home/real2sim/src/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_buffer.sdf"
 

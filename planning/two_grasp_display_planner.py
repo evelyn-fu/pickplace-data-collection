@@ -233,7 +233,8 @@ class TwoGraspPlanner(LeafSystem):
 
         # For grasp planner
         self.current_pcd = PointCloud(0)
-        self.DeclareAbstractInputPort("cloud_W", AbstractValue.Make(PointCloud(0)))
+        self.DeclareAbstractInputPort("cloud_handeye", AbstractValue.Make(PointCloud(0)))
+        self.DeclareAbstractInputPort("cloud_stationary", AbstractValue.Make(PointCloud(0)))
         self._eef_body_index = eef_body_index
         self._X_EefC = X_EefC
         self._scanning_traj_dir = scanning_traj_dir
@@ -531,7 +532,7 @@ class TwoGraspPlanner(LeafSystem):
         
         def get_pcd(start_new_pcd = False):
             body_poses = self.GetInputPort("body_poses").Eval(context)
-            cloud = self.GetInputPort("cloud_W").Eval(context)
+            cloud = self.GetInputPort("cloud_handeye").Eval(context)
             new_pcd = cloud.Crop(lower_xyz=[0.23, -0.17, 0.071], upper_xyz=[0.57, 0.17, 0.27])
             new_pcd.EstimateNormals(radius=0.1, num_closest=30)
             X_WC = body_poses[self._eef_body_index] @ self._X_EefC 
@@ -549,6 +550,15 @@ class TwoGraspPlanner(LeafSystem):
                     int(self._scan_mode_index)
                 ).set_value(ScanState.GO_TO_1)
 
+                # start pcd with front camera view
+                body_poses = self.GetInputPort("body_poses").Eval(context)
+                cloud = self.GetInputPort("cloud_stationary").Eval(context)
+                new_pcd = cloud.Crop(lower_xyz=[0.23, -0.17, 0.071], upper_xyz=[0.57, 0.17, 0.27])
+                new_pcd.EstimateNormals(radius=0.1, num_closest=30)
+                X_WC = body_poses[self._eef_body_index] @ self._X_EefC 
+                new_pcd.FlipNormalsTowardPoint(X_WC.translation())
+                self.current_pcd = new_pcd
+
                 # load trajectory to first camera view
                 traj = CompositeBezierCurveTrajectoryAttributes.load(self._scanning_traj_dir + "/to1/").to_composite_bezier_curve_trajectory()
                 set_traj(traj)
@@ -560,7 +570,7 @@ class TwoGraspPlanner(LeafSystem):
                 ).set_value(ScanState.GO_TO_2)
 
                 # update pcd
-                new_pcd = get_pcd(start_new_pcd=True)
+                new_pcd = get_pcd()
                 self.current_pcd = new_pcd
 
                 # load trajectory to next camera view
@@ -722,21 +732,27 @@ class TwoGraspPlanner(LeafSystem):
         # Set gcs regions or generate if not given or not ignoring obstacles/loading trajectories
         if mode == PlannerState.SCANNING1:
             if not self.use_offline_regions1 and not self.no_obstacles and not loaded_traj:
-                self.regions = get_regions(self.models_path, self.object_com, self.object_rot, self.object_dims)
-
-                # make sure the start and pregrasp positions are in the regions
-                print("getting seeded region for q")
-                self.regions.append(get_seeded_region(self.models_path, self.object_com, self.object_rot, self.object_dims, q))
-                print("getting seeded region for q goal")
-                self.regions.append(get_seeded_region(self.models_path, self.object_com, self.object_rot, self.object_dims, q_goal))
-
+                # self.regions = get_regions(self.models_path, self.object_com, self.object_rot, self.object_dims)
                 q_in_regions = False
                 q_goal_in_regions = False
+
+                if self.regions is None:
+                    self.regions = []
+
                 for region in self.regions:
                     if region.PointInSet(q):
                         q_in_regions = True
                     if region.PointInSet(q_goal):
                         q_goal_in_regions = True
+
+                # make sure the start and pregrasp positions are in the regions
+                if not q_in_regions:
+                    print("getting seeded region for q")
+                    self.regions.append(get_seeded_region(self.models_path, self.object_com, self.object_rot, self.object_dims, q))
+                if not q_goal_in_regions:
+                    print("getting seeded region for q goal")
+                    self.regions.append(get_seeded_region(self.models_path, self.object_com, self.object_rot, self.object_dims, q_goal))
+
                 
                 if not q_in_regions:
                     raise Exception("q not in regions?")
@@ -749,10 +765,14 @@ class TwoGraspPlanner(LeafSystem):
                 self.regions = self.regions1
         else:
             if not self.use_offline_regions2 and not self.no_obstacles and not loaded_traj:
-                self.regions = get_regions(self.models_path, self.object_com, self.object_rot, self.object_dims)
+                # self.regions = get_regions(self.models_path, self.object_com, self.object_rot, self.object_dims)
 
                 q_in_regions = False
                 q_goal_in_regions = False
+                
+                if self.regions is None:
+                    self.regions = []
+                    
                 for region in self.regions:
                     if region.PointInSet(q):
                         q_in_regions = True
