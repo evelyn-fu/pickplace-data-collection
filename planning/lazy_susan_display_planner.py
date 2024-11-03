@@ -202,7 +202,7 @@ class ScanState(Enum):
     DONE = 6
 
 # pregrasp is negative z in the gripper frame
-X_GgraspGpregrasp = RigidTransform([0, 0.0, -0.15])
+X_GgraspGpregrasp = RigidTransform([0, 0.0, -0.10])
 
 yaw_display_traj = []
 
@@ -218,8 +218,11 @@ push_traj = []
 reset_traj = []
 for i in range(8):
     theta = (np.pi/4 * i/8) - np.pi/16
-    push_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 3*np.pi/2)), [0.42 + 0.11*np.sin(theta), 0.11*np.cos(theta), 0.34]))
-    reset_traj.insert(0, RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 3*np.pi/2)), [0.42 + 0.11*np.sin(theta), 0.11*np.cos(theta), 0.44]))
+    if i == 7:
+        push_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 3*np.pi/2)), [0.415 + 0.115*np.sin(theta + np.pi/16), 0.115*np.cos(theta + np.pi/16), 0.44]))
+    else:
+        push_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 3*np.pi/2)), [0.415 + 0.115*np.sin(theta), 0.115*np.cos(theta), 0.43]))
+    reset_traj.insert(0, RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 3*np.pi/2)), [0.415 + 0.115*np.sin(theta), 0.115*np.cos(theta), 0.53]))
 
 q_home = [0.0, 0.2, 0.0, -1.2, 0.0, 1.0, -1.57]
 
@@ -941,7 +944,7 @@ class LazySusanPlanner(LeafSystem):
                 [-0.09768838513265254, -0.045603821200431924, 0.9941716506228155],
                 [-0.994967574885025, -0.017890694697671787, -0.09858726069146323],
             ]),
-            p=[0.42445722815176673, -0.08550809156030052, 0.23211535453341342],
+            p=[0.42445722815176673, -0.13550809156030052, 0.23211535453341342],
             )]
             # self.grasp_node.compute_candidate_grasps(
             #     down_sampled_pcd, 
@@ -1126,8 +1129,8 @@ class LazySusanPlanner(LeafSystem):
         toppra_traj = reparameterize_with_toppra(
             trajectory=knots.T,
             plant=self._iiwa_controller_plant,
-            velocity_limits=self.velocity_limits*5,
-            acceleration_limits=self.acceleration_limits*5,
+            velocity_limits=self.velocity_limits,
+            acceleration_limits=self.acceleration_limits,
             num_grid_points=100,
         )
 

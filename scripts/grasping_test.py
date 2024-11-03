@@ -188,7 +188,7 @@ def start_scenario(
     else:
         handeye_camera_pcd = builder.AddSystem(DepthImageToPointCloud(CameraInfo(848, 480, 639.036, 639.036, 425.131, 244.165)))
 
-        builder.Connect(external_station.GetOutputPort("handeye_camera.depth_image"), handeye_camera_pcd.GetInputPort("depth_image"))
+        builder.Connect(station.GetOutputPort("handeye_camera.depth_image"), handeye_camera_pcd.GetInputPort("depth_image"))
 
     
     # from camera calibation
@@ -382,7 +382,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--scenario_path",
         type=str,
-        default="scenario_data_grasping.yml",
+        default="scenario_data_lazy_susan.yml",
         help="yaml file with scenario",
     )
     parser.add_argument(

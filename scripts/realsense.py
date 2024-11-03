@@ -14,7 +14,7 @@ def isData():
     return select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], [])
 
 
-def realsense(dirstr="temp", serial="822512060233"):
+def realsense(dirstr="temp", serial="843512061674"):
     if not os.path.exists(dirstr):
         os.makedirs(dirstr)
     if not os.path.exists(dirstr+"/rgb/"):
@@ -141,7 +141,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "serial",
-        default="822512060233",
+        default="843512061674",
         help="serial number of camera to save from",
         nargs='?',
     )
