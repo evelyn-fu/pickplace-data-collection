@@ -45,13 +45,13 @@ directives:
         rotation: !Rpy { deg: [0.0, 0.0, 0.0]}
         translation: [0.4, 0.0, 0]
 
-- add_model:
-    name: box
-    file: file://./home/real2sim/src/Real2SimObjectManipulation/models/box.sdf
+# - add_model:
+#     name: box
+#     file: file://./home/real2sim/src/Real2SimObjectManipulation/models/box.sdf
 
-- add_weld:
-    parent: box_origin
-    child: box::box_body
+# - add_weld:
+#     parent: box_origin
+#     child: box::box_body
 
 - add_frame:
     name: camera0_staging
@@ -105,8 +105,8 @@ cameras:
             base_frame: handeye_camera_origin
 
 camera_ids:
-    main_camera: "DRAKE_RGBD_CAMERAS_843512061674"
-    handeye_camera: "DRAKE_RGBD_CAMERAS_843512061674"
+    main_camera: "DRAKE_RGBD_CAMERA_IMAGES_843512061674"
+    handeye_camera: "DRAKE_RGBD_CAMERA_IMAGES_810512062206"
 
 plant_config:
     time_step: 0.001

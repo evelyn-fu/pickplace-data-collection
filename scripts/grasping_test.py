@@ -33,7 +33,8 @@ from pydrake.planning import (RobotDiagramBuilder,
                               CollisionCheckerParams)
 from pydrake.math import (
     RigidTransform,
-    RotationMatrix
+    RotationMatrix,
+    RollPitchYaw,
 )
 from pydrake.solvers import MosekSolver, GurobiSolver
 
@@ -195,11 +196,20 @@ def start_scenario(
 
     
     # from camera calibation
-    r = R.from_quat([0.00969807, -0.0140297, -0.70331, 0.710679])
-    x_ee_camera = RigidTransform(
+    r = R.from_quat([0.0102867, -0.0159347, -0.706193, 0.707766])
+    x_ee_rgb = RigidTransform(
         R=RotationMatrix(r.as_matrix()),
-        p = [-0.074597, 0.0324164, 0.155892]
+        p = [-0.0697802, 0.0297534, 0.159606]
     )
+    x_rgb_depth_handeye = RigidTransform([  [0.999996, -0.00178663, -0.00226395,  -0.0149415],
+                                            [0.0017759,    0.999987, -0.00473442, 0.000124462],
+                                            [0.00227238,  0.00473038,    0.999986, 5.33155e-05],
+                                            [        0,           0,           0,          1]])
+    x_depth_rgb_handeye = RigidTransform([[    0.999996 ,   0.0017759,   0.00227238 ,   0.0149411],
+                                            [-0.00178663 ,    0.999987 ,  0.00473038, -0.000151408],
+                                            [-0.00226395 , -0.00473442 ,    0.999986, -8.65525e-05],
+                                             [       0  ,          0 ,           0,           1]])
+    x_ee_camera = x_ee_rgb @ x_depth_rgb_handeye
 
     # connect handeye camera pcd source
     handeye_camera_pose_source = builder.AddSystem(CameraPoseInWorldSource(x_ee_camera, handeye=True))
@@ -224,10 +234,19 @@ def start_scenario(
     
     # connect stationary camera pcd source
     r = R.from_quat([-0.698783, 0.0166324, 0.715101, 0.00750221])
-    x_world_camera0 = RigidTransform(
+    x_world_rgb_camera0 = RigidTransform(
         R=RotationMatrix(r.as_matrix()),
         p = [0.864887, -0.00272318, 0.311732]
     )
+    x_rgb_depth_camera0 = RigidTransform([  [0.999986,  0.000116105 , -0.00531402 ,  -0.0151041],
+                                            [-0.000127587 ,    0.999998 , -0.00216038 ,-6.34105e-05],
+                                            [0.00531376  , 0.00216102  ,   0.999984 ,  0.00034625],
+                                                    [0  ,          0  ,          0 ,           1]])
+    x_depth_rgb_camera0 = RigidTransform([[0.999986, -0.000127587,   0.00531376,     0.015102],
+                                        [0.000116105,     0.999998 ,  0.00216102,  6.44158e-05],
+                                        [-0.00531402,  -0.00216038,     0.999984, -0.000426644],
+                                        [          0,            0,            0,            1]])
+    x_world_camera0 = x_world_rgb_camera0 @ x_depth_rgb_camera0
     camera0_pose_source = builder.AddSystem(CameraPoseInWorldSource(x_world_camera0, handeye=False))
 
     builder.Connect(

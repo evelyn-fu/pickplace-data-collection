@@ -5,6 +5,7 @@ import datetime
 import open3d as o3d
 import os
 from scipy.spatial.transform import Rotation as R
+from perception.icp import icp
 from planning.grasp import GraspListener
 from planning.toppra import reparameterize_with_toppra
 from planning.trajectories import (
@@ -40,6 +41,7 @@ from pydrake.planning import (RobotDiagramBuilder,
                               SceneGraphCollisionChecker)
 from pydrake.solvers import MosekSolver, GurobiSolver
 from pydrake.geometry.optimization import IrisOptions, IrisInConfigurationSpace
+from pydrake.geometry import Rgba
 
 from manipulation.meshcat_utils import AddMeshcatTriad
 from enum import Enum
@@ -197,7 +199,7 @@ class ScanState(Enum):
     DONE = 6
 
 # pregrasp is negative z in the gripper frame
-X_GgraspGpregrasp = RigidTransform([0, 0.0, -0.15])
+X_GgraspGpregrasp = RigidTransform([0, 0.0, -0.2])
 
 yaw_display_traj = []
 
@@ -345,6 +347,11 @@ class TwoGraspPlanner(LeafSystem):
         self.savedir = dirstr
         self.no_obstacles = no_obstacles
         self.done = False
+
+        self.pcd0 = None
+        self.pcd1 = None
+        self.pcd2 = None
+        self.pcd3 = None
 
     def Update(self, context, state):
         mode = context.get_abstract_state(int(self._mode_index)).get_value()
@@ -530,19 +537,24 @@ class TwoGraspPlanner(LeafSystem):
                 )
             )
         
-        def get_pcd(start_new_pcd = False):
+        def get_pcd(start_new_pcd = False, ind=0):
             body_poses = self.GetInputPort("body_poses").Eval(context)
             cloud = self.GetInputPort("cloud_handeye").Eval(context)
-            new_pcd = cloud.Crop(lower_xyz=[0.23, -0.17, 0.071], upper_xyz=[0.57, 0.17, 0.27])
+            new_pcd = cloud.Crop(lower_xyz=[0.23, -0.17, 0.055], upper_xyz=[0.57, 0.17, 0.27])
             new_pcd.EstimateNormals(radius=0.1, num_closest=30)
             X_WC = body_poses[self._eef_body_index] @ self._X_EefC 
             new_pcd.FlipNormalsTowardPoint(X_WC.translation())
             if start_new_pcd:
                 return new_pcd
             
-            merged_pcd = Concatenate([self.current_pcd, new_pcd])
-            return merged_pcd
-
+            if ind == 0:
+                self.pcd0 = new_pcd
+            if ind == 1:
+                self.pcd1 = new_pcd
+            if ind == 2:
+                self.pcd2 = new_pcd
+            if ind == 3:
+                self.pcd3 = new_pcd
 
         if scan_mode == ScanState.IDLE:
             if context.get_time() > traj_q.end_time() + start_time:
@@ -553,11 +565,12 @@ class TwoGraspPlanner(LeafSystem):
                 # start pcd with front camera view
                 body_poses = self.GetInputPort("body_poses").Eval(context)
                 cloud = self.GetInputPort("cloud_stationary").Eval(context)
-                new_pcd = cloud.Crop(lower_xyz=[0.23, -0.17, 0.071], upper_xyz=[0.57, 0.17, 0.27])
+                new_pcd = cloud.Crop(lower_xyz=[0.23, -0.17, 0.055], upper_xyz=[0.57, 0.17, 0.27])
                 new_pcd.EstimateNormals(radius=0.1, num_closest=30)
                 X_WC = body_poses[self._eef_body_index] @ self._X_EefC 
                 new_pcd.FlipNormalsTowardPoint(X_WC.translation())
                 self.current_pcd = new_pcd
+                self.pcd0 = new_pcd
 
                 # load trajectory to first camera view
                 traj = CompositeBezierCurveTrajectoryAttributes.load(self._scanning_traj_dir + "/to1/").to_composite_bezier_curve_trajectory()
@@ -569,9 +582,8 @@ class TwoGraspPlanner(LeafSystem):
                     int(self._scan_mode_index)
                 ).set_value(ScanState.GO_TO_2)
 
-                # update pcd
-                new_pcd = get_pcd()
-                self.current_pcd = new_pcd
+                # # update pcd (skip for now, too close to object)
+                # get_pcd(ind=1)
 
                 # load trajectory to next camera view
                 traj = CompositeBezierCurveTrajectoryAttributes.load(self._scanning_traj_dir + "/to2/").to_composite_bezier_curve_trajectory()
@@ -584,8 +596,7 @@ class TwoGraspPlanner(LeafSystem):
                 ).set_value(ScanState.GO_TO_3)
 
                 # update pcd
-                new_pcd = get_pcd()
-                self.current_pcd = new_pcd
+                get_pcd(ind=2)
 
                 # load trajectory to next camera view
                 traj = CompositeBezierCurveTrajectoryAttributes.load(self._scanning_traj_dir + "/to3/").to_composite_bezier_curve_trajectory()
@@ -598,8 +609,39 @@ class TwoGraspPlanner(LeafSystem):
                 ).set_value(ScanState.GO_HOME)
 
                 # update pcd
-                new_pcd = get_pcd()
-                down_sampled_pcd = new_pcd.VoxelizedDownSample(voxel_size=0.005)
+                get_pcd(ind=3)
+
+                # merge all and downsample
+                pcd_components = []
+                if self.pcd0:
+                    pcd_components.append(self.pcd0)
+                if self.pcd1:
+                    pcd_components.append(self.pcd1)
+                if self.pcd2:
+                    # X_3_2, mean_error, num_iters = icp(self.pcd3.xyzs(), self.pcd2.xyzs())
+                    X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.05, -0.01, 0.01)),[0.0075, 0.009, 0])
+                    transformed_xyzs = X_adjust @ self.pcd2.xyzs()
+                    self.pcd2.mutable_xyzs()[:] = transformed_xyzs
+                    pcd_components.append(self.pcd2)
+                if self.pcd3:
+                    pcd_components.append(self.pcd3)
+                    X_adjust = RigidTransform(RotationMatrix(),[-0.0075, 0, 0])
+                    transformed_xyzs = X_adjust @ self.pcd3.xyzs()
+                    self.pcd3.mutable_xyzs()[:] = transformed_xyzs
+                    pcd_components.append(self.pcd3)
+
+                # merge
+                merged_pcd = Concatenate(pcd_components)
+                
+                # downsample
+                down_sampled_pcd = merged_pcd.VoxelizedDownSample(voxel_size=0.005)
+                
+                # remove outliers
+                o3d_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(down_sampled_pcd.xyzs().T))
+                o3d_cloud.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
+                filtered_pts = np.asarray(o3d_cloud.points)
+                down_sampled_pcd.resize(filtered_pts.shape[0])
+                down_sampled_pcd.mutable_xyzs()[:] = filtered_pts.T
                 self.current_pcd = down_sampled_pcd
 
                 # load trajectory to return home
@@ -754,11 +796,11 @@ class TwoGraspPlanner(LeafSystem):
                     self.regions.append(get_seeded_region(self.models_path, self.object_com, self.object_rot, self.object_dims, q_goal))
 
                 
-                if not q_in_regions:
-                    raise Exception("q not in regions?")
+                # if not q_in_regions:
+                #     raise Exception("q not in regions?")
                 
-                if not q_goal_in_regions:
-                    raise Exception("q_goal not in regions?")
+                # if not q_goal_in_regions:
+                #     raise Exception("q_goal not in regions?")
 
                 save_regions_pkl(self.regions, self.models_path, self.savedir, "regions_1")
             else:
@@ -832,10 +874,20 @@ class TwoGraspPlanner(LeafSystem):
         '''
         mode = context.get_abstract_state(int(self._mode_index)).get_value()
         
-        down_sampled_pcd = self.current_pcd
-        self.meshcat.SetObject("cloud", down_sampled_pcd, point_size=0.001)
+        pcd_with_floor = self.current_pcd # Includes some floor on purpose
+        object_pcd = pcd_with_floor.Crop(lower_xyz=[0.23, -0.17, 0.065], upper_xyz=[0.57, 0.17, 0.27]) # just object
+        # if self.pcd0:
+        #     self.meshcat.SetObject("cloud0", self.pcd0, point_size=0.0001, rgba=Rgba(1,0,0,1))
+        # if self.pcd1:
+        #     self.meshcat.SetObject("cloud1", self.pcd1, point_size=0.0001, rgba=Rgba(1,1,0,1))
+        # if self.pcd2:
+        #     self.meshcat.SetObject("cloud2", self.pcd2, point_size=0.0001, rgba=Rgba(0,1,0,1))
+        # if self.pcd3:
+        #     self.meshcat.SetObject("cloud3", self.pcd3, point_size=0.0001, rgba=Rgba(0,0,1,1))
+        self.meshcat.SetObject("cloud", object_pcd, point_size=0.001)
+        # self.meshcat.SetObject("cloud_w_floor", pcd_with_floor, point_size=0.001, rgba=Rgba(1,1,0,1))
 
-        pcd_points = down_sampled_pcd.xyzs().T
+        pcd_points = object_pcd.xyzs().T
         principal_component, secondary_component, minor_component = compute_principal_minor_components(pcd_points)
 
         # visualize axes, principal axis is z axis (blue), minor axis is x axis (red)
@@ -857,13 +909,23 @@ class TwoGraspPlanner(LeafSystem):
         if mode == PlannerState.SCANNING1:
             # Planning first grasping trajectory
             self.grasp_node.compute_candidate_grasps(
-                down_sampled_pcd,
+                object_pcd,
+                pcd_with_floor,
                 candidate_num=1,
-                num_samples=10,
+                num_samples=15,
                 random_seed=5,
             )
             print("Grasp Pair:", self.grasp_node.get_best_grasps(candidate_num=1)[0])
             X_WG = self.grasp_node.get_best_grasps(candidate_num=1)[0][0]
+            X_WG2 = self.grasp_node.get_best_grasps(candidate_num=1)[0][1]
+
+            # visualize both grasps in o3d
+            manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(object_pcd.xyzs().T))
+            manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
+            viz_geoms = [manipuland_cloud]
+            viz_geoms.append(self.grasp_node.make_gripper_line_set(X_WG, [0.0, 1.0, 0.0]))
+            viz_geoms.append(self.grasp_node.make_gripper_line_set(X_WG2, [1.0, 0.0, 0.0]))
+            o3d.visualization.draw_geometries(viz_geoms)
         else:
             X_WG = self.grasp_node.get_best_grasps(candidate_num=1)[0][1]
 
@@ -879,7 +941,7 @@ class TwoGraspPlanner(LeafSystem):
         state.get_mutable_abstract_state(self._grasp_X_G_index).set_value(X_WE)
 
         # visualize grasp in o3d
-        manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(down_sampled_pcd.xyzs().T))
+        manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(object_pcd.xyzs().T))
         manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
         viz_geoms = [manipuland_cloud]
         viz_geoms.append(self.grasp_node.make_gripper_line_set(X_WG.GetAsMatrix4(), [0.0, 1.0, 0.0]))
