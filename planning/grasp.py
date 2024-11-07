@@ -387,7 +387,7 @@ class GraspListener():
         ) / within_box_pt_normals.shape[1]  # along the horizontal axis of the gripper, larger good (antipodal metric)
 
         # want grasps to avoid alignment with long axes, smaller better
-        gripper_vertical_axis_alignment_cost = -np.max(np.abs(eff_vertical_vec @ split_axes))
+        gripper_vertical_axis_alignment_cost = -np.abs(eff_vertical_vec @ split_axes)
         gripper_horizontal_axis_alignment_cost = -np.max(np.abs(eff_horizontal_vec @ split_axes))
 
         # consider lower two split ratio costs (grasp should be even along at least two axes)
@@ -396,12 +396,12 @@ class GraspListener():
         split_ratio_cost = split_ratio_costs_sorted[0] + split_ratio_costs_sorted[1]
         higher_up_cost = -np.min(t[2] - 0.1, 0) / 0.1
         cost = (
-            10.0 * antipodal_cost
-            + 10.0 * gripper_vertical_axis_alignment_cost
-            + 5.0 * gripper_horizontal_axis_alignment_cost
+            20.0 * antipodal_cost
+            + 10.0 * gripper_vertical_axis_alignment_cost[2]
+            + 5.0 * gripper_vertical_axis_alignment_cost[1]
             + 5.0 * split_ratio_cost
             + 5.0 * higher_up_cost
-            + 5.0 * proportion_enclosed
+            - 5.0 * proportion_enclosed
         )
         return cost
 
@@ -895,7 +895,7 @@ class GraspListener():
 
         grasps_quality = candidate_costs_filtered[:, np.newaxis] + candidate_costs_filtered[np.newaxis, :]
 
-        pair_costs = grasps_quality + 10 * translation_cost + 10 * rotation_cost
+        pair_costs = grasps_quality + 20 * translation_cost + 20 * rotation_cost
         pair_costs = np.triu(pair_costs, k=1) + np.tril(np.inf * np.ones_like(pair_costs)) # make lower + diagonal infinity to avoid double counting
         pair_costs = pair_costs.flatten()
         pairs = [(X_WG1, X_WG2) for X_WG1 in candidates_filtered for X_WG2 in candidates_filtered]
@@ -943,8 +943,10 @@ class GraspListener():
 
         print("pair selection time:", time.time()-start)
         # List of grasp pairs
-        self.grasp_candidates: List[Tuple[np.ndarray]] = pair_lst_sorted[:candidate_num]
+        self.grasp_candidates: List[Tuple[np.ndarray]] = pair_lst_sorted
 
-    def get_best_grasps(self, candidate_num=-1) -> List[np.ndarray]:
+    def get_best_grasps(self, candidate_num=-1) -> List[Tuple[np.ndarray]]:
         """Returns a list of the `candidate_num` grasps with the lowest cost."""
+        if candidate_num == -1:
+            return self.grasp_candidates
         return self.grasp_candidates[:candidate_num]

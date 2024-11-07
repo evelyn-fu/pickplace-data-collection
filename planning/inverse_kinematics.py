@@ -67,8 +67,8 @@ def solve_global_inverse_kinematics(
     prog.SetInitialGuess(q_variables, initial_guess)
 
     result = Solve(prog)
-    if not result.is_success():
-        logging.error(f"Failed to solve global IK for gripper pose {X_G}.")
-        return None
+    # if not result.is_success():
+    #     logging.error(f"Failed to solve global IK for gripper pose {X_G}.")
+    #     return None
     q_sol = result.GetSolution(q_variables)
     return q_sol

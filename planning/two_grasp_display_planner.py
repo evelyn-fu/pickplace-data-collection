@@ -70,14 +70,22 @@ def get_seeded_region(models_path, com, rot, dims, q_nominal):
     builder = RobotDiagramBuilder()
     plant = builder.plant()
     builder.parser().AddModels(models_path)
-    builder.parser().AddModelsFromString(bounding_box_urdf, "urdf")
+    # builder.parser().AddModelsFromString(bounding_box_urdf, "urdf")
     diagram = builder.Build()
 
     context = diagram.CreateDefaultContext()
     plant_context = plant.GetMyContextFromRoot(context)
     plant.SetPositions(plant_context, q_nominal)
 
-    iris_options = IrisOptions(require_sample_point_is_contained=True)
+    # iris_options = IrisOptions(require_sample_point_is_contained=True)
+    iris_options = IrisOptions()
+    iris_options.iteration_limit = 10
+    # increase num_collision_infeasible_samples to improve the (probabilistic)
+    # certificate of having no collisions.
+    iris_options.num_collision_infeasible_samples = 3
+    iris_options.require_sample_point_is_contained = True
+    iris_options.relative_termination_threshold = 0.01
+    iris_options.termination_threshold = -1
     region = IrisInConfigurationSpace(plant, plant_context, iris_options)
     print("region:", region)
 
@@ -322,13 +330,15 @@ class TwoGraspPlanner(LeafSystem):
         self.DeclarePeriodicUnrestrictedUpdateEvent(0.1, 0.0, self.Update)
 
         self.grasp_node = GraspListener(gripper_model_path=gripper_model_path)
+        self.q_pregrasp1 = None
+        self.q_pregrasp2 = None
+        self.X_WG1 = None
+        self.X_WG2 = None
         self.meshcat = meshcat
         self.plant = plant
         self._iiwa_controller_plant = controller_plant
         self.velocity_limits = 0.4 * np.ones(7)
-        self.velocity_limits[6] = 1.0
         self.acceleration_limits = 0.4 * np.ones(7)
-        self.acceleration_limits[6] = 1.0
         self.regions = None #regions
         self.object_com = None
         self.object_dims = None
@@ -422,7 +432,11 @@ class TwoGraspPlanner(LeafSystem):
                 ).set_value(ScanState.IDLE)
             return
         if mode == PlannerState.SCANNING2:
-            self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP2)
+            state.get_mutable_abstract_state(
+                int(self._mode_index)
+            ).set_value(PlannerState.GO_TO_PREGRASP2)
+            self.PlanToPregrasp(context, state)
+            # self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP2)
             return
         if mode == PlannerState.GO_TO_PREGRASP2:
             traj_q= context.get_abstract_state(
@@ -475,6 +489,7 @@ class TwoGraspPlanner(LeafSystem):
                 self.PlanGripper(context, state, "close")
         if pick_mode == PickState.CLOSING:
             if context.get_time() > self._gripper_traj_end_time:
+                print(self._gripper_traj_end_time, context.get_time())
                 state.get_mutable_abstract_state(
                     int(self._pick_mode_index)
                 ).set_value(PickState.MOVE)
@@ -582,8 +597,8 @@ class TwoGraspPlanner(LeafSystem):
                     int(self._scan_mode_index)
                 ).set_value(ScanState.GO_TO_2)
 
-                # # update pcd (skip for now, too close to object)
-                # get_pcd(ind=1)
+                # update pcd (skip for now, too close to object)
+                get_pcd(ind=1)
 
                 # load trajectory to next camera view
                 traj = CompositeBezierCurveTrajectoryAttributes.load(self._scanning_traj_dir + "/to2/").to_composite_bezier_curve_trajectory()
@@ -612,20 +627,27 @@ class TwoGraspPlanner(LeafSystem):
                 get_pcd(ind=3)
 
                 # merge all and downsample
+                # note: camera calibration is bad, manual tuning is added here
                 pcd_components = []
                 if self.pcd0:
+                    X_adjust = RigidTransform(RotationMatrix(),[-0.01, 0.0, 0.0])
+                    transformed_xyzs = X_adjust @ self.pcd0.xyzs()
+                    self.pcd0.mutable_xyzs()[:] = transformed_xyzs
                     pcd_components.append(self.pcd0)
                 if self.pcd1:
+                    X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.03, 0, 0)),[-0.01, 0.0, 0.0])
+                    transformed_xyzs = X_adjust @ self.pcd1.xyzs()
+                    self.pcd1.mutable_xyzs()[:] = transformed_xyzs
                     pcd_components.append(self.pcd1)
                 if self.pcd2:
                     # X_3_2, mean_error, num_iters = icp(self.pcd3.xyzs(), self.pcd2.xyzs())
-                    X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.05, -0.01, 0.01)),[0.0075, 0.009, 0])
+                    X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.05, -0.01, 0.01)),[-0.0025, 0.009, 0])
                     transformed_xyzs = X_adjust @ self.pcd2.xyzs()
                     self.pcd2.mutable_xyzs()[:] = transformed_xyzs
                     pcd_components.append(self.pcd2)
                 if self.pcd3:
                     pcd_components.append(self.pcd3)
-                    X_adjust = RigidTransform(RotationMatrix(),[-0.0075, 0, 0])
+                    X_adjust = RigidTransform(RotationMatrix(),[-0.0175, 0, 0])
                     transformed_xyzs = X_adjust @ self.pcd3.xyzs()
                     self.pcd3.mutable_xyzs()[:] = transformed_xyzs
                     pcd_components.append(self.pcd3)
@@ -638,8 +660,10 @@ class TwoGraspPlanner(LeafSystem):
                 
                 # remove outliers
                 o3d_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(down_sampled_pcd.xyzs().T))
-                o3d_cloud.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
-                filtered_pts = np.asarray(o3d_cloud.points)
+                cl, ind = o3d_cloud.remove_statistical_outlier(
+                    nb_neighbors=int(down_sampled_pcd.xyzs().shape[1] // 10), 
+                    std_ratio=1.0)
+                filtered_pts = np.asarray(o3d_cloud.points)[ind]
                 down_sampled_pcd.resize(filtered_pts.shape[0])
                 down_sampled_pcd.mutable_xyzs()[:] = filtered_pts.T
                 self.current_pcd = down_sampled_pcd
@@ -729,38 +753,13 @@ class TwoGraspPlanner(LeafSystem):
         mode = context.get_abstract_state(int(self._mode_index)).get_value()
 
         # Find grasp candidate
-        X_G_pick = self.PlanGrasp(context, state)
-        
-        X_G_prepick = X_G_pick @ X_GgraspGpregrasp
+        self.PlanGrasp(context, state)
 
         q = self.get_input_port(self._iiwa_position_index).Eval(context)
-        q_goal = solve_global_inverse_kinematics(
-            plant=self._iiwa_controller_plant,
-            X_G=X_G_prepick,
-            initial_guess=q,
-            position_tolerance=0.0,
-            orientation_tolerance=0.0,
-            gripper_frame_name="iiwa_link_7",
-        )
-        attempts = 0
-        while q_goal is None and attempts < 10:
-            print("trying global inverse kinematics with new initial guess randomized around q")
-            q_goal = solve_global_inverse_kinematics(
-                plant=self._iiwa_controller_plant,
-                X_G=X_G_prepick,
-                initial_guess=q + np.random.normal(0, np.pi/4, 7),
-                position_tolerance=0.0,
-                orientation_tolerance=0.0,
-                gripper_frame_name="iiwa_link_7",
-            )
-            attempts += 1
-
-        if q_goal is None:
-            logging.error(
-                "Failed to solve inverse kinematics for the grasping start pose."
-            )
-            exit(1)
-        print(q_goal)
+        if mode == PlannerState.SCANNING1:
+            q_goal = self.q_pregrasp1
+        if mode == PlannerState.SCANNING2:
+            q_goal = self.q_pregrasp2
 
         loaded_traj = False
         if self.traj_dir is not None:
@@ -782,19 +781,22 @@ class TwoGraspPlanner(LeafSystem):
                     self.regions = []
 
                 for region in self.regions:
-                    if region.PointInSet(q):
-                        q_in_regions = True
                     if region.PointInSet(q_goal):
                         q_goal_in_regions = True
+
+                if not q_goal_in_regions:
+                    print("getting seeded region for q goal")
+                    self.regions.append(get_seeded_region(self.models_path, self.object_com, self.object_rot, self.object_dims, q_goal))
+
+                for region in self.regions:
+                    if region.PointInSet(q):
+                        q_in_regions = True
 
                 # make sure the start and pregrasp positions are in the regions
                 if not q_in_regions:
                     print("getting seeded region for q")
                     self.regions.append(get_seeded_region(self.models_path, self.object_com, self.object_rot, self.object_dims, q))
-                if not q_goal_in_regions:
-                    print("getting seeded region for q goal")
-                    self.regions.append(get_seeded_region(self.models_path, self.object_com, self.object_rot, self.object_dims, q_goal))
-
+                
                 
                 # if not q_in_regions:
                 #     raise Exception("q not in regions?")
@@ -818,13 +820,15 @@ class TwoGraspPlanner(LeafSystem):
                 for region in self.regions:
                     if region.PointInSet(q):
                         q_in_regions = True
-                    if region.PointInSet(q_goal):
-                        q_goal_in_regions = True
                 
                 if not q_in_regions:
                     print("getting seeded region for q")
                     self.regions.append(get_seeded_region(self.models_path, self.object_com, self.object_rot, self.object_dims, q))
                 
+                for region in self.regions:
+                    if region.PointInSet(q_goal):
+                        q_goal_in_regions = True
+
                 if not q_goal_in_regions:
                     print("getting seeded region for q goal")
                     self.regions.append(get_seeded_region(self.models_path, self.object_com, self.object_rot, self.object_dims, q_goal))
@@ -875,15 +879,15 @@ class TwoGraspPlanner(LeafSystem):
         mode = context.get_abstract_state(int(self._mode_index)).get_value()
         
         pcd_with_floor = self.current_pcd # Includes some floor on purpose
-        object_pcd = pcd_with_floor.Crop(lower_xyz=[0.23, -0.17, 0.065], upper_xyz=[0.57, 0.17, 0.27]) # just object
-        # if self.pcd0:
-        #     self.meshcat.SetObject("cloud0", self.pcd0, point_size=0.0001, rgba=Rgba(1,0,0,1))
-        # if self.pcd1:
-        #     self.meshcat.SetObject("cloud1", self.pcd1, point_size=0.0001, rgba=Rgba(1,1,0,1))
-        # if self.pcd2:
-        #     self.meshcat.SetObject("cloud2", self.pcd2, point_size=0.0001, rgba=Rgba(0,1,0,1))
-        # if self.pcd3:
-        #     self.meshcat.SetObject("cloud3", self.pcd3, point_size=0.0001, rgba=Rgba(0,0,1,1))
+        object_pcd = pcd_with_floor.Crop(lower_xyz=[0.23, -0.17, 0.06], upper_xyz=[0.57, 0.17, 0.27]) # just object
+        if self.pcd0:
+            self.meshcat.SetObject("cloud0", self.pcd0, point_size=0.0001, rgba=Rgba(1,0,0,1))
+        if self.pcd1:
+            self.meshcat.SetObject("cloud1", self.pcd1, point_size=0.0001, rgba=Rgba(1,1,0,1))
+        if self.pcd2:
+            self.meshcat.SetObject("cloud2", self.pcd2, point_size=0.0001, rgba=Rgba(0,1,0,1))
+        if self.pcd3:
+            self.meshcat.SetObject("cloud3", self.pcd3, point_size=0.0001, rgba=Rgba(0,0,1,1))
         self.meshcat.SetObject("cloud", object_pcd, point_size=0.001)
         # self.meshcat.SetObject("cloud_w_floor", pcd_with_floor, point_size=0.001, rgba=Rgba(1,1,0,1))
 
@@ -906,6 +910,9 @@ class TwoGraspPlanner(LeafSystem):
                         X_PT=RigidTransform(rot,
                         [com[0], com[1], com[2]]))
 
+        # get end effector pose from grasp pose
+        X_GE = RigidTransform(RotationMatrix(RollPitchYaw(0, 0, 0)), [0, 0, -0.17])
+        
         if mode == PlannerState.SCANNING1:
             # Planning first grasping trajectory
             self.grasp_node.compute_candidate_grasps(
@@ -915,25 +922,90 @@ class TwoGraspPlanner(LeafSystem):
                 num_samples=15,
                 random_seed=5,
             )
-            print("Grasp Pair:", self.grasp_node.get_best_grasps(candidate_num=1)[0])
-            X_WG = self.grasp_node.get_best_grasps(candidate_num=1)[0][0]
-            X_WG2 = self.grasp_node.get_best_grasps(candidate_num=1)[0][1]
 
-            # visualize both grasps in o3d
-            manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(object_pcd.xyzs().T))
-            manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
-            viz_geoms = [manipuland_cloud]
-            viz_geoms.append(self.grasp_node.make_gripper_line_set(X_WG, [0.0, 1.0, 0.0]))
-            viz_geoms.append(self.grasp_node.make_gripper_line_set(X_WG2, [1.0, 0.0, 0.0]))
-            o3d.visualization.draw_geometries(viz_geoms)
+            grasp_pairs = self.grasp_node.get_best_grasps()
+            print("grasp pairs:", len(grasp_pairs))
+            X_ee = None
+            X_pregrasp = None
+            for i in range(len(grasp_pairs)):
+                print("Grasp Pair:", grasp_pairs[i])
+
+                X_WG1 = grasp_pairs[i][0]
+                X_WG2 = grasp_pairs[i][1]
+                X_WPregrasp1 = (RigidTransform(X_WG1) @ X_GE) @ X_GgraspGpregrasp
+                X_WPregrasp2 = (RigidTransform(X_WG2) @ X_GE) @ X_GgraspGpregrasp
+
+                # Check that IK passes
+                q = self.get_input_port(self._iiwa_position_index).Eval(context)
+                q_goal1 = solve_global_inverse_kinematics(
+                    plant=self._iiwa_controller_plant,
+                    X_G=X_WPregrasp1,
+                    initial_guess=q,
+                    position_tolerance=0.0,
+                    orientation_tolerance=0.0,
+                    gripper_frame_name="iiwa_link_7",
+                )
+                attempts = 0
+                while q_goal1 is None and attempts < 10:
+                    print("trying global inverse kinematics with new initial guess randomized around q")
+                    q_goal1 = solve_global_inverse_kinematics(
+                        plant=self._iiwa_controller_plant,
+                        X_G=X_WPregrasp1,
+                        initial_guess=q + np.random.normal(0, np.pi/4, 7),
+                        position_tolerance=0.0,
+                        orientation_tolerance=0.0,
+                        gripper_frame_name="iiwa_link_7",
+                    )
+                    attempts += 1
+
+                if q_goal1 is None:
+                    continue
+
+                q = self.get_input_port(self._iiwa_position_index).Eval(context)
+                q_goal2 = solve_global_inverse_kinematics(
+                    plant=self._iiwa_controller_plant,
+                    X_G=X_WPregrasp2,
+                    initial_guess=q,
+                    position_tolerance=0.0,
+                    orientation_tolerance=0.0,
+                    gripper_frame_name="iiwa_link_7",
+                )
+                attempts = 0
+                while q_goal2 is None and attempts < 10:
+                    print("trying global inverse kinematics with new initial guess randomized around q")
+                    q_goal2 = solve_global_inverse_kinematics(
+                        plant=self._iiwa_controller_plant,
+                        X_G=X_WPregrasp2,
+                        initial_guess=q + np.random.normal(0, np.pi/4, 7),
+                        position_tolerance=0.0,
+                        orientation_tolerance=0.0,
+                        gripper_frame_name="iiwa_link_7",
+                    )
+                    attempts += 1
+
+                if q_goal2 is None:
+                    continue
+                
+                self.q_pregrasp1 = q_goal1
+                self.q_pregrasp2 = q_goal2
+                self.X_WG1 = X_WG1
+                self.X_WG2 = X_WG2
+                X_ee = RigidTransform(X_WG1) @ X_GE
+                X_pregrasp = (RigidTransform(X_WG1) @ X_GE) @ X_GgraspGpregrasp
+                break
+            
+            if self.q_pregrasp1 is None or self.q_pregrasp2 is None:
+                logging.error(
+                    "Failed to solve inverse kinematics for any pair of grasps (cry)"
+                )
+                exit(1)
+
+            X_WG = self.X_WG1
         else:
-            X_WG = self.grasp_node.get_best_grasps(candidate_num=1)[0][1]
+            X_WG = self.X_WG2
 
         X_WG = RigidTransform(X_WG)
         print(X_WG)
-        
-        # get end effector pose from grasp pose
-        X_GE = RigidTransform(RotationMatrix(RollPitchYaw(0, 0, 0)), [0, 0, -0.09])
 
         X_WE = X_WG.multiply(X_GE)
 
@@ -963,7 +1035,7 @@ class TwoGraspPlanner(LeafSystem):
         }
 
         X_G["display_traj"] = yaw_display_traj
-        place_flipped = (mode == PlannerState.GO_TO_PREGRASP1)
+        place_flipped = False #(mode == PlannerState.GO_TO_PREGRASP1)
         X_G, times = MakePickAndDisplayGripperFrames(X_G, place_flipped)
 
         state.get_mutable_abstract_state(int(self._times_index)).set_value(
@@ -1048,7 +1120,7 @@ class TwoGraspPlanner(LeafSystem):
             np.hstack([[closed], [opened]]) if direction == "open" else np.hstack([[opened], [closed]]) 
         )
 
-        self._gripper_traj_end_time = current_time + 1.0
+        self._gripper_traj_end_time = current_time + 3.0
 
         state.get_mutable_abstract_state(int(self._traj_wsg_index)).set_value(
             traj_wsg_command
