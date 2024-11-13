@@ -8,4 +8,3 @@ env/
 **/__pycache__/
 planning/**/__pycache__/
 outputs/
-scanning_traj_continuous/

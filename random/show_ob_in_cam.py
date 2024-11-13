@@ -38,13 +38,14 @@ def main(argv):
     diagram = builder.Build()
 
     ob_in_cam_path = argv[0]
-    # i = 0
-    # for transform_path in sorted(os.listdir(ob_in_cam_path)):
-    #     T = np.loadtxt(os.path.join(ob_in_cam_path, transform_path))
-    #     AddMeshcatTriad(meshcat, f'camera_frame{i}', X_PT=RigidTransform(RotationMatrix(T[:3, :3]),
-    #                             T[:3, -1]))
-    #     i += 1
-    # print(i)
+    i = 0
+    for transform_path in sorted(os.listdir(ob_in_cam_path)):
+        T = np.loadtxt(os.path.join(ob_in_cam_path, transform_path))
+        T = np.linalg.inv(T)
+        AddMeshcatTriad(meshcat, f'camera_frame{i}', X_PT=RigidTransform(RotationMatrix(T[:3, :3]),
+                                T[:3, -1]))
+        i += 1
+    print(i)
 
     context = diagram.CreateDefaultContext()
     plant_context = plant.GetMyContextFromRoot(context)

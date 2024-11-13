@@ -94,13 +94,24 @@ def _CalcRegion(name, seed):
 
     # Gaze constraint:
     ik = InverseKinematics(plant, plant_context)
-    ik.AddGazeTargetConstraint(
-        frameA=plant.GetFrameByName("iiwa_link_7"), 
-        p_AS=np.array([0., 0., 0.09]),
-        n_A=np.array([0., 0., 1.]),
-        frameB=plant.GetFrameByName("world"),
-        p_BT=np.array([0.4, 0, 0.1]),
-        cone_half_angle=np.pi*40/180)
+    corners = [
+        [0.3, 0.2, 0.07],
+        [0.3, -0.2, 0.07],
+        [0.5, 0.2, 0.07],
+        [0.5, -0.2, 0.07],
+        [0.3, 0.2, 0.23],
+        [0.3, -0.2, 0.23],
+        [0.5, 0.2, 0.23],
+        [0.5, -0.2, 0.23]
+    ]
+    for c in corners:
+        ik.AddGazeTargetConstraint(
+            frameA=plant.GetFrameByName("iiwa_link_7"), 
+            p_AS=np.array([0., 0., 0.09]),
+            n_A=np.array([0., 0., 1.]),
+            frameB=plant.GetFrameByName("world"),
+            p_BT=np.array(c),
+            cone_half_angle=np.pi*40/180)
     iris_options.prog_with_additional_constraints = ik.prog()
 
     if use_existing_regions_as_obstacles:
@@ -121,7 +132,21 @@ def _CalcRegion(name, seed):
     display(f"Computing region for seed: {name}")
     start_time = time.time()
     print(plant.GetPositionLowerLimits())
-    hpoly = IrisInConfigurationSpace(plant, plant_context, iris_options)
+    try:
+        hpoly = IrisInConfigurationSpace(plant, plant_context, iris_options)
+    except:
+        print(f"full corners gaze constraint failed at seed {name}")
+        ik_backup = InverseKinematics(plant, plant_context)
+        ik_backup.AddGazeTargetConstraint(
+            frameA=plant.GetFrameByName("iiwa_link_7"), 
+            p_AS=np.array([0., 0., 0.09]),
+            n_A=np.array([0., 0., 1.]),
+            frameB=plant.GetFrameByName("world"),
+            p_BT=np.array([0.4, 0, 0.1]),
+            cone_half_angle=np.pi*20/180)
+        iris_options.prog_with_additional_constraints = ik_backup.prog()
+        hpoly = IrisInConfigurationSpace(plant, plant_context, iris_options)
+
     display(
         f"Finished seed {name}; Computation time: {(time.time() - start_time):.2f} seconds"
     )
@@ -139,7 +164,7 @@ def GenerateRegion(name, seed):
         display(f"Region already computed: {name}")
         return
     iris_regions[name] = _CalcRegion(name, seed)
-    SaveIrisRegionsYamlFile("../regions/gaze_constrained_scanning_regions.yaml.autosave", iris_regions)
+    SaveIrisRegionsYamlFile("../regions/gaze_constrained_scanning_regions_2.yaml.autosave", iris_regions)
 
 
 def GenerateRegions(seed_dict, verbose=True):
@@ -280,6 +305,17 @@ def MyInverseKinematics(X_WE, plant=None, context=None, initial_guess=None):
     plant.SetPositions(context, result.GetSolution(q))
     return result.GetSolution(q)
 
+def MyForwardKinematics(q, plant=None):
+    if not plant:
+        plant = MultibodyPlant(0.0)
+        LoadRobot(plant, models_path)
+        plant.Finalize()
+
+    temp_context = plant.CreateDefaultContext()
+    plant.SetPositions(temp_context, q)
+
+    return plant.EvalBodyPoseInWorld(temp_context, plant.GetBodyByName("body"))
+
 def get_seeded_region(models_path, com, rot, dims, q_nominal):
     object_area_urdf = """<?xml version="1.0"?>
     <robot name="object_area">
@@ -372,61 +408,94 @@ print("Top")
 seeds["Top"] = MyInverseKinematics(
     RigidTransform(RollPitchYaw(-np.pi/2, 0, 0), [0.4, 0, 0.7])
 )
-print(seeds["Top"])
-print("Back Back Left")
-seeds["Back Back Left"] = [2.5, 1.3, 1.8, 1.8, 0.2, -1.5, -1.4]
-print("Back Back Right")
-seeds["Back Back Right"] = [0.64, -1.3, 1.34, 1.8, -0.2, -1.5, 1.3]
+print(list(seeds["Top"]))
+
 print("Back Left")
 seeds["Back Left"] = MyInverseKinematics(
     RigidTransform(RollPitchYaw(-5*np.pi/6, 0, np.pi/4), [0.1, 0.3, 0.4]),
-    initial_guess = seeds["Back Back Left"]
+    initial_guess = seeds["Top"]
 )
-print(seeds["Back Left"])
+print(list(seeds["Back Left"]))
 print("Back Right")
 seeds["Back Right"] = MyInverseKinematics(
     RigidTransform(RollPitchYaw(np.pi/6, np.pi, -np.pi/4), [0.1, -0.3, 0.4]),
-    initial_guess = seeds["Back Back Right"]
+    initial_guess = seeds["Top"]
 )
-print(seeds["Back Right"])
+print(list(seeds["Back Right"]))
+
+back_back_left_pose = MyForwardKinematics(np.array([2.5, 1.3, 1.8, 1.8, 0.2, -1.5, -1.4]))
+back_back_right_pose = MyForwardKinematics(np.array([0.64, -1.3, 1.34, 1.8, -0.2, -1.5, 1.3]))
+
+print("Back Back Left")
+seeds["Back Back Left"] = MyInverseKinematics(
+    RigidTransform(RollPitchYaw(-5*np.pi/6, 0, 0), [0.4, 0.4, 0.4]),
+    initial_guess = seeds["Back Left"]
+)
+print(list(seeds["Back Back Left"]))
+print("Back Back Right")
+seeds["Back Back Right"] = MyInverseKinematics(
+    RigidTransform(RollPitchYaw(np.pi/6, np.pi, 0), [0.4, -0.4, 0.4]),
+    initial_guess = seeds["Back Right"]
+)
+print(list(seeds["Back Back Right"]))
+
 print("Left")
 seeds["Left"] = MyInverseKinematics(
     RigidTransform(RollPitchYaw(-5*np.pi/6, 0, 0), [0.4, 0.4, 0.4]),
     initial_guess = seeds["Back Left"]
 )
-print(seeds["Left"])
+print(list(seeds["Left"]))
 print("Right")
 seeds["Right"] = MyInverseKinematics(
     RigidTransform(RollPitchYaw(np.pi/6, np.pi, 0), [0.4, -0.4, 0.4]),
     initial_guess = seeds["Back Right"]
 )
-print(seeds["Right"])
-print("Front")
-seeds["Front"] = np.array([0, 0.7, -0.2, -1.1, 0.2, 1.75, 2.9])
+print(list(seeds["Right"]))
+
 print("Front Left")
 seeds["Front Left"] = MyInverseKinematics(
     RigidTransform(RollPitchYaw(-5*np.pi/6, 0, -np.pi/10), [0.5, 0.35, 0.4]),
     initial_guess = seeds["Left"]
 )
-print(seeds["Front Left"])
+print(list(seeds["Front Left"]))
 print("Front Right")
 seeds["Front Right"] = MyInverseKinematics(
     RigidTransform(RollPitchYaw(np.pi/6, np.pi, np.pi/10), [0.5, -0.35, 0.4]),
     initial_guess = seeds["Right"]
 )
-print(seeds["Front Right"])
-print("Home")
-seeds["Home"] = [0.0, 0.4, 0, -1.2, 0, 1.0, -1.57]
-print(seeds["Home"])
+print(list(seeds["Front Right"]))
+
+print("Top Left")
+seeds["Top Left"] = MyInverseKinematics(
+    RigidTransform(RollPitchYaw(-2*np.pi/3, 0, 0), [0.4, 0.25, 0.55]),
+    initial_guess = seeds["Top"]
+)
+print(list(seeds["Top Left"]))
+print("Top Right")
+seeds["Top Right"] = MyInverseKinematics(
+    RigidTransform(RollPitchYaw(-1*np.pi/3, 0, 0), [0.4, -0.25, 0.55]),
+    initial_guess = seeds["Top"]
+)
+print(list(seeds["Top Right"]))
 
 if MosekSolver().available() and MosekSolver().enabled():
     print("mosek enabled")
     iris_regions = dict()  # reset the iris regions
-    iris_regions.update(LoadIrisRegionsYamlFile("../regions/gaze_constrained_scanning_regions.yaml.autosave"))
+    try:
+        # old_regions = LoadIrisRegionsYamlFile("../regions/gaze_constrained_scanning_regions_2.yaml.autosave")
+        # iris_regions["Top"] = old_regions["Top"]
+        # iris_regions["Front"] = old_regions["Front"]
+        # iris_regions["Top Left"] = old_regions["Top Left"]
+        # iris_regions["Top Right"] = old_regions["Top Right"]
+        # iris_regions["Back Left"] = old_regions["Back Left Top Seeded"]
+        # iris_regions["Back Right"] = old_regions["Back Right Top Seeded"]
+        iris_regions.update(LoadIrisRegionsYamlFile("../regions/gaze_constrained_scanning_regions_3.yaml"))
+    except:
+        pass
     print(iris_regions)
     GenerateRegions(seeds)
 
-    SaveIrisRegionsYamlFile("regions/gaze_constrained_scanning_regions.yaml", iris_regions)
+    SaveIrisRegionsYamlFile("../regions/gaze_constrained_scanning_regions_3.yaml", iris_regions)
 
     VisualizeRegions()
 elif GurobiSolver().available() and GurobiSolver().enabled():
@@ -434,7 +503,7 @@ elif GurobiSolver().available() and GurobiSolver().enabled():
     iris_regions = dict()  # reset the iris regions
     GenerateRegions(seeds)
 
-    SaveIrisRegionsYamlFile("regions/gaze_constrained_scanning_regions.yaml", iris_regions)
+    SaveIrisRegionsYamlFile("../regions/gaze_constrained_scanning_regions_3.yaml", iris_regions)
 
     VisualizeRegions()
 else:

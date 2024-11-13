@@ -13,7 +13,7 @@ def main(argv):
     count = 0
     for image_path in sorted(os.listdir(original_path)):
         input_path = os.path.join(original_path, image_path)
-        if count % 2 == 0:
+        if count % 10 == 0:
             shutil.copy2(input_path, new_dir)
         count += 1
 

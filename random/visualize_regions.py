@@ -61,7 +61,7 @@ plant_context = plant.GetMyContextFromRoot(context)
 
 diagram.ForcedPublish(context)
 
-iris_regions = LoadIrisRegionsYamlFile("../regions/gaze_constrained_scanning_regions.yaml.autosave")
+iris_regions = LoadIrisRegionsYamlFile("../regions/gaze_constrained_scanning_regions_3.yaml")
 visualize_connectivity(iris_regions)
 
 test_iris_region(plant, plant_context, meshcat, iris_regions, num_sample=100)

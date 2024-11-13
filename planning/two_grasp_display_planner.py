@@ -192,14 +192,16 @@ class PickState(Enum):
 
 class ScanState(Enum):
     IDLE = 1
+    GO_TO_PRESCAN = 7
     GO_TO_1 = 2
     GO_TO_2 = 3
     GO_TO_3 = 4
+    GO_TO_POSTSCAN = 8
     GO_HOME = 5
     DONE = 6
 
 # pregrasp is negative z in the gripper frame
-X_GgraspGpregrasp = RigidTransform([0, 0.0, -0.15])
+X_GgraspGpregrasp = RigidTransform([0, 0.0, -0.2])
 
 yaw_display_traj = []
 
@@ -310,6 +312,11 @@ class TwoGraspPlanner(LeafSystem):
             lambda: AbstractValue.Make(PlannerState.START),
             self.GetState
         )
+        self.DeclareAbstractOutputPort(
+            "scan_state", 
+            lambda: AbstractValue.Make(ScanState.IDLE),
+            self.GetScanState
+        )
 
         # To get iiwa position
         num_positions = 7
@@ -374,32 +381,32 @@ class TwoGraspPlanner(LeafSystem):
             if context.get_time() > traj_q.end_time() + start_time:
                 state.get_mutable_abstract_state(
                     int(self._mode_index)
-                ).set_value(PlannerState.PRESCANNING)
-                # # Update scanning state
-                # state.get_mutable_abstract_state(
-                #     int(self._scan_mode_index)
-                # ).set_value(ScanState.IDLE)
-            return
-        if mode == PlannerState.PRESCANNING:
-            traj_q= context.get_abstract_state(
-                int(self._current_joint_traj_idx)
-            ).get_value().trajectory
-            start_time = context.get_abstract_state(
-                int(self._current_joint_traj_idx)
-            ).get_value().start_time_s
-            if context.get_time() > traj_q.end_time() + start_time:
+                ).set_value(PlannerState.SCANNING1)
+                # Update scanning state
                 state.get_mutable_abstract_state(
-                    int(self._mode_index)
-                ).set_value(PlannerState.MOVE_FORWARD)
+                    int(self._scan_mode_index)
+                ).set_value(ScanState.IDLE)
             return
-        if mode == PlannerState.MOVE_FORWARD:
-            self.UpdateInGrasp(context, state, PlannerState.GO_HOME1)
+        # if mode == PlannerState.PRESCANNING:
+        #     traj_q= context.get_abstract_state(
+        #         int(self._current_joint_traj_idx)
+        #     ).get_value().trajectory
+        #     start_time = context.get_abstract_state(
+        #         int(self._current_joint_traj_idx)
+        #     ).get_value().start_time_s
+        #     if context.get_time() > traj_q.end_time() + start_time:
+        #         state.get_mutable_abstract_state(
+        #             int(self._mode_index)
+        #         ).set_value(PlannerState.MOVE_FORWARD)
+        #     return
+        # if mode == PlannerState.MOVE_FORWARD:
+        #     self.UpdateInGrasp(context, state, PlannerState.GO_HOME1)
         if mode == PlannerState.SCANNING1:
-            self.PlanToPregrasp(context, state)
-            state.get_mutable_abstract_state(
-                int(self._mode_index)
-            ).set_value(PlannerState.GO_TO_PREGRASP1)
-            # self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP1)
+            # self.PlanToPregrasp(context, state)
+            # state.get_mutable_abstract_state(
+            #     int(self._mode_index)
+            # ).set_value(PlannerState.GO_TO_PREGRASP1)
+            self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP1)
             return
         if mode == PlannerState.GO_TO_PREGRASP1:
             traj_q= context.get_abstract_state(
@@ -438,11 +445,11 @@ class TwoGraspPlanner(LeafSystem):
                 ).set_value(ScanState.IDLE)
             return
         if mode == PlannerState.SCANNING2:
-            self.PlanToPregrasp(context, state)
-            state.get_mutable_abstract_state(
-                int(self._mode_index)
-            ).set_value(PlannerState.GO_TO_PREGRASP2)
-            # self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP2)
+            # self.PlanToPregrasp(context, state)
+            # state.get_mutable_abstract_state(
+            #     int(self._mode_index)
+            # ).set_value(PlannerState.GO_TO_PREGRASP2)
+            self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP2)
             return
         if mode == PlannerState.GO_TO_PREGRASP2:
             traj_q= context.get_abstract_state(
@@ -584,6 +591,16 @@ class TwoGraspPlanner(LeafSystem):
             if context.get_time() > traj_q.end_time() + start_time:
                 state.get_mutable_abstract_state(
                     int(self._scan_mode_index)
+                ).set_value(ScanState.GO_TO_PRESCAN)
+
+                # load trajectory to first camera view
+                traj = CompositeBezierCurveTrajectoryAttributes.load(self._scanning_traj_dir + "/to_prescan/").to_composite_bezier_curve_trajectory()
+                set_traj(traj)
+                return
+        if scan_mode == ScanState.GO_TO_PRESCAN:
+            if context.get_time() > traj_q.end_time() + start_time:
+                state.get_mutable_abstract_state(
+                    int(self._scan_mode_index)
                 ).set_value(ScanState.GO_TO_1)
 
                 # load trajectory to first camera view
@@ -622,12 +639,22 @@ class TwoGraspPlanner(LeafSystem):
             if context.get_time() > traj_q.end_time() + start_time:
                 state.get_mutable_abstract_state(
                     int(self._scan_mode_index)
-                ).set_value(ScanState.GO_HOME)
+                ).set_value(ScanState.GO_TO_POSTSCAN)
 
                 # update pcd
                 new_pcd = get_pcd()
                 down_sampled_pcd = new_pcd.VoxelizedDownSample(voxel_size=0.005)
                 self.current_pcd = down_sampled_pcd
+
+                # load trajectory to return home
+                traj = CompositeBezierCurveTrajectoryAttributes.load(self._scanning_traj_dir + "/to_postscan/").to_composite_bezier_curve_trajectory()
+                set_traj(traj)
+                return
+        if scan_mode == ScanState.GO_TO_POSTSCAN:
+            if context.get_time() > traj_q.end_time() + start_time:
+                state.get_mutable_abstract_state(
+                    int(self._scan_mode_index)
+                ).set_value(ScanState.GO_HOME)
 
                 # load trajectory to return home
                 traj = CompositeBezierCurveTrajectoryAttributes.load(self._scanning_traj_dir + "/to_home/").to_composite_bezier_curve_trajectory()
@@ -759,47 +786,62 @@ class TwoGraspPlanner(LeafSystem):
         # Set gcs regions or generate if not given or not ignoring obstacles/loading trajectories
         if mode == PlannerState.SCANNING1:
             if not self.use_offline_regions1 and not self.no_obstacles and not loaded_traj:
-                self.regions = get_regions(self.models_path, self.object_com, self.object_rot, self.object_dims)
-
-                # make sure the start and pregrasp positions are in the regions
-                print("getting seeded region for q")
-                self.regions.append(get_seeded_region(self.models_path, self.object_com, self.object_rot, self.object_dims, q))
-                print("getting seeded region for q goal")
-                self.regions.append(get_seeded_region(self.models_path, self.object_com, self.object_rot, self.object_dims, q_goal))
-
+                # self.regions = get_regions(self.models_path, self.object_com, self.object_rot, self.object_dims)
                 q_in_regions = False
                 q_goal_in_regions = False
+
+                if self.regions is None:
+                    self.regions = []
+
+                for region in self.regions:
+                    if region.PointInSet(q_goal):
+                        q_goal_in_regions = True
+
+                if not q_goal_in_regions:
+                    print("getting seeded region for q goal")
+                    self.regions.append(get_seeded_region(self.models_path, self.object_com, self.object_rot, self.object_dims, q_goal))
+
                 for region in self.regions:
                     if region.PointInSet(q):
                         q_in_regions = True
-                    if region.PointInSet(q_goal):
-                        q_goal_in_regions = True
-                
+
+                # make sure the start and pregrasp positions are in the regions
                 if not q_in_regions:
-                    raise Exception("q not in regions?")
+                    print("getting seeded region for q")
+                    self.regions.append(get_seeded_region(self.models_path, self.object_com, self.object_rot, self.object_dims, q))
                 
-                if not q_goal_in_regions:
-                    raise Exception("q_goal not in regions?")
+                
+                # if not q_in_regions:
+                #     raise Exception("q not in regions?")
+                
+                # if not q_goal_in_regions:
+                #     raise Exception("q_goal not in regions?")
 
                 save_regions_pkl(self.regions, self.models_path, self.savedir, "regions_1")
             else:
                 self.regions = self.regions1
         else:
             if not self.use_offline_regions2 and not self.no_obstacles and not loaded_traj:
-                self.regions = get_regions(self.models_path, self.object_com, self.object_rot, self.object_dims)
+                # self.regions = get_regions(self.models_path, self.object_com, self.object_rot, self.object_dims)
 
                 q_in_regions = False
                 q_goal_in_regions = False
+                
+                if self.regions is None:
+                    self.regions = []
+                    
                 for region in self.regions:
                     if region.PointInSet(q):
                         q_in_regions = True
-                    if region.PointInSet(q_goal):
-                        q_goal_in_regions = True
                 
                 if not q_in_regions:
                     print("getting seeded region for q")
                     self.regions.append(get_seeded_region(self.models_path, self.object_com, self.object_rot, self.object_dims, q))
                 
+                for region in self.regions:
+                    if region.PointInSet(q_goal):
+                        q_goal_in_regions = True
+
                 if not q_goal_in_regions:
                     print("getting seeded region for q goal")
                     self.regions.append(get_seeded_region(self.models_path, self.object_com, self.object_rot, self.object_dims, q_goal))
@@ -849,27 +891,27 @@ class TwoGraspPlanner(LeafSystem):
         '''
         mode = context.get_abstract_state(int(self._mode_index)).get_value()
         
-        # down_sampled_pcd = self.current_pcd
-        # self.meshcat.SetObject("cloud", down_sampled_pcd, point_size=0.001)
+        down_sampled_pcd = self.current_pcd
+        self.meshcat.SetObject("cloud", down_sampled_pcd, point_size=0.001)
 
-        # pcd_points = down_sampled_pcd.xyzs().T
-        # principal_component, secondary_component, minor_component = compute_principal_minor_components(pcd_points)
+        pcd_points = down_sampled_pcd.xyzs().T
+        principal_component, secondary_component, minor_component = compute_principal_minor_components(pcd_points)
 
-        # # visualize axes, principal axis is z axis (blue), minor axis is x axis (red)
-        # z_axis, x_axis = [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]
-        # rot_principal_component_to_axes, _ = R.align_vectors(
-        #     np.array([z_axis, x_axis]), np.stack([principal_component, minor_component])
-        # )
-        # com = np.mean(pcd_points, axis=0)
-        # self.object_com = com
-        # pcd_points_axis_aligned = pcd_points @ rot_principal_component_to_axes.as_matrix().T
-        # dims = np.max(pcd_points_axis_aligned, axis=0) - np.min(pcd_points_axis_aligned, axis=0)
-        # self.object_dims = dims
-        # rot = RotationMatrix(rot_principal_component_to_axes.as_matrix().T)
-        # self.object_rot = rot
-        # AddMeshcatTriad(self.meshcat, "principal axis", 
-        #                 X_PT=RigidTransform(rot,
-        #                 [com[0], com[1], com[2]]))
+        # visualize axes, principal axis is z axis (blue), minor axis is x axis (red)
+        z_axis, x_axis = [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]
+        rot_principal_component_to_axes, _ = R.align_vectors(
+            np.array([z_axis, x_axis]), np.stack([principal_component, minor_component])
+        )
+        com = np.mean(pcd_points, axis=0)
+        self.object_com = com
+        pcd_points_axis_aligned = pcd_points @ rot_principal_component_to_axes.as_matrix().T
+        dims = np.max(pcd_points_axis_aligned, axis=0) - np.min(pcd_points_axis_aligned, axis=0)
+        self.object_dims = dims
+        rot = RotationMatrix(rot_principal_component_to_axes.as_matrix().T)
+        self.object_rot = rot
+        AddMeshcatTriad(self.meshcat, "principal axis", 
+                        X_PT=RigidTransform(rot,
+                        [com[0], com[1], com[2]]))
 
         if mode == PlannerState.SCANNING1:
             # # Planning first grasping trajectory
@@ -884,11 +926,11 @@ class TwoGraspPlanner(LeafSystem):
             # )
             grasps = [RigidTransform(
             R=RotationMatrix([
-                [0.20681969377898063, 0.9685467022240954, 0.1383578688618696],
-                [0.9774142324949082, -0.21081815591263353, 0.014735102781668053],
-                [0.043439985975579215, 0.13218544075814884, -0.9902726780387395],
+                [0.22783097578605485, 0.9733560255523372, 0.025905481916626873],
+                [0.9670396445975739, -0.22308562101611026, -0.12274824427442842],
+                [-0.1136986026693926, 0.05301748029485181, -0.9920996797369772],
             ]),
-            p=[0.5798396344223478, -0.0008122595958626092, 0.3250179079887979],
+            p=[0.4350590091759226, 0.025942858196805044, 0.2858149251212371],
             )]
         else:
             # # Planning second grasping trajectory
@@ -903,11 +945,11 @@ class TwoGraspPlanner(LeafSystem):
             # )
             grasps = [RigidTransform(
             R=RotationMatrix([
-                [0.12572403407217733, 0.9917884232805839, 0.023434818182183535],
-                [0.2661806471800798, -0.056479645509977305, 0.9622670693263183],
-                [0.9556889296854982, -0.11474220274023483, -0.2710957332510173],
+                [0.0434567182067186, 0.9983236091838877, -0.03822937337649225],
+                [0.033027167195226505, 0.036809050025528166, 0.9987764014349143],
+                [0.9985092487652588, -0.04466615253495156, -0.031372200241041835],
             ]),
-            p=[0.5768087034926264, -0.11622951972991928, 0.19546535154771355],
+            p=[0.44721501573177286, -0.03556603195955065, 0.18460453214754097],
             )]
         
         # grasps = self.grasp_node.get_best_grasps(candidate_num=1)
@@ -915,7 +957,7 @@ class TwoGraspPlanner(LeafSystem):
         print(grasps)
         
         # get end effector pose from grasp pose
-        X_GE = RigidTransform(RotationMatrix(RollPitchYaw(0, 0, 0)), [0, 0, -0.09])
+        X_GE = RigidTransform(RotationMatrix(RollPitchYaw(0, 0, 0)), [0, 0, -0.12])
 
         ee_grasps = [X_WG.multiply(X_GE) for X_WG in grasps]
 
@@ -923,11 +965,11 @@ class TwoGraspPlanner(LeafSystem):
         state.get_mutable_abstract_state(self._grasp_X_G_index).set_value(ee_grasps[0])
 
         # visualize grasp in o3d
-        # manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(down_sampled_pcd.xyzs().T))
-        # manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
-        # viz_geoms = [manipuland_cloud]
-        # viz_geoms.append(self.grasp_node.make_gripper_line_set(grasps[0].GetAsMatrix4(), [0.0, 1.0, 0.0]))
-        # o3d.visualization.draw_geometries(viz_geoms)
+        manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(down_sampled_pcd.xyzs().T))
+        manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
+        viz_geoms = [manipuland_cloud]
+        viz_geoms.append(self.grasp_node.make_gripper_line_set(grasps[0].GetAsMatrix4(), [0.0, 1.0, 0.0]))
+        o3d.visualization.draw_geometries(viz_geoms)
 
         return ee_grasps[0]
 
@@ -1097,6 +1139,10 @@ class TwoGraspPlanner(LeafSystem):
     
     def GetState(self, context, output):
         state = context.get_abstract_state(int(self._mode_index)).get_value()
+        output.set_value(state)
+    
+    def GetScanState(self, context, output):
+        state = context.get_abstract_state(int(self._scan_mode_index)).get_value()
         output.set_value(state)
 
     def Initialize(self, context, discrete_state):

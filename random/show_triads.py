@@ -42,7 +42,9 @@ def main(argv):
         RigidTransform(RollPitchYaw(-5*np.pi/6, 0, 0), [0.4, 0.4, 0.4]),
         RigidTransform(RollPitchYaw(np.pi/6, np.pi, 0), [0.4, -0.4, 0.4]),
         RigidTransform(RollPitchYaw(-5*np.pi/6, 0, -np.pi/8), [0.5, 0.35, 0.4]),
-        RigidTransform(RollPitchYaw(np.pi/6, np.pi, np.pi/10), [0.5, -0.35, 0.4])
+        RigidTransform(RollPitchYaw(np.pi/6, np.pi, np.pi/10), [0.5, -0.35, 0.4]),
+        RigidTransform(RollPitchYaw(-2*np.pi/3, 0, 0), [0.4, 0.25, 0.55]),
+        RigidTransform(RollPitchYaw(-1*np.pi/3, 0, 0), [0.4, -0.25, 0.55]),
     ]
     i = 0
     for T in transforms:

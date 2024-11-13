@@ -21,7 +21,7 @@ import pyrealsense2 as rs
 import sys
 import tty
 import termios
-from planning.two_grasp_display_planner import PlannerState
+from planning.two_grasp_display_planner import PlannerState, ScanState
 
 class ImageSaver(LeafSystem):
     def __init__(
@@ -68,16 +68,17 @@ class ImageSaver(LeafSystem):
                                         model_value=Value(camera_info_model))
             self.DeclareInitializationPublishEvent(self.Initialize)
         
-        if ob_in_cam and camera_index is not None:
+        if ob_in_cam:
             self.DeclareAbstractInputPort(
                 "body_poses", model_value=Value([RigidTransform()])
             )
-        elif ob_in_cam:
-            self.DeclareAbstractInputPort(
-                "camera_pose", model_value=Value(RigidTransform())
-            )
+            if camera_index is None:
+                self.DeclareAbstractInputPort(
+                    "camera_pose", model_value=Value(RigidTransform())
+                )
         
         self.DeclareAbstractInputPort("planner_state", model_value=Value(PlannerState.START))
+        self.DeclareAbstractInputPort("scan_state", model_value=Value(ScanState.IDLE))
 
         # Calling `ForcePublish()` will trigger the callback.
         self.DeclareForcedPublishEvent(self.Publish)
@@ -88,12 +89,27 @@ class ImageSaver(LeafSystem):
                                          publish=self.Publish)
         
     def Publish(self, context):
+        planner_state = self.GetInputPort("planner_state").Eval(context)
+        scan_state = self.GetInputPort("scan_state").Eval(context)
         no_save_states = [
             PlannerState.WAIT_FOR_OBJECTS_TO_SETTLE,
             PlannerState.START,
             PlannerState.SCANNING1, 
             PlannerState.SCANNING2]
-        if (self.GetInputPort("planner_state").Eval(context) in no_save_states) ^ self.save_scanning:
+        if not self.save_scanning and (planner_state in no_save_states) :
+            return
+        
+        scanning_save_states = [
+            ScanState.GO_TO_1,
+            ScanState.GO_TO_2,
+            ScanState.GO_TO_3,
+            ScanState.GO_TO_POSTSCAN,
+        ]
+        scanning_save_planner_states = [
+            PlannerState.SCANNING1,
+            PlannerState.SCANNING2
+        ]
+        if self.save_scanning and (planner_state not in scanning_save_planner_states or scan_state not in scanning_save_states):
             return
         
         time_ms = int(context.get_time() * 1000)
@@ -137,13 +153,18 @@ class ImageSaver(LeafSystem):
             mask_pil = Image.fromarray(masks[0])
             mask_pil.save(self.dirstr+"/masks"+self.camera_name+"/"+timestr+".png")
 
-            gripper_mask_pil = Image.fromarray(masks[1])
-            gripper_mask_pil.save(self.dirstr+"/gripper_masks"+self.camera_name+"/"+timestr+".png")
+            if not self.save_scanning:
+                gripper_mask_pil = Image.fromarray(masks[1])
+                gripper_mask_pil.save(self.dirstr+"/gripper_masks"+self.camera_name+"/"+timestr+".png")
         
         # ob_in_cam pose
         if self.ob_in_cam:
+            if self.camera_index is None:
+                c2w = self.GetInputPort("camera_pose").Eval(context)
+            else:
+                c2w = self.GetInputPort("body_poses").Eval(context)[int(self.camera_index)]
+            
             o2w = self.GetInputPort("body_poses").Eval(context)[int(self.object_index)]
-            c2w = self.GetInputPort("body_poses").Eval(context)[int(self.camera_index)]
 
             o2c = c2w.inverse() @ o2w
             T = o2c.GetAsMatrix4()

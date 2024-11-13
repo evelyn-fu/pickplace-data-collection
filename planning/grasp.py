@@ -34,8 +34,8 @@ class GraspListener():
 
     def __init__(self, hand_finger_path=None, gripper_model_path=None):
         if hand_finger_path == None:
-            hand_finger_path = os.path.abspath(os.path.join(os.path.dirname( __file__ ), 'misc', 'hand_finger.sdf'))
-        self.hand_collision_model = SignedDensityField.from_sdf(hand_finger_path)
+            hand_finger_path = os.path.abspath(os.path.join(os.path.dirname( __file__ ), '..', 'scenario_datas', 'gripper_sdf.pkl'))
+        self.hand_collision_model = SignedDensityField.from_pkl(hand_finger_path)
 
         builder = DiagramBuilder()
         self.plant, self.scene_graph = AddMultibodyPlantSceneGraph(builder, time_step=0.0005)
@@ -55,7 +55,7 @@ class GraspListener():
     def check_collision(self, pcd, X_G, visualize=False):
         """Returns true if not in collision and false otherwise."""
         thre = 0.0
-        sdf = self.compute_sdf(pcd, X_G, visualize)
+        sdf = self.compute_sdf_fast(pcd, X_G, visualize)
         return sdf > thre
 
     def compute_darboux_frame(self, point, normal, pcd, kdtree, ball_radius=0.002, max_nn=50):
@@ -186,11 +186,9 @@ class GraspListener():
         signed_distance = -np.inf
         X_WGnew = RigidTransform()
 
+        X_WGlast = None
+        last_signed_distance = np.nan
         for z in z_grid:
-            # Record the computed values using last z.
-            last_signed_distance = signed_distance
-            X_WGlast = X_WGnew
-
             # Compute new values.
             X_WGnew = X_WG.multiply(RigidTransform([0.0, 0.0, z]))
             # print(z, X_WGnew)
@@ -200,7 +198,7 @@ class GraspListener():
             # viz_geoms = [manipuland_cloud]
             # viz_geoms.append(self.make_gripper_line_set(X_WGnew.GetAsMatrix4(), [0.0, 1.0, 0.0]))
 
-            signed_distance = self.compute_sdf(pcd, X_WGnew)
+            signed_distance = self.compute_sdf_fast(pcd, X_WGnew)
 
             # visualize 
             # o3d.visualization.draw_geometries(viz_geoms)
@@ -208,6 +206,10 @@ class GraspListener():
             # If the value crossed for the first time, return.
             if (last_signed_distance > thre) and (signed_distance < thre):
                 return last_signed_distance, X_WGlast
+                
+            # Record the computed values using last z.
+            last_signed_distance = signed_distance
+            X_WGlast = X_WGnew
 
         # If nothing is returned after line search, discard the sample by sending None.
         # manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))

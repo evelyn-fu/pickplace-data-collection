@@ -162,8 +162,6 @@ def start_scenario(
                 os.makedirs(dirstr+"/depth_wrist/")
             if not os.path.exists(dirstr+"/masks_wrist/"):
                 os.makedirs(dirstr+"/masks_wrist/")
-            if not os.path.exists(dirstr+"/gripper_masks_wrist/"):
-                os.makedirs(dirstr+"/gripper_masks_wrist/")
             if not use_hardware and not os.path.exists(dirstr+"/ob_in_cam_wrist/"):
                 os.makedirs(dirstr+"/ob_in_cam_wrist/")
 
@@ -210,6 +208,7 @@ def start_scenario(
                 builder.Connect(station.GetOutputPort("handeye_camera.label_image"), wrist_img_saver.GetInputPort("label_in"))
                 builder.Connect(station.GetOutputPort("handeye_camera.rgb_image"), wrist_img_saver.GetInputPort("rgb_in"))
                 builder.Connect(station.GetOutputPort("handeye_camera.depth_image"), wrist_img_saver.GetInputPort("depth_in"))
+                builder.Connect(station.GetOutputPort("body_poses"), wrist_img_saver.GetInputPort("body_poses"))
                 builder.Connect(camera_pose_source.GetOutputPort("X_WC"), wrist_img_saver.GetInputPort("camera_pose"))
 
 
@@ -286,8 +285,10 @@ def start_scenario(
 
     if save_imgs:
         builder.Connect(planner.GetOutputPort("planner_state"), img_saver.GetInputPort("planner_state"))
+        builder.Connect(planner.GetOutputPort("scan_state"), img_saver.GetInputPort("scan_state"))
         if wrist_camera_images:
             builder.Connect(planner.GetOutputPort("planner_state"), wrist_img_saver.GetInputPort("planner_state"))
+            builder.Connect(planner.GetOutputPort("scan_state"), wrist_img_saver.GetInputPort("scan_state"))
 
     if use_hardware:
         # Connect the output of external station to the input of internal station
