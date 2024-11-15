@@ -7,7 +7,7 @@ from pydrake.all import (
 )
 from planning.inverse_kinematics import solve_global_inverse_kinematics
 
-def MakePickAndDisplayGripperFrames(X_G, place_flipped=False):
+def MakePickAndDisplayGripperFrames(X_G, gripper_length, pregrasp_dist, place_flipped=False):
     """
     Takes a partial specification with X_G["pick"], X_G["prepick"], and
     X_G["display_traj"] (a tuple of two list of poses of any length that begin with the same pose,
@@ -24,7 +24,7 @@ def MakePickAndDisplayGripperFrames(X_G, place_flipped=False):
         X_G["place"] = rot_180 @ RigidTransform(RotationMatrix(R))
 
         # calculate translation difference of bottom of gripper given rotation (t is top of gripper, want to place object back in same place)
-        t_gripper_angle = X_G["place"] @ [0, 0, 0.12] # 12 cm is roughly the length of the gripper?
+        t_gripper_angle = X_G["place"] @ [0, 0, gripper_length] # 12 cm is roughly the length of the gripper?
         t_gripper_angle[2] = 0
         t_gripper_angle *= 2
         print(t_gripper_angle)
@@ -44,7 +44,7 @@ def MakePickAndDisplayGripperFrames(X_G, place_flipped=False):
     times["pick_end"] = 0.0
 
     # raise object off surface
-    X_G["postpick"] = RigidTransform(X_G["pick"].rotation(), X_G["pick"].translation() + [0, 0, 0.15])
+    X_G["postpick"] = RigidTransform(X_G["pick"].rotation(), X_G["pick"].translation() + [0, 0, 0.2])
     times["postpick"] = 1.0
 
     # Give time to get to start of display trajectory
@@ -55,7 +55,7 @@ def MakePickAndDisplayGripperFrames(X_G, place_flipped=False):
     times["display_traj"] = [time_to_predisplay, 0.1] 
 
     # Prepare to place back down
-    X_G["preplace"] = RigidTransform(X_G["place"].rotation(), X_G["place"].translation() + [0, 0, 0.15])
+    X_G["preplace"] = RigidTransform(X_G["place"].rotation(), X_G["place"].translation() + [0, 0, 0.2])
     times["preplace"] = time_to_predisplay
 
     # Place back down and allow some time for gripper to open
@@ -65,7 +65,7 @@ def MakePickAndDisplayGripperFrames(X_G, place_flipped=False):
     times["place_end"] = 0.0
 
     # Go back to prepick pose
-    X_GgraspGpostgrasp = RigidTransform([0, 0.0, -0.15])
+    X_GgraspGpostgrasp = RigidTransform([0, 0.0, -pregrasp_dist])
     X_G["postplace"] = X_G["place"] @ X_GgraspGpostgrasp
     times["postplace"] = 1.0
     X_G["postpostplace"] = X_G["prepick"]

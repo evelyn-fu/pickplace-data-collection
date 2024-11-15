@@ -419,36 +419,36 @@ def start_scenario(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "scenario_path",
+        "--scenario_path",
         default="scenario_data_grasping.yml",
         help="yaml file with scenario",
     )
     parser.add_argument(
-        "models_path",
+        "--models_path",
         default="scenario_data_grasping.dmd.yaml",
         help="dmd.yaml file with scenario, used for generating iris regions",
         nargs='?',
     )
     parser.add_argument(
-        "save_dir",
+        "--save_dir",
         default="temp",
         help="directory to save images in",
         nargs='?',
     )
     parser.add_argument(
-        "pkl1_path",
+        "--pkl1_path",
         default="",
         help="path to first regions pkl file",
         nargs='?',
     )
     parser.add_argument(
-        "pkl2_path",
+        "--pkl2_path",
         default="",
         help="path to first regions pkl file",
         nargs='?',
     )
     parser.add_argument(
-        "traj_dir",
+        "--traj_dir",
         default="",
         help="path to directory with saved gcs trajectories",
         nargs='?',

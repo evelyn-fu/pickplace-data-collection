@@ -14,7 +14,7 @@ def isData():
     return select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], [])
 
 
-def realsense(dirstr="temp", serial="822512060233"):
+def realsense(dirstr="temp", serial="928222061590"):
     if not os.path.exists(dirstr):
         os.makedirs(dirstr)
     if not os.path.exists(dirstr+"/rgb/"):
@@ -45,12 +45,12 @@ def realsense(dirstr="temp", serial="822512060233"):
         print("The demo requires Depth camera with Color sensor")
         exit(0)
 
-    config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
-
+    config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 30)
+ 
     if device_product_line == 'L500':
-        config.enable_stream(rs.stream.color, 960, 540, rs.format.rgb8, 30)
+        config.enable_stream(rs.stream.color, 1920, 1080, rs.format.rgb8, 30)
     else:
-        config.enable_stream(rs.stream.color, 640, 480, rs.format.rgb8, 30)
+        config.enable_stream(rs.stream.color, 1920, 1080, rs.format.rgb8, 30)
 
     # Start streaming
     profile = pipeline.start(config)
@@ -141,7 +141,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "serial",
-        default="822512060233",
+        default="928222061590",
         help="serial number of camera to save from",
         nargs='?',
     )

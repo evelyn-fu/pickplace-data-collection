@@ -206,18 +206,15 @@ class ScanState(Enum):
     GO_HOME = 5
     DONE = 6
 
-# pregrasp is negative z in the gripper frame
-X_GgraspGpregrasp = RigidTransform([0, 0.0, -0.2])
-
 yaw_display_traj = []
 
-yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0)), [0.6, 0.0, 0.54]))
-yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi/4)), [0.6, 0.0, 0.54]))
-yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi/2)), [0.6, 0.0, 0.54]))
-yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -3*np.pi/4)), [0.6, 0.0, 0.54]))
-yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi)), [0.6, 0.0, 0.54]))
-yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -5*np.pi)), [0.6, 0.0, 0.54]))
-yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -3*np.pi/2)), [0.6, 0.0, 0.54]))
+yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0)), [0.4, 0.0, 0.6]))
+yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi/4)), [0.4, 0.0, 0.6]))
+yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi/2)), [0.4, 0.0, 0.6]))
+yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -3*np.pi/4)), [0.4, 0.0, 0.6]))
+yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi)), [0.4, 0.0, 0.6]))
+yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -5*np.pi)), [0.4, 0.0, 0.6]))
+yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -3*np.pi/2)), [0.4, 0.0, 0.6]))
 
 q_home = [0.0, 0.4, 0.0, -1.2, 0.0, 1.0, -1.57]
 
@@ -237,7 +234,10 @@ class TwoGraspPlanner(LeafSystem):
             models_path=None,
             no_obstacles=False,
             gripper_model_path=None,
-            default_home=q_home
+            default_home=q_home,
+            gripper_length=0.12,
+            pregrasp_dist=0.2,
+            eef_to_gripper_length=0.2,
         ):
         LeafSystem.__init__(self)
 
@@ -348,6 +348,9 @@ class TwoGraspPlanner(LeafSystem):
         self.traj_dir = traj_dir
         self.use_offline_regions1 = False if regions1 is None else True
         self.use_offline_regions2 = False if regions1 is None else True
+        self.gripper_length = gripper_length
+        self.pregrasp_dist = pregrasp_dist
+        self.eef_to_gripper_length = eef_to_gripper_length
 
         if not self.use_offline_regions1 or not self.use_offline_regions1:
             if models_path == None:
@@ -393,6 +396,10 @@ class TwoGraspPlanner(LeafSystem):
                 ).set_value(ScanState.IDLE)
             return
         if mode == PlannerState.SCANNING1:
+            # self.PlanToPregrasp(context, state)
+            # state.get_mutable_abstract_state(
+            #     int(self._mode_index)
+            # ).set_value(PlannerState.GO_TO_PREGRASP1)
             self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP1)
             return
         if mode == PlannerState.GO_TO_PREGRASP1:
@@ -630,24 +637,24 @@ class TwoGraspPlanner(LeafSystem):
                 # note: camera calibration is bad, manual tuning is added here
                 pcd_components = []
                 if self.pcd0:
-                    X_adjust = RigidTransform(RotationMatrix(),[-0.01, 0.0, 0.0])
+                    X_adjust = RigidTransform(RotationMatrix(),[0.01, 0.0, -0.01])
                     transformed_xyzs = X_adjust @ self.pcd0.xyzs()
                     self.pcd0.mutable_xyzs()[:] = transformed_xyzs
                     pcd_components.append(self.pcd0)
                 if self.pcd1:
-                    X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.03, 0, 0)),[-0.01, 0.0, 0.0])
+                    X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0, 0, 0)),[0.015, -0.005, 0.0])
                     transformed_xyzs = X_adjust @ self.pcd1.xyzs()
                     self.pcd1.mutable_xyzs()[:] = transformed_xyzs
                     pcd_components.append(self.pcd1)
                 if self.pcd2:
                     # X_3_2, mean_error, num_iters = icp(self.pcd3.xyzs(), self.pcd2.xyzs())
-                    X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.05, -0.01, 0.01)),[-0.0025, 0.009, 0])
+                    X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.05, -0.01, 0.01)),[-0.005, -0.01, -0.01])
                     transformed_xyzs = X_adjust @ self.pcd2.xyzs()
                     self.pcd2.mutable_xyzs()[:] = transformed_xyzs
                     pcd_components.append(self.pcd2)
                 if self.pcd3:
                     pcd_components.append(self.pcd3)
-                    X_adjust = RigidTransform(RotationMatrix(),[-0.0175, 0, 0])
+                    X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.1, 0.0, 0.0)),[0.0045, 0.015, 0.0])
                     transformed_xyzs = X_adjust @ self.pcd3.xyzs()
                     self.pcd3.mutable_xyzs()[:] = transformed_xyzs
                     pcd_components.append(self.pcd3)
@@ -879,15 +886,15 @@ class TwoGraspPlanner(LeafSystem):
         mode = context.get_abstract_state(int(self._mode_index)).get_value()
         
         pcd_with_floor = self.current_pcd # Includes some floor on purpose
-        object_pcd = pcd_with_floor.Crop(lower_xyz=[0.23, -0.17, 0.06], upper_xyz=[0.57, 0.17, 0.27]) # just object
-        if self.pcd0:
-            self.meshcat.SetObject("cloud0", self.pcd0, point_size=0.0001, rgba=Rgba(1,0,0,1))
-        if self.pcd1:
-            self.meshcat.SetObject("cloud1", self.pcd1, point_size=0.0001, rgba=Rgba(1,1,0,1))
-        if self.pcd2:
-            self.meshcat.SetObject("cloud2", self.pcd2, point_size=0.0001, rgba=Rgba(0,1,0,1))
-        if self.pcd3:
-            self.meshcat.SetObject("cloud3", self.pcd3, point_size=0.0001, rgba=Rgba(0,0,1,1))
+        object_pcd = pcd_with_floor.Crop(lower_xyz=[0.23, -0.17, 0.063], upper_xyz=[0.57, 0.17, 0.27]) # just object
+        # if self.pcd0:
+        #     self.meshcat.SetObject("cloud0", self.pcd0, point_size=0.0001, rgba=Rgba(1,0,0,1))
+        # if self.pcd1:
+        #     self.meshcat.SetObject("cloud1", self.pcd1, point_size=0.0001, rgba=Rgba(1,1,0,1))
+        # if self.pcd2:
+        #     self.meshcat.SetObject("cloud2", self.pcd2, point_size=0.0001, rgba=Rgba(0,1,0,1))
+        # if self.pcd3:
+        #     self.meshcat.SetObject("cloud3", self.pcd3, point_size=0.0001, rgba=Rgba(0,0,1,1))
         self.meshcat.SetObject("cloud", object_pcd, point_size=0.001)
         # self.meshcat.SetObject("cloud_w_floor", pcd_with_floor, point_size=0.001, rgba=Rgba(1,1,0,1))
 
@@ -900,6 +907,7 @@ class TwoGraspPlanner(LeafSystem):
             np.array([z_axis, x_axis]), np.stack([principal_component, minor_component])
         )
         com = np.mean(pcd_points, axis=0)
+        print(com)
         self.object_com = com
         pcd_points_axis_aligned = pcd_points @ rot_principal_component_to_axes.as_matrix().T
         dims = np.max(pcd_points_axis_aligned, axis=0) - np.min(pcd_points_axis_aligned, axis=0)
@@ -911,7 +919,10 @@ class TwoGraspPlanner(LeafSystem):
                         [com[0], com[1], com[2]]))
 
         # get end effector pose from grasp pose
-        X_GE = RigidTransform(RotationMatrix(RollPitchYaw(0, 0, 0)), [0, 0, -0.17])
+        X_GE = RigidTransform(RotationMatrix(RollPitchYaw(0, 0, 0)), [0, 0, -self.eef_to_gripper_length])
+
+        # pregrasp is negative z in the gripper frame
+        X_GgraspGpregrasp = RigidTransform([0, 0.0, -self.pregrasp_dist])
         
         if mode == PlannerState.SCANNING1:
             # Planning first grasping trajectory
@@ -1001,6 +1012,12 @@ class TwoGraspPlanner(LeafSystem):
                 exit(1)
 
             X_WG = self.X_WG1
+            manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(object_pcd.xyzs().T))
+            manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
+            viz_geoms = [manipuland_cloud]
+            viz_geoms.append(self.grasp_node.make_gripper_line_set(self.X_WG1, [0.0, 1.0, 0.0]))
+            viz_geoms.append(self.grasp_node.make_gripper_line_set(self.X_WG2, [1.0, 0.0, 0.0]))
+            o3d.visualization.draw_geometries(viz_geoms)
         else:
             X_WG = self.X_WG2
 
@@ -1017,6 +1034,7 @@ class TwoGraspPlanner(LeafSystem):
         manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
         viz_geoms = [manipuland_cloud]
         viz_geoms.append(self.grasp_node.make_gripper_line_set(X_WG.GetAsMatrix4(), [0.0, 1.0, 0.0]))
+        viz_geoms.append(self.grasp_node.make_gripper_line_set(X_WE.GetAsMatrix4(), [1.0, 0.0, 0.0]))
         o3d.visualization.draw_geometries(viz_geoms)
 
         return X_WE
@@ -1036,7 +1054,7 @@ class TwoGraspPlanner(LeafSystem):
 
         X_G["display_traj"] = yaw_display_traj
         place_flipped = False #(mode == PlannerState.GO_TO_PREGRASP1)
-        X_G, times = MakePickAndDisplayGripperFrames(X_G, place_flipped)
+        X_G, times = MakePickAndDisplayGripperFrames(X_G, self.gripper_length, self.pregrasp_dist, place_flipped)
 
         state.get_mutable_abstract_state(int(self._times_index)).set_value(
             times

@@ -106,6 +106,7 @@ cameras:
 
 camera_ids:
     main_camera: "DRAKE_RGBD_CAMERA_IMAGES_843512061674"
+    # main_camera: "DRAKE_RGBD_CAMERA_IMAGES_810512062206"
     handeye_camera: "DRAKE_RGBD_CAMERA_IMAGES_810512062206"
 
 plant_config:

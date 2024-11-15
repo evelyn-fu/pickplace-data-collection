@@ -35,9 +35,9 @@ builder = DiagramBuilder()
 plant, scene_graph = AddMultibodyPlantSceneGraph(builder, time_step=0.0005)
 parser = Parser(plant)
 ConfigureParser(parser)
-parser.AddModelsFromUrl("file://./home/evelyn/sources/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_buffer.sdf")
-# parser.AddModelsFromUrl("file://./home/evelyn/sources/Real2SimObjectManipulation/models/box_2.sdf")
-# parser.AddModelsFromUrl("file://./home/evelyn/sources/Real2SimObjectManipulation/models/box.sdf")
+parser.AddModelsFromUrl("file://./home/real2sim/src/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_buffer.sdf")
+# parser.AddModelsFromUrl("file://./home/real2sim/src/Real2SimObjectManipulation/models/box_2.sdf")
+parser.AddModelsFromUrl("file://./home/real2sim/src/Real2SimObjectManipulation/models/box.sdf")
 # parser.AddModelsFromUrl("package://drake/manipulation/models/ycb/sdf/006_mustard_bottle.sdf")
 plant.Finalize()
 
@@ -88,12 +88,13 @@ X_GgraspGpregrasp = RigidTransform([0, 0.0, -0.15])
 
 X_G = RigidTransform(
   R=RotationMatrix([
-    [-0.7536161473974042, 0.59819944231936, -0.2724337159580315],
-    [0.65730679904535, 0.6878723749385145, -0.30786257928693544],
-    [0.003236403968931164, -0.4110827447184517, -0.9115922897239176],
+    [0.5142525069850176, 0.6293902579843373, 0.5825909905019416],
+    [0.7215289753153308, -0.6847076767721266, 0.10281699835010716],
+    [0.4636165407317052, 0.367482381242592, -0.8062359472488435],
   ]),
-  p=[0.07046840429505286, -0.3783725206382699, 0.2672424814188106],
-) # q = [0.64, -1.3, 1.34, 1.8, -0.2, -1.5, 1.3]
+  p=[0.3440462323953777, -0.012168941390720623, 0.12800715222785072],
+)
+X_GE = RigidTransform(RotationMatrix(RollPitchYaw(0, 0, 0)), [0, 0, -0.2])
 
 rot = X_G.GetAsMatrix4()[:3, :3]
 t = X_G.GetAsMatrix4()[:3, 3]
@@ -127,13 +128,13 @@ print(gripper_axis_alignment_cost, gripper_minor_alignment_cost)
 # X_WGfix = RigidTransform(RotationMatrix(RollPitchYaw(np.pi/2, 0, np.pi/2)))
 # rot_180 = RigidTransform(RotationMatrix(RollPitchYaw(0, np.pi, 0)))
 context = diagram.CreateDefaultContext()
-# plant_context = plant.GetMyContextFromRoot(context)
-# plant.SetFreeBodyPose(plant_context, plant.GetBodyByName("body"), X_G)
+plant_context = plant.GetMyContextFromRoot(context)
+plant.SetFreeBodyPose(plant_context, plant.GetBodyByName("body"), X_G)
 # plant.SetFreeBodyPose(plant_context, plant.GetBodyByName("base_link_mustard"), X_mustard)
 # X_box2 = RigidTransform(RotationMatrix(), [0.4, 0.0, 0.07])
 # plant.SetFreeBodyPose(plant_context, plant.GetBodyByName("box2_body"), X_box2)
-# X_box = RigidTransform(RotationMatrix(), [0.4, 0.0, 0.0])
-# plant.SetFreeBodyPose(plant_context, plant.GetBodyByName("box_body"), X_box)
+X_box = RigidTransform(RotationMatrix(), [0.4, 0.0, 0.0])
+plant.SetFreeBodyPose(plant_context, plant.GetBodyByName("box_body"), X_box)
 
 diagram.ForcedPublish(context)
 
