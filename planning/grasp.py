@@ -670,7 +670,7 @@ class GraspListener():
         line_set = o3d.geometry.LineSet()
         line_set.points = o3d.utility.Vector3dVector(hand_anchor_points)
         line_set.lines = o3d.utility.Vector2iVector(line_index)
-        line_set.colors = o3d.utility.Vector3dVector([color for _ in range(len(line_index))])
+        line_set.colors = o3d.utility.Vector3dVector([(1,0,0), (0,1,0), (0,0,1)])
         line_set.transform(pose)
         return line_set
 

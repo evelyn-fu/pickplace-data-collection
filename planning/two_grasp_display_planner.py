@@ -496,7 +496,6 @@ class TwoGraspPlanner(LeafSystem):
                 self.PlanGripper(context, state, "close")
         if pick_mode == PickState.CLOSING:
             if context.get_time() > self._gripper_traj_end_time:
-                print(self._gripper_traj_end_time, context.get_time())
                 state.get_mutable_abstract_state(
                     int(self._pick_mode_index)
                 ).set_value(PickState.MOVE)
@@ -637,26 +636,24 @@ class TwoGraspPlanner(LeafSystem):
                 # note: camera calibration is bad, manual tuning is added here
                 pcd_components = []
                 if self.pcd0:
-                    X_adjust = RigidTransform(RotationMatrix(),[0.01, 0.0, -0.01])
-                    transformed_xyzs = X_adjust @ self.pcd0.xyzs()
-                    self.pcd0.mutable_xyzs()[:] = transformed_xyzs
+                    # X_adjust = RigidTransform(RotationMatrix(),[0.01, 0.0, -0.01])
+                    # transformed_xyzs = X_adjust @ self.pcd0.xyzs()
+                    # self.pcd0.mutable_xyzs()[:] = transformed_xyzs
                     pcd_components.append(self.pcd0)
                 if self.pcd1:
-                    X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0, 0, 0)),[0.015, -0.005, 0.0])
-                    transformed_xyzs = X_adjust @ self.pcd1.xyzs()
-                    self.pcd1.mutable_xyzs()[:] = transformed_xyzs
+                    # X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0, 0, 0)),[0.015, -0.005, 0.0])
+                    # transformed_xyzs = X_adjust @ self.pcd1.xyzs()
+                    # self.pcd1.mutable_xyzs()[:] = transformed_xyzs
                     pcd_components.append(self.pcd1)
                 if self.pcd2:
-                    # X_3_2, mean_error, num_iters = icp(self.pcd3.xyzs(), self.pcd2.xyzs())
-                    X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.05, -0.01, 0.01)),[-0.005, -0.01, -0.01])
-                    transformed_xyzs = X_adjust @ self.pcd2.xyzs()
-                    self.pcd2.mutable_xyzs()[:] = transformed_xyzs
+                    # X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.05, -0.01, 0.01)),[-0.005, -0.01, -0.01])
+                    # transformed_xyzs = X_adjust @ self.pcd2.xyzs()
+                    # self.pcd2.mutable_xyzs()[:] = transformed_xyzs
                     pcd_components.append(self.pcd2)
                 if self.pcd3:
-                    pcd_components.append(self.pcd3)
-                    X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.1, 0.0, 0.0)),[0.0045, 0.015, 0.0])
-                    transformed_xyzs = X_adjust @ self.pcd3.xyzs()
-                    self.pcd3.mutable_xyzs()[:] = transformed_xyzs
+                    # X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.1, 0.0, 0.0)),[0.0045, 0.015, 0.0])
+                    # transformed_xyzs = X_adjust @ self.pcd3.xyzs()
+                    # self.pcd3.mutable_xyzs()[:] = transformed_xyzs
                     pcd_components.append(self.pcd3)
 
                 # merge
@@ -907,7 +904,6 @@ class TwoGraspPlanner(LeafSystem):
             np.array([z_axis, x_axis]), np.stack([principal_component, minor_component])
         )
         com = np.mean(pcd_points, axis=0)
-        print(com)
         self.object_com = com
         pcd_points_axis_aligned = pcd_points @ rot_principal_component_to_axes.as_matrix().T
         dims = np.max(pcd_points_axis_aligned, axis=0) - np.min(pcd_points_axis_aligned, axis=0)
@@ -1017,6 +1013,7 @@ class TwoGraspPlanner(LeafSystem):
             viz_geoms = [manipuland_cloud]
             viz_geoms.append(self.grasp_node.make_gripper_line_set(self.X_WG1, [0.0, 1.0, 0.0]))
             viz_geoms.append(self.grasp_node.make_gripper_line_set(self.X_WG2, [1.0, 0.0, 0.0]))
+            viz_geoms.append(self.grasp_node.make_triad_line_set(RigidTransform().GetAsMatrix4()))
             o3d.visualization.draw_geometries(viz_geoms)
         else:
             X_WG = self.X_WG2

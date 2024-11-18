@@ -31,5 +31,4 @@ class CameraPoseInWorldSource(LeafSystem):
         else:
             X_WC = self.X_camera
         
-        print('X_WC', X_WC)
         output.set_value(X_WC)
