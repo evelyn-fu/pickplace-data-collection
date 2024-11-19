@@ -1,4 +1,4 @@
-# Mostly taken from https://github.com/nepfaff/rlg_panda_stack/blob/main/src/perception/grasp_node.py with ros stuff removed
+# Mostly taken from https://github.com/nepfaff/rlg_panda_stack/blob/main/src/perception/grasp_node.py with a lot of changes
 
 import time
 import open3d as o3d
@@ -37,6 +37,7 @@ class GraspListener():
         if hand_finger_path == None:
             hand_finger_path = os.path.abspath(os.path.join(os.path.dirname( __file__ ), '..', 'scenario_datas', 'gripper_sdf.pkl'))
         self.hand_collision_model = SignedDensityField.from_pkl(hand_finger_path)
+        # self.hand_collision_model.visualize()
 
         builder = DiagramBuilder()
         self.plant, self.scene_graph = AddMultibodyPlantSceneGraph(builder, time_step=0.0005)
@@ -132,7 +133,6 @@ class GraspListener():
 
     def compute_sdf(self, pcd, X_G, visualize=False):
         """Computes the signed distance from scratch via Drake query_object."""
-        #print("start compute sdf")
 
         # not a free body set freebody pose will fail
         X_WGfix = RigidTransform(RotationMatrix(RollPitchYaw(np.pi/2, 0, np.pi/2)))
@@ -152,7 +152,7 @@ class GraspListener():
     def compute_sdf_fast(self, pcd, X_G, visualize=False):
         """A lookup to the pre-computed sdf of the hand collision model."""
         pcd_W_np = pcd.xyzs()
-        X_GW = X_G.inverse()
+        X_GW = (X_G @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0])).inverse()
         pcd_G_np = X_GW.multiply(pcd_W_np)
         dist = self.hand_collision_model.get_distance(pcd_G_np.T)
         return dist.min()
@@ -387,21 +387,28 @@ class GraspListener():
         ) / within_box_pt_normals.shape[1]  # along the horizontal axis of the gripper, larger good (antipodal metric)
 
         # want grasps to avoid alignment with long axes, smaller better
-        gripper_vertical_axis_alignment_cost = -np.abs(eff_vertical_vec @ split_axes)
+        gripper_vertical_axis_alignment_cost = np.abs(eff_vertical_vec @ split_axes)
         gripper_horizontal_axis_alignment_cost = -np.max(np.abs(eff_horizontal_vec @ split_axes))
 
         # consider lower two split ratio costs (grasp should be even along at least two axes)
         split_ratio_costs = -split_ratios
         split_ratio_costs_sorted = np.sort(split_ratio_costs)
         split_ratio_cost = split_ratio_costs_sorted[0] + split_ratio_costs_sorted[1]
-        higher_up_cost = -np.min(t[2] - 0.1, 0) / 0.1
+        higher_up_cost = -min(t[2] - 0.15, 0) / 0.15
+
+        print("antipodal cost", antipodal_cost)
+        print("gripper_vertical_axis_alignment_cost principal", gripper_vertical_axis_alignment_cost[2])
+        print("gripper_vertical_axis_alignment_cost secondary", gripper_vertical_axis_alignment_cost[1])
+        print("split_ratio_cost", split_ratio_cost)
+        print("higher_up_cost", higher_up_cost)
+        print("proportion_enclosed", proportion_enclosed)
         cost = (
-            20.0 * antipodal_cost
+            20 * antipodal_cost
             + 10.0 * gripper_vertical_axis_alignment_cost[2]
             + 5.0 * gripper_vertical_axis_alignment_cost[1]
             + 5.0 * split_ratio_cost
             + 5.0 * higher_up_cost
-            - 5.0 * proportion_enclosed
+            - 20.0 * proportion_enclosed
         )
         return cost
 
@@ -712,7 +719,7 @@ class GraspListener():
         yaw_max = np.pi / 2
         num_yaw_samples = 7
 
-        np.random.seed(random_seed)
+        # np.random.seed(random_seed)
 
         pcd_points = pcd.xyzs().T
 
