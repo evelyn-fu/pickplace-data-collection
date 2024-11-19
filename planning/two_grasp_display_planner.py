@@ -237,7 +237,7 @@ class TwoGraspPlanner(LeafSystem):
             default_home=q_home,
             gripper_length=0.12,
             pregrasp_dist=0.2,
-            eef_to_gripper_length=0.2,
+            eef_to_gripper_length=0.09,
         ):
         LeafSystem.__init__(self)
 
@@ -1173,7 +1173,7 @@ class TwoGraspPlanner(LeafSystem):
     def CalcWsgPosition(self, context, output):
         pick_mode = context.get_abstract_state(int(self._pick_mode_index)).get_value()
         opened = np.array([0.107])
-        closed = np.array([0.0])
+        closed = np.array([0.02])
 
         traj_wsg = context.get_abstract_state(
             int(self._traj_wsg_index)
