@@ -11,7 +11,11 @@ from pydrake.common import RandomGenerator, use_native_cpp_logging
 from pydrake.planning import (RobotDiagramBuilder,
                               SceneGraphCollisionChecker)
 from pydrake.solvers import MosekSolver, GurobiSolver
-from pydrake.geometry.optimization import IrisOptions, IrisInConfigurationSpace
+from pydrake.geometry.optimization import (
+    IrisOptions, 
+    IrisInConfigurationSpace,
+    LoadIrisRegionsYamlFile,
+)
 from pydrake.geometry import (
     StartMeshcat,
 )
@@ -23,6 +27,25 @@ def get_seeded_region(models_path, q_nominal):
     builder = RobotDiagramBuilder()
     plant = builder.plant()
     builder.parser().AddModels(models_path)
+
+    object_area_urdf = """<?xml version="1.0"?>
+    <robot name="object_area">
+    <link name="object_area">
+    <collision name="object_area">
+        <origin rpy="0 0 0" xyz="0.4 0.0 0.15"/>
+        <geometry>
+        <box size="0.2 0.2 0.16"/>
+        </geometry>
+    </collision>
+    </link>
+    <joint name="fixed_link_weld" type="fixed">
+    <parent link="world"/>
+    <child link="object_area"/>
+    </joint>
+    </robot>
+    """
+
+    builder.parser().AddModelsFromString(object_area_urdf, "urdf")
     diagram = builder.Build()
 
     context = diagram.CreateDefaultContext()
@@ -83,6 +106,9 @@ def make_trajectory_save_dirs(dirstr, traj_name):
 
 
 def save_regions_pkl(sets, dirstr):
+    if not os.path.exists(dirstr):
+        os.makedirs(dirstr)
+
     pkl_path = dirstr + '/scanning_traj_region.pkl'
 
     with open(pkl_path, 'wb') as f:
@@ -94,17 +120,18 @@ if __name__ == "__main__":
         "scenario_path",
         default="scenario_data_grasping.yml",
         help="yaml file with scenario",
+        nargs='?',
     )
     parser.add_argument(
         "models_path",
-        default="scenario_data_grasping.dmd.yaml",
+        default="scenario_datas/scenario_data_no_object.dmd.yaml",
         help="dmd.yaml file with scenario, used for generating iris regions",
         nargs='?',
     )
     args = parser.parse_args()
     scenario_path = args.scenario_path
     models_path=args.models_path
-    savedir = os.path.abspath(os.path.join(os.path.dirname( __file__ ), '..', 'scanning_traj'))
+    savedir = os.path.abspath(os.path.join(os.path.dirname( __file__ ), '..', 'scanning_traj_new'))
 
     # Start the visualizer.
     meshcat = StartMeshcat()
@@ -116,28 +143,32 @@ if __name__ == "__main__":
     scenario = LoadScenario(filename=filename)
     station = builder.AddSystem(MakeHardwareStation(scenario, meshcat, hardware=False))
     controller_plant = station.GetSubsystemByName(
-        "iiwa.controller"
-    ).get_multibody_plant_for_control()
+       "iiwa_controller_plant_pointer_system"
+    ).get()
     
     # Build diagram
     diagram = builder.Build()
 
     q_home = [0.0, 0.4, 0.0, -1.2, 0.0, 1.0, -1.57]
     q_1 = [0, 0.7, -0.2, -1.1, 0.2, 1.75, 2.9]
-    q_2 = [2.5, 1.3, 1.8, 1.8, 0.2, -1.5, -1.4]
-    q_3 = [0.64, -1.3, 1.34, 1.8, -0.2, -1.5, 1.3]
+    q_2 = [1.3311604346936108, 0.697684906385546, 0.4073999929951436, -1.8351844859783966, -0.7035361697736608, 1.8018761324534878, 2.8312224489446822]
+    q_3 = [-1.4351576622763744, 0.6765052946383036, -0.2726149728918183, -1.8350212412420834, 0.6636165395196224, 1.7571574480997274, -2.8723952551439567]
     
     times = []
     # make regions
     start = time.time()
-    regions = get_regions(models_path)
+    # regions = get_regions(models_path)
+    regions = []
     regions.append(get_seeded_region(models_path, q_home))
     regions.append(get_seeded_region(models_path, q_1))
     regions.append(get_seeded_region(models_path, q_2))
     regions.append(get_seeded_region(models_path, q_3))
     times.append(time.time() - start)
     print(f"Regions generated in {times[-1]} seconds")
-    save_regions_pkl(savedir)
+    save_regions_pkl(regions, savedir)
+
+    gaze_regions_dict = LoadIrisRegionsYamlFile("../regions/gaze_constrained_scanning_regions_3.yaml")
+    gaze_regions = list(gaze_regions_dict.values())
 
     # generate and save trajectories
     make_trajectory_save_dirs(savedir, "to1")
@@ -153,7 +184,7 @@ if __name__ == "__main__":
     make_trajectory_save_dirs(savedir, "to2")
     start = time.time()
     traj2 = plan_unconstrained_gcs_path_start_to_goal(
-        plant=controller_plant, q_start=q_1, q_goal=q_2, regions=regions, no_obstacles=False
+        plant=controller_plant, q_start=q_1, q_goal=q_2, regions=gaze_regions, no_obstacles=False
     )
     times.append(time.time() - start)
     print(f"To 2 traj generated in {times[-1]} seconds")
@@ -163,7 +194,7 @@ if __name__ == "__main__":
     make_trajectory_save_dirs(savedir, "to3")
     start = time.time()
     traj3 = plan_unconstrained_gcs_path_start_to_goal(
-        plant=controller_plant, q_start=q_2, q_goal=q_3, regions=regions, no_obstacles=False
+        plant=controller_plant, q_start=q_2, q_goal=q_3, regions=gaze_regions, no_obstacles=False
     )
     times.append(time.time() - start)
     print(f"To 3 traj generated in {times[-1]} seconds")

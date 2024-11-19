@@ -115,10 +115,9 @@ X_G = RigidTransform(
 #     gripper_frame_name="iiwa_link_7",
 # )
 
-q_goal = [ 1.54171116,  1.2877689 ,  1.68350761,  1.21460623 , 0.24698678, -1.85501355,
- -1.39106498] + list(new_positions[7:])
+q_goal = [-1.4351576622763744, 0.6765052946383036, -0.2726149728918183, -1.8350212412420834, 0.6636165395196224, 1.7571574480997274, -2.8723952551439567] + list(new_positions[7:])
 
-plant.SetPositions(plant_context, q)
+plant.SetPositions(plant_context, q_goal)
 print(new_positions)
 
 diagram.ForcedPublish(context)

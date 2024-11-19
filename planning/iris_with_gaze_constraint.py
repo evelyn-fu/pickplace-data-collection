@@ -428,13 +428,13 @@ back_back_right_pose = MyForwardKinematics(np.array([0.64, -1.3, 1.34, 1.8, -0.2
 
 print("Back Back Left")
 seeds["Back Back Left"] = MyInverseKinematics(
-    RigidTransform(RollPitchYaw(-5*np.pi/6, 0, 0), [0.4, 0.4, 0.4]),
+    back_back_left_pose,
     initial_guess = seeds["Back Left"]
 )
 print(list(seeds["Back Back Left"]))
 print("Back Back Right")
 seeds["Back Back Right"] = MyInverseKinematics(
-    RigidTransform(RollPitchYaw(np.pi/6, np.pi, 0), [0.4, -0.4, 0.4]),
+    back_back_right_pose,
     initial_guess = seeds["Back Right"]
 )
 print(list(seeds["Back Back Right"]))
@@ -478,33 +478,33 @@ seeds["Top Right"] = MyInverseKinematics(
 )
 print(list(seeds["Top Right"]))
 
-if MosekSolver().available() and MosekSolver().enabled():
-    print("mosek enabled")
-    iris_regions = dict()  # reset the iris regions
-    try:
-        # old_regions = LoadIrisRegionsYamlFile("../regions/gaze_constrained_scanning_regions_2.yaml.autosave")
-        # iris_regions["Top"] = old_regions["Top"]
-        # iris_regions["Front"] = old_regions["Front"]
-        # iris_regions["Top Left"] = old_regions["Top Left"]
-        # iris_regions["Top Right"] = old_regions["Top Right"]
-        # iris_regions["Back Left"] = old_regions["Back Left Top Seeded"]
-        # iris_regions["Back Right"] = old_regions["Back Right Top Seeded"]
-        iris_regions.update(LoadIrisRegionsYamlFile("../regions/gaze_constrained_scanning_regions_3.yaml"))
-    except:
-        pass
-    print(iris_regions)
-    GenerateRegions(seeds)
+# if MosekSolver().available() and MosekSolver().enabled():
+#     print("mosek enabled")
+#     iris_regions = dict()  # reset the iris regions
+#     try:
+#         # old_regions = LoadIrisRegionsYamlFile("../regions/gaze_constrained_scanning_regions_2.yaml.autosave")
+#         # iris_regions["Top"] = old_regions["Top"]
+#         # iris_regions["Front"] = old_regions["Front"]
+#         # iris_regions["Top Left"] = old_regions["Top Left"]
+#         # iris_regions["Top Right"] = old_regions["Top Right"]
+#         # iris_regions["Back Left"] = old_regions["Back Left Top Seeded"]
+#         # iris_regions["Back Right"] = old_regions["Back Right Top Seeded"]
+#         iris_regions.update(LoadIrisRegionsYamlFile("../regions/gaze_constrained_scanning_regions_3.yaml"))
+#     except:
+#         pass
+#     print(iris_regions)
+#     GenerateRegions(seeds)
 
-    SaveIrisRegionsYamlFile("../regions/gaze_constrained_scanning_regions_3.yaml", iris_regions)
+#     SaveIrisRegionsYamlFile("../regions/gaze_constrained_scanning_regions_3.yaml", iris_regions)
 
-    VisualizeRegions()
-elif GurobiSolver().available() and GurobiSolver().enabled():
-    print("gurobi enabled")
-    iris_regions = dict()  # reset the iris regions
-    GenerateRegions(seeds)
+#     VisualizeRegions()
+# elif GurobiSolver().available() and GurobiSolver().enabled():
+#     print("gurobi enabled")
+#     iris_regions = dict()  # reset the iris regions
+#     GenerateRegions(seeds)
 
-    SaveIrisRegionsYamlFile("../regions/gaze_constrained_scanning_regions_3.yaml", iris_regions)
+#     SaveIrisRegionsYamlFile("../regions/gaze_constrained_scanning_regions_3.yaml", iris_regions)
 
-    VisualizeRegions()
-else:
-    print("No solvers available")
+#     VisualizeRegions()
+# else:
+#     print("No solvers available")
