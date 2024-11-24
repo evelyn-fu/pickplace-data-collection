@@ -9,18 +9,19 @@ import sys
 import select
 import tty
 import termios
+import shutil
 
 def isData():
     return select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], [])
 
 
 def realsense(dirstr="temp", serial="928222061590"):
-    if not os.path.exists(dirstr):
-        os.makedirs(dirstr)
-    if not os.path.exists(dirstr+"/rgb/"):
-        os.makedirs(dirstr+"/rgb/")
-    if not os.path.exists(dirstr+"/depth/"):
-        os.makedirs(dirstr+"/depth/")
+    if os.path.exists(dirstr):
+        shutil.rmtree(dirstr)
+        
+    os.makedirs(dirstr)
+    os.makedirs(dirstr+"/rgb/")
+    os.makedirs(dirstr+"/depth/")
 
     # Create a pipeline
     pipeline = rs.pipeline()

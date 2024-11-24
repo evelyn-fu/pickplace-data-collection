@@ -53,6 +53,14 @@ directives:
 #     parent: box_origin
 #     child: box::box_body
 
+- add_model:
+    name: wall
+    file: file://./home/real2sim/src/Real2SimObjectManipulation/models/front_wall.sdf
+
+- add_weld:
+    parent: world
+    child: wall::wall_body
+
 - add_frame:
     name: camera0_staging
     X_PF:

@@ -42,6 +42,7 @@ from planning.two_grasp_display_planner import TwoGraspPlanner
 from perception.image_saver import ImageSaver
 from perception.camera_in_world import CameraPoseInWorldSource
 from planning.trajectory_sources import TrajectoryWithTimingInformationSource, DummyTrajSource
+# from iiwa import IiwaHardwareStationDiagram
 
 def get_regions_static(scenario_path, dirstr):
     print("generating static regions")
@@ -125,10 +126,17 @@ def start_scenario(
     dir_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     filename = os.path.join(dir_path, os.path.join("scenario_datas", scenario_path))
     scenario = LoadScenario(filename=filename)
+    # station: IiwaHardwareStationDiagram = builder.AddNamedSystem(
+    #     "station",
+    #     IiwaHardwareStationDiagram(
+    #         scenario=scenario, has_wsg=True, use_hardware=use_hardware
+    #     ),
+    # )
     station = builder.AddSystem(MakeHardwareStation(scenario, meshcat, hardware=False))
     if use_hardware:
         external_station = builder.AddSystem(MakeHardwareStation(scenario, meshcat, hardware=True))
     plant = station.GetSubsystemByName("plant")
+    # plant = station.get_plant()
 
     # initialize image writer and save directories
     if not os.path.exists(dirstr):

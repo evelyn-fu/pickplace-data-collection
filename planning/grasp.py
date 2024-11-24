@@ -396,19 +396,13 @@ class GraspListener():
         split_ratio_cost = split_ratio_costs_sorted[0] + split_ratio_costs_sorted[1]
         higher_up_cost = -min(t[2] - 0.15, 0) / 0.15
 
-        print("antipodal cost", antipodal_cost)
-        print("gripper_vertical_axis_alignment_cost principal", gripper_vertical_axis_alignment_cost[2])
-        print("gripper_vertical_axis_alignment_cost secondary", gripper_vertical_axis_alignment_cost[1])
-        print("split_ratio_cost", split_ratio_cost)
-        print("higher_up_cost", higher_up_cost)
-        print("proportion_enclosed", proportion_enclosed)
         cost = (
-            20 * antipodal_cost
+            30 * antipodal_cost
             + 10.0 * gripper_vertical_axis_alignment_cost[2]
             + 5.0 * gripper_vertical_axis_alignment_cost[1]
-            + 5.0 * split_ratio_cost
-            + 5.0 * higher_up_cost
-            - 20.0 * proportion_enclosed
+            + 10.0 * split_ratio_cost
+            + 20.0 * higher_up_cost
+            - 30.0 * proportion_enclosed
         )
         return cost
 
@@ -760,7 +754,7 @@ class GraspListener():
         PARALLEL = False
         VISUALIZE = False
         VISUALIZE_EACH = False
-        VISUALIZE_ALL = True
+        VISUALIZE_ALL = False
 
         start_time = time.time()
         if not PARALLEL:

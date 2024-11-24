@@ -177,6 +177,40 @@ def compute_principal_minor_components(pcd):
 
     return principal_component, secondary_component, minor_component
 
+def check_configuration_has_collisions(models_path, com, rot, dims, q):
+    # Get bounding box of object
+    rpy = rot.ToRollPitchYaw().vector()
+    bounding_box_urdf = """<?xml version="1.0"?>
+<robot name="bounding_box">
+  <link name="bounding_box">
+    <collision name="bounding_box">
+        <origin rpy="%f %f %f" xyz="%f %f %f"/>
+      <geometry>
+        <box size="%f %f %f"/>
+      </geometry>
+    </collision>
+  </link>
+    <joint name="fixed_link_weld" type="fixed">
+    <parent link="world"/>
+    <child link="bounding_box"/>
+    </joint>
+</robot>
+    """ % (rpy[0], rpy[1], rpy[2], com[0], com[1], com[2], dims[0], dims[1], dims[2])
+    builder = RobotDiagramBuilder()
+    plant = builder.plant()
+    scene_graph = builder.scene_graph()
+    builder.parser().AddModels(models_path)
+    builder.parser().AddModelsFromString(bounding_box_urdf, "urdf")
+    diagram = builder.Build()
+
+    context = diagram.CreateDefaultContext()
+    plant_context = plant.GetMyContextFromRoot(context)
+    plant.SetPositions(plant_context, q)
+
+    scene_graph_context = scene_graph.GetMyMutableContextFromRoot(context)
+    query_object = scene_graph.GetOutputPort("query").Eval(scene_graph_context)
+    return query_object.HasCollisions()
+
 class PlannerState(Enum):
     WAIT_FOR_OBJECTS_TO_SETTLE = 1
     START = 2
@@ -236,8 +270,8 @@ class TwoGraspPlanner(LeafSystem):
             gripper_model_path=None,
             default_home=q_home,
             gripper_length=0.12,
-            pregrasp_dist=0.2,
-            eef_to_gripper_length=0.09,
+            pregrasp_dist=0.18,
+            eef_to_gripper_length=0.19,
         ):
         LeafSystem.__init__(self)
 
@@ -339,6 +373,9 @@ class TwoGraspPlanner(LeafSystem):
         self._iiwa_controller_plant = controller_plant
         self.velocity_limits = 0.4 * np.ones(7)
         self.acceleration_limits = 0.4 * np.ones(7)
+        self.display_velocity_limits = 0.2 * np.ones(7)
+        self.display_velocity_limits[6] = 0.05
+        self.display_acceleration_limits = 0.2 * np.ones(7)
         self.regions = None #regions
         self.object_com = None
         self.object_dims = None
@@ -636,24 +673,24 @@ class TwoGraspPlanner(LeafSystem):
                 # note: camera calibration is bad, manual tuning is added here
                 pcd_components = []
                 if self.pcd0:
-                    # X_adjust = RigidTransform(RotationMatrix(),[0.01, 0.0, -0.01])
-                    # transformed_xyzs = X_adjust @ self.pcd0.xyzs()
-                    # self.pcd0.mutable_xyzs()[:] = transformed_xyzs
+                    X_adjust = RigidTransform(RotationMatrix(),[0.0, 0.0, -0.0])
+                    transformed_xyzs = X_adjust @ self.pcd0.xyzs()
+                    self.pcd0.mutable_xyzs()[:] = transformed_xyzs
                     pcd_components.append(self.pcd0)
                 if self.pcd1:
-                    # X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0, 0, 0)),[0.015, -0.005, 0.0])
-                    # transformed_xyzs = X_adjust @ self.pcd1.xyzs()
-                    # self.pcd1.mutable_xyzs()[:] = transformed_xyzs
+                    X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0, 0, 0)),[0.0, -0.005, 0.0])
+                    transformed_xyzs = X_adjust @ self.pcd1.xyzs()
+                    self.pcd1.mutable_xyzs()[:] = transformed_xyzs
                     pcd_components.append(self.pcd1)
                 if self.pcd2:
-                    # X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.05, -0.01, 0.01)),[-0.005, -0.01, -0.01])
-                    # transformed_xyzs = X_adjust @ self.pcd2.xyzs()
-                    # self.pcd2.mutable_xyzs()[:] = transformed_xyzs
+                    X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.0, -0.01, 0.03)),[-0.01, -0.01, 0.0])
+                    transformed_xyzs = X_adjust @ self.pcd2.xyzs()
+                    self.pcd2.mutable_xyzs()[:] = transformed_xyzs
                     pcd_components.append(self.pcd2)
                 if self.pcd3:
-                    # X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.1, 0.0, 0.0)),[0.0045, 0.015, 0.0])
-                    # transformed_xyzs = X_adjust @ self.pcd3.xyzs()
-                    # self.pcd3.mutable_xyzs()[:] = transformed_xyzs
+                    X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[0.0, 0.005, 0.0])
+                    transformed_xyzs = X_adjust @ self.pcd3.xyzs()
+                    self.pcd3.mutable_xyzs()[:] = transformed_xyzs
                     pcd_components.append(self.pcd3)
 
                 # merge
@@ -841,6 +878,8 @@ class TwoGraspPlanner(LeafSystem):
             else:
                 self.regions = self.regions2
 
+        input("regions generated, press [ENTER] to continue")
+
         if not loaded_traj:
             traj = plan_unconstrained_gcs_path_start_to_goal(
                 plant=self._iiwa_controller_plant, q_start=q, q_goal=q_goal, regions=self.regions, no_obstacles=self.no_obstacles
@@ -884,14 +923,14 @@ class TwoGraspPlanner(LeafSystem):
         
         pcd_with_floor = self.current_pcd # Includes some floor on purpose
         object_pcd = pcd_with_floor.Crop(lower_xyz=[0.23, -0.17, 0.063], upper_xyz=[0.57, 0.17, 0.27]) # just object
-        # if self.pcd0:
-        #     self.meshcat.SetObject("cloud0", self.pcd0, point_size=0.0001, rgba=Rgba(1,0,0,1))
-        # if self.pcd1:
-        #     self.meshcat.SetObject("cloud1", self.pcd1, point_size=0.0001, rgba=Rgba(1,1,0,1))
-        # if self.pcd2:
-        #     self.meshcat.SetObject("cloud2", self.pcd2, point_size=0.0001, rgba=Rgba(0,1,0,1))
-        # if self.pcd3:
-        #     self.meshcat.SetObject("cloud3", self.pcd3, point_size=0.0001, rgba=Rgba(0,0,1,1))
+        if self.pcd0:
+            self.meshcat.SetObject("cloud0", self.pcd0, point_size=0.0001, rgba=Rgba(1,0,0,1))
+        if self.pcd1:
+            self.meshcat.SetObject("cloud1", self.pcd1, point_size=0.0001, rgba=Rgba(1,1,0,1))
+        if self.pcd2:
+            self.meshcat.SetObject("cloud2", self.pcd2, point_size=0.0001, rgba=Rgba(0,1,0,1))
+        if self.pcd3:
+            self.meshcat.SetObject("cloud3", self.pcd3, point_size=0.0001, rgba=Rgba(0,0,1,1))
         self.meshcat.SetObject("cloud", object_pcd, point_size=0.001)
         # self.meshcat.SetObject("cloud_w_floor", pcd_with_floor, point_size=0.001, rgba=Rgba(1,1,0,1))
 
@@ -967,6 +1006,10 @@ class TwoGraspPlanner(LeafSystem):
 
                 if q_goal1 is None:
                     continue
+                    
+                # check if configuration is in collision with scene
+                if check_configuration_has_collisions(self.models_path, com, rot, dims, q_goal1):
+                    continue
 
                 q = self.get_input_port(self._iiwa_position_index).Eval(context)
                 q_goal2 = solve_global_inverse_kinematics(
@@ -991,6 +1034,10 @@ class TwoGraspPlanner(LeafSystem):
                     attempts += 1
 
                 if q_goal2 is None:
+                    continue
+
+                # check if configuration is in collision with scene
+                if check_configuration_has_collisions(self.models_path, com, rot, dims, q_goal2):
                     continue
                 
                 self.q_pregrasp1 = q_goal1
@@ -1026,13 +1073,13 @@ class TwoGraspPlanner(LeafSystem):
         # Store grasp pose to use later when making pick + display trajectory
         state.get_mutable_abstract_state(self._grasp_X_G_index).set_value(X_WE)
 
-        # visualize grasp in o3d
-        manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(object_pcd.xyzs().T))
-        manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
-        viz_geoms = [manipuland_cloud]
-        viz_geoms.append(self.grasp_node.make_gripper_line_set(X_WG.GetAsMatrix4(), [0.0, 1.0, 0.0]))
-        viz_geoms.append(self.grasp_node.make_gripper_line_set(X_WE.GetAsMatrix4(), [1.0, 0.0, 0.0]))
-        o3d.visualization.draw_geometries(viz_geoms)
+        # # visualize grasp in o3d
+        # manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(object_pcd.xyzs().T))
+        # manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
+        # viz_geoms = [manipuland_cloud]
+        # viz_geoms.append(self.grasp_node.make_gripper_line_set(X_WG.GetAsMatrix4(), [0.0, 1.0, 0.0]))
+        # viz_geoms.append(self.grasp_node.make_gripper_line_set(X_WE.GetAsMatrix4(), [1.0, 0.0, 0.0]))
+        # o3d.visualization.draw_geometries(viz_geoms)
 
         return X_WE
 
@@ -1092,8 +1139,8 @@ class TwoGraspPlanner(LeafSystem):
         toppra_traj = reparameterize_with_toppra(
             trajectory=display_traj,
             plant=self._iiwa_controller_plant,
-            velocity_limits=self.velocity_limits,
-            acceleration_limits=self.acceleration_limits,
+            velocity_limits=self.display_velocity_limits,
+            acceleration_limits=self.display_acceleration_limits,
             num_grid_points=100,
             is_pl=True,
         )
@@ -1127,7 +1174,7 @@ class TwoGraspPlanner(LeafSystem):
 
     def PlanGripper(self, context, state, direction="open"):
         opened = np.array([0.107])
-        closed = np.array([0.0])
+        closed = np.array([0.02])
         current_time = context.get_time()
 
         traj_wsg_command = PiecewisePolynomial.FirstOrderHold(
