@@ -53,14 +53,6 @@ directives:
 #     parent: box_origin
 #     child: box::box_body
 
-- add_model:
-    name: wall
-    file: file://./home/real2sim/src/Real2SimObjectManipulation/models/front_wall.sdf
-
-- add_weld:
-    parent: world
-    child: wall::wall_body
-
 - add_frame:
     name: camera0_staging
     X_PF:
@@ -68,54 +60,95 @@ directives:
         rotation: !Rpy { deg: [0, 0, 0.0]}
 
 - add_frame:
-    name: handeye_camera_origin
+    name: camera1_staging
     X_PF:
-        base_frame: iiwa::iiwa_link_7
-        rotation: !Rpy { deg: [1.92088771, -0.36094999, -89.40886295]}
-        translation: [-0.074597, 0.0324164, 0.155892]
+        base_frame: world
+        rotation: !Rpy { deg: [0, 0, 0.0]}
+
+- add_frame:
+    name: camera2_staging
+    X_PF:
+        base_frame: world
+        rotation: !Rpy { deg: [0, 0, 0.0]}
 
 - add_frame:
     name: camera0_origin
     X_PF:
         base_frame: camera0_staging
-        rotation: !Rpy { deg: [-110, 0, 90]}
-        translation: [1.2, 0.0, 0.54]
+        rotation: !Rpy { deg: [-150.29508676,   -0.49652966,   87.69325379]}
+        translation: [1.00847, -0.0314675, 1.12864]
+
+- add_frame:
+    name: camera1_origin
+    X_PF:
+        base_frame: camera1_staging
+        rotation: !Rpy { deg: [-105.81290946,    2.14985993,  -43.7254432]}
+        translation: [-0.110748, -0.931772,  0.388191]
+
+- add_frame:
+    name: camera2_origin
+    X_PF:
+        base_frame: camera2_staging
+        rotation: !Rpy { deg: [-102.739428,   -3.69469624, -149.1420755]}
+        translation: [-0.0533544,  1.00955,  0.449207]
 
 - add_model:
-    name: camera_main
+    name: camera_front
+    file: package://manipulation/camera_box.sdf
+
+- add_model:
+    name: camera_right
+    file: package://manipulation/camera_box.sdf
+
+- add_model:
+    name: camera_left
     file: package://manipulation/camera_box.sdf
 
 - add_weld:
     parent: camera0_origin
-    child: camera_main::base
+    child: camera_front::base
+
+- add_weld:
+    parent: camera1_origin
+    child: camera_right::base
+
+- add_weld:
+    parent: camera2_origin
+    child: camera_left::base
 
 cameras:
-    main_camera:
+    camera_front:
         name: camera0
         depth: True
-        # show_rgb: True
-        # D415 & D435 RGB sensor
         width: 1920
-        height: 1080
+        height: 1440
         focal: !FovDegrees {x: 69, y: 42}
-        # # Femto Bolt
-        # width: 3840
-        # height: 2160
-        # focal: !FovDegrees {x: 80, y: 51}
         lcm_bus: driver_traffic
         X_PB:
-            base_frame: camera_main::base
-    handeye_camera:
-        name: handeye_camera
+            base_frame: camera_front::base
+    camera_right:
+        name: camera1
         depth: True
+        width: 1920
+        height: 1440
+        focal: !FovDegrees {x: 69, y: 42}
         lcm_bus: driver_traffic
         X_PB:
-            base_frame: handeye_camera_origin
+            base_frame: camera_right::base
+    camera_left:
+        name: camera2
+        depth: True
+        width: 1920
+        height: 1440
+        focal: !FovDegrees {x: 69, y: 42}
+        lcm_bus: driver_traffic
+        X_PB:
+            base_frame: camera_left::base
 
 camera_ids:
-    main_camera: "DRAKE_RGBD_CAMERA_IMAGES_843512061674"
-    # main_camera: "DRAKE_RGBD_CAMERA_IMAGES_810512062206"
-    handeye_camera: "DRAKE_RGBD_CAMERA_IMAGES_810512062206"
+    camera_front: "DRAKE_RGBD_CAMERA_IMAGES_843512061674"
+    camera_right: "DRAKE_RGBD_CAMERA_IMAGES_802212061325"
+    camera_left: "DRAKE_RGBD_CAMERA_IMAGES_928222061590"
 
 plant_config:
     time_step: 0.001

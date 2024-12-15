@@ -58,6 +58,20 @@ directives:
         rotation: !Rpy { deg: [0.0, 0.0, 0.0]}
         translation: [0.4, 0.0, 0]
 
+- add_frame:
+    name: front_wall_origin
+    X_PF:
+        base_frame: world
+        rotation: !Rpy { deg: [0.0, 0.0, 0.0]}
+        translation: [0.85, 0.0, 0]
+
+- add_frame:
+    name: back_wall_origin
+    X_PF:
+        base_frame: world
+        rotation: !Rpy { deg: [0.0, 0.0, 0.0]}
+        translation: [-0.4, 0.0, 0]
+
 - add_model:
     name: box
     file: file://./home/real2sim/src/Real2SimObjectManipulation/models/box.sdf
@@ -67,9 +81,17 @@ directives:
     child: box::box_body
 
 - add_model:
-    name: wall
+    name: back_wall
     file: file://./home/real2sim/src/Real2SimObjectManipulation/models/front_wall.sdf
 
 - add_weld:
-    parent: world
-    child: wall::wall_body
+    parent: back_wall_origin
+    child: back_wall::wall_body
+
+- add_model:
+    name: front_wall
+    file: file://./home/real2sim/src/Real2SimObjectManipulation/models/front_wall.sdf
+
+- add_weld:
+    parent: front_wall_origin
+    child: front_wall::wall_body

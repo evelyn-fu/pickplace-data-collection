@@ -2,6 +2,7 @@ import numpy as np
 import logging
 import pickle
 import datetime
+import random
 import open3d as o3d
 import os
 from scipy.spatial.transform import Rotation as R
@@ -86,18 +87,6 @@ def get_seeded_region(models_path, com, rot, dims, q_nominal):
     opts = IrisZoOptions()
     opts.max_iterations = 10
     region = IrisZo(checker, Hyperellipsoid.MakeHypersphere(1e-4, q_nominal), domain, opts)
-
-    # # iris_options = IrisOptions(require_sample_point_is_contained=True)
-    # iris_options = IrisOptions()
-    # iris_options.iteration_limit = 10
-    # # increase num_collision_infeasible_samples to improve the (probabilistic)
-    # # certificate of having no collisions.
-    # iris_options.num_collision_infeasible_samples = 3
-    # iris_options.require_sample_point_is_contained = True
-    # iris_options.relative_termination_threshold = 0.01
-    # iris_options.termination_threshold = -1
-    # region = IrisInConfigurationSpace(plant, plant_context, iris_options)
-    # print("region:", region)
 
     return region
 
@@ -282,7 +271,7 @@ class TwoGraspPlanner(LeafSystem):
             default_home=q_home,
             gripper_length=0.12,
             pregrasp_dist=0.18,
-            eef_to_gripper_length=0.19,
+            eef_to_gripper_length=0.1,
         ):
         LeafSystem.__init__(self)
 
@@ -386,9 +375,9 @@ class TwoGraspPlanner(LeafSystem):
         self._iiwa_controller_plant = controller_plant
         self.velocity_limits = 0.4 * np.ones(7)
         self.acceleration_limits = 0.4 * np.ones(7)
-        self.display_velocity_limits = 1 * np.ones(7)
-        self.display_velocity_limits[6] = 1
-        self.display_acceleration_limits = 1 * np.ones(7)
+        self.display_velocity_limits = 0.2 * np.ones(7)
+        self.display_velocity_limits[6] = 0.05
+        self.display_acceleration_limits = 0.2 * np.ones(7)
         self.regions = None #regions
         self.object_com = None
         self.object_dims = None
@@ -795,38 +784,6 @@ class TwoGraspPlanner(LeafSystem):
         Determine grasp pose
         '''
         mode = context.get_abstract_state(int(self._mode_index)).get_value()
-        
-        pcd_with_floor = self.current_pcd # Includes some floor on purpose
-        object_pcd = pcd_with_floor.Crop(lower_xyz=[0.23, -0.17, 0.063], upper_xyz=[0.57, 0.17, 0.27]) # just object
-        if self.pcd0:
-            self.meshcat.SetObject("cloud0", self.pcd0, point_size=0.0001, rgba=Rgba(1,0,0,1))
-        if self.pcd1:
-            self.meshcat.SetObject("cloud1", self.pcd1, point_size=0.0001, rgba=Rgba(1,1,0,1))
-        if self.pcd2:
-            self.meshcat.SetObject("cloud2", self.pcd2, point_size=0.0001, rgba=Rgba(0,1,0,1))
-        if self.pcd3:
-            self.meshcat.SetObject("cloud3", self.pcd3, point_size=0.0001, rgba=Rgba(0,0,1,1))
-        self.meshcat.SetObject("cloud", object_pcd, point_size=0.001)
-        # self.meshcat.SetObject("cloud_w_floor", pcd_with_floor, point_size=0.001, rgba=Rgba(1,1,0,1))
-
-        pcd_points = object_pcd.xyzs().T
-        principal_component, secondary_component, minor_component = compute_principal_minor_components(pcd_points)
-
-        # visualize axes, principal axis is z axis (blue), minor axis is x axis (red)
-        z_axis, x_axis = [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]
-        rot_principal_component_to_axes, _ = R.align_vectors(
-            np.array([z_axis, x_axis]), np.stack([principal_component, minor_component])
-        )
-        com = np.mean(pcd_points, axis=0)
-        self.object_com = com
-        pcd_points_axis_aligned = pcd_points @ rot_principal_component_to_axes.as_matrix().T
-        dims = np.max(pcd_points_axis_aligned, axis=0) - np.min(pcd_points_axis_aligned, axis=0)
-        self.object_dims = dims
-        rot = RotationMatrix(rot_principal_component_to_axes.as_matrix().T)
-        self.object_rot = rot
-        AddMeshcatTriad(self.meshcat, "principal axis", 
-                        X_PT=RigidTransform(rot,
-                        [com[0], com[1], com[2]]))
 
         # get end effector pose from grasp pose
         X_GE = RigidTransform(RotationMatrix(RollPitchYaw(0, 0, 0)), [0, 0, -self.eef_to_gripper_length])
@@ -835,6 +792,38 @@ class TwoGraspPlanner(LeafSystem):
         X_GgraspGpregrasp = RigidTransform([0, 0.0, -self.pregrasp_dist])
         
         if mode == PlannerState.SCANNING1:
+            pcd_with_floor = self.current_pcd # Includes some floor on purpose
+            object_pcd = pcd_with_floor.Crop(lower_xyz=[0.23, -0.17, 0.07], upper_xyz=[0.57, 0.17, 0.27]) # just object
+            if self.pcd0:
+                self.meshcat.SetObject("cloud0", self.pcd0, point_size=0.0001, rgba=Rgba(1,0,0,1))
+            if self.pcd1:
+                self.meshcat.SetObject("cloud1", self.pcd1, point_size=0.0001, rgba=Rgba(1,1,0,1))
+            if self.pcd2:
+                self.meshcat.SetObject("cloud2", self.pcd2, point_size=0.0001, rgba=Rgba(0,1,0,1))
+            if self.pcd3:
+                self.meshcat.SetObject("cloud3", self.pcd3, point_size=0.0001, rgba=Rgba(0,0,1,1))
+            self.meshcat.SetObject("cloud", object_pcd, point_size=0.001)
+            # self.meshcat.SetObject("cloud_w_floor", pcd_with_floor, point_size=0.001, rgba=Rgba(1,1,0,1))
+
+            pcd_points = object_pcd.xyzs().T
+            principal_component, secondary_component, minor_component = compute_principal_minor_components(pcd_points)
+
+            # visualize axes, principal axis is z axis (blue), minor axis is x axis (red)
+            z_axis, x_axis = [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]
+            rot_principal_component_to_axes, _ = R.align_vectors(
+                np.array([z_axis, x_axis]), np.stack([principal_component, minor_component])
+            )
+            com = np.mean(pcd_points, axis=0)
+            self.object_com = com
+            pcd_points_axis_aligned = pcd_points @ rot_principal_component_to_axes.as_matrix().T
+            dims = np.max(pcd_points_axis_aligned, axis=0) - np.min(pcd_points_axis_aligned, axis=0)
+            self.object_dims = dims
+            rot = RotationMatrix(rot_principal_component_to_axes.as_matrix().T)
+            self.object_rot = rot
+            AddMeshcatTriad(self.meshcat, "principal axis", 
+                            X_PT=RigidTransform(rot,
+                            [com[0], com[1], com[2]]))
+            
             # Planning first grasping trajectory
             self.grasp_node.compute_candidate_grasps(
                 object_pcd,
