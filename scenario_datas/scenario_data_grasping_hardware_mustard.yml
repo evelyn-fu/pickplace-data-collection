@@ -1,7 +1,7 @@
 directives:
 - add_model:
     name: iiwa
-    file: package://drake_models/iiwa_description/sdf/iiwa14_no_collision.sdf
+    file: package://drake_models/iiwa_description/sdf/iiwa7_no_collision.sdf
     default_joint_positions:
         iiwa_joint_1: [0.0]
         iiwa_joint_2: [0.4]
@@ -67,40 +67,84 @@ directives:
         rotation: !Rpy { deg: [0, 0, 0.0]}
 
 - add_frame:
-    name: handeye_camera_origin
+    name: camera1_staging
     X_PF:
-        base_frame: iiwa::iiwa_link_7
-        rotation: !Rpy { deg: [  2.0540215 ,  -0.31583718, -89.24078404]}
-        translation: [-0.0730357, 0.032904, 0.151341]
+        base_frame: world
+        rotation: !Rpy { deg: [0, 0, 0.0]}
+
+- add_frame:
+    name: camera2_staging
+    X_PF:
+        base_frame: world
+        rotation: !Rpy { deg: [0, 0, 0.0]}
 
 - add_frame:
     name: camera0_origin
     X_PF:
         base_frame: camera0_staging
-        rotation: !Rpy { deg: [-110, 0, 90]}
-        translation: [1.2, 0.0, 0.54]
+        rotation: !Rpy { deg: [-150.29508676,   -0.49652966,   87.69325379]}
+        translation: [1.00847, -0.0314675, 1.12864]
+
+- add_frame:
+    name: camera1_origin
+    X_PF:
+        base_frame: camera1_staging
+        rotation: !Rpy { deg: [-105.81290946,    2.14985993,  -43.7254432]}
+        translation: [-0.110748, -0.931772,  0.388191]
+
+- add_frame:
+    name: camera2_origin
+    X_PF:
+        base_frame: camera2_staging
+        rotation: !Rpy { deg: [-102.739428,   -3.69469624, -149.1420755]}
+        translation: [-0.0533544,  1.00955,  0.449207]
 
 - add_model:
-    name: camera_main
+    name: camera_front
+    file: package://manipulation/camera_box.sdf
+
+- add_model:
+    name: camera_right
+    file: package://manipulation/camera_box.sdf
+
+- add_model:
+    name: camera_left
     file: package://manipulation/camera_box.sdf
 
 - add_weld:
     parent: camera0_origin
-    child: camera_main::base
+    child: camera_front::base
+
+- add_weld:
+    parent: camera1_origin
+    child: camera_right::base
+
+- add_weld:
+    parent: camera2_origin
+    child: camera_left::base
 
 cameras:
-    main_camera:
+    camera_front:
         name: camera0
         depth: True
         width: 1920
         height: 1440
         X_PB:
-            base_frame: camera_main::base
-    handeye_camera:
-        name: handeye_camera
+            base_frame: camera_front::base
+    camera_right:
+        name: camera1
         depth: True
+        width: 1920
+        height: 1440
         X_PB:
-            base_frame: handeye_camera_origin
+            base_frame: camera_right::base
+    camera_left:
+        name: camera2
+        depth: True
+        width: 1920
+        height: 1440
+        X_PB:
+            base_frame: camera_left::base
 
 plant_config:
     time_step: 0.001

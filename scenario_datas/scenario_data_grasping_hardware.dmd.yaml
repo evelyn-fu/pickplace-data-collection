@@ -1,9 +1,9 @@
 directives:
 - add_model:
     name: iiwa
-    file: package://drake_models/iiwa_description/sdf/iiwa14_no_collision.sdf
+    file: package://drake_models/iiwa_description/sdf/iiwa7_no_collision.sdf
     default_joint_positions:
-        iiwa_joint_1: [0.0]
+        iiwa_joint_1: [0.3]
         iiwa_joint_2: [0.4]
         iiwa_joint_3: [0]
         iiwa_joint_4: [-1.2]

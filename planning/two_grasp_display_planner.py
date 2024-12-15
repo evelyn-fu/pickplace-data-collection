@@ -41,6 +41,7 @@ from pydrake.planning import (RobotDiagramBuilder,
                               SceneGraphCollisionChecker)
 from pydrake.solvers import MosekSolver, GurobiSolver
 from pydrake.geometry.optimization import IrisOptions, IrisInConfigurationSpace
+from pydrake.all import IrisZo, IrisZoOptions, Hyperellipsoid, HPolyhedron
 from pydrake.geometry import Rgba
 
 from manipulation.meshcat_utils import AddMeshcatTriad
@@ -67,27 +68,36 @@ def get_seeded_region(models_path, com, rot, dims, q_nominal):
     """ % (rpy[0], rpy[1], rpy[2], com[0], com[1], com[2], dims[0], dims[1], dims[2])
 
     print("getting seeded region around", q_nominal)
+
+    use_native_cpp_logging()
+    params = dict(edge_step_size=0.125)
     builder = RobotDiagramBuilder()
-    plant = builder.plant()
     builder.parser().AddModels(models_path)
-    # builder.parser().AddModelsFromString(bounding_box_urdf, "urdf")
-    diagram = builder.Build()
+    builder.parser().AddModelsFromString(bounding_box_urdf, "urdf")
+    iiwa_model_instance_index = builder.plant().GetModelInstanceByName("iiwa")
+    wsg_model_instance_index = builder.plant().GetModelInstanceByName("wsg")
+    plant = builder.plant()
+    plant.Finalize()
+    params["robot_model_instances"] = [iiwa_model_instance_index, wsg_model_instance_index]
+    params["model"] = builder.Build()
+    domain = HPolyhedron.MakeBox(plant.GetPositionLowerLimits(), plant.GetPositionUpperLimits())
+    checker = SceneGraphCollisionChecker(**params)
 
-    context = diagram.CreateDefaultContext()
-    plant_context = plant.GetMyContextFromRoot(context)
-    plant.SetPositions(plant_context, q_nominal)
+    opts = IrisZoOptions()
+    opts.max_iterations = 10
+    region = IrisZo(checker, Hyperellipsoid.MakeHypersphere(1e-4, q_nominal), domain, opts)
 
-    # iris_options = IrisOptions(require_sample_point_is_contained=True)
-    iris_options = IrisOptions()
-    iris_options.iteration_limit = 10
-    # increase num_collision_infeasible_samples to improve the (probabilistic)
-    # certificate of having no collisions.
-    iris_options.num_collision_infeasible_samples = 3
-    iris_options.require_sample_point_is_contained = True
-    iris_options.relative_termination_threshold = 0.01
-    iris_options.termination_threshold = -1
-    region = IrisInConfigurationSpace(plant, plant_context, iris_options)
-    print("region:", region)
+    # # iris_options = IrisOptions(require_sample_point_is_contained=True)
+    # iris_options = IrisOptions()
+    # iris_options.iteration_limit = 10
+    # # increase num_collision_infeasible_samples to improve the (probabilistic)
+    # # certificate of having no collisions.
+    # iris_options.num_collision_infeasible_samples = 3
+    # iris_options.require_sample_point_is_contained = True
+    # iris_options.relative_termination_threshold = 0.01
+    # iris_options.termination_threshold = -1
+    # region = IrisInConfigurationSpace(plant, plant_context, iris_options)
+    # print("region:", region)
 
     return region
 
@@ -250,15 +260,16 @@ yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -
 yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -5*np.pi)), [0.4, 0.0, 0.6]))
 yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -3*np.pi/2)), [0.4, 0.0, 0.6]))
 
-q_home = [0.0, 0.4, 0.0, -1.2, 0.0, 1.0, -1.57]
+q_home = [0.3, 0.4, 0.0, -1.2, 0.0, 1.0, -1.57]
 
 class TwoGraspPlanner(LeafSystem):
     def __init__(
             self, 
             plant,
-            controller_plant, 
-            eef_body_index,
-            X_EefC,
+            controller_plant,
+            X_WC0,
+            X_WC1,
+            X_WC2,
             scanning_traj_dir,
             meshcat, 
             dirstr,
@@ -277,10 +288,12 @@ class TwoGraspPlanner(LeafSystem):
 
         # For grasp planner
         self.current_pcd = PointCloud(0)
-        self.DeclareAbstractInputPort("cloud_handeye", AbstractValue.Make(PointCloud(0)))
-        self.DeclareAbstractInputPort("cloud_stationary", AbstractValue.Make(PointCloud(0)))
-        self._eef_body_index = eef_body_index
-        self._X_EefC = X_EefC
+        self.DeclareAbstractInputPort("cloud_front", AbstractValue.Make(PointCloud(0)))
+        self.DeclareAbstractInputPort("cloud_back_right", AbstractValue.Make(PointCloud(0)))
+        self.DeclareAbstractInputPort("cloud_back_left", AbstractValue.Make(PointCloud(0)))
+        self._X_WC0 = X_WC0
+        self._X_WC1 = X_WC1
+        self._X_WC2 = X_WC2
         self._scanning_traj_dir = scanning_traj_dir
 
         # for getting current positions
@@ -373,9 +386,9 @@ class TwoGraspPlanner(LeafSystem):
         self._iiwa_controller_plant = controller_plant
         self.velocity_limits = 0.4 * np.ones(7)
         self.acceleration_limits = 0.4 * np.ones(7)
-        self.display_velocity_limits = 0.2 * np.ones(7)
-        self.display_velocity_limits[6] = 0.05
-        self.display_acceleration_limits = 0.2 * np.ones(7)
+        self.display_velocity_limits = 1 * np.ones(7)
+        self.display_velocity_limits[6] = 1
+        self.display_acceleration_limits = 1 * np.ones(7)
         self.regions = None #regions
         self.object_com = None
         self.object_dims = None
@@ -433,10 +446,6 @@ class TwoGraspPlanner(LeafSystem):
                 ).set_value(ScanState.IDLE)
             return
         if mode == PlannerState.SCANNING1:
-            # self.PlanToPregrasp(context, state)
-            # state.get_mutable_abstract_state(
-            #     int(self._mode_index)
-            # ).set_value(PlannerState.GO_TO_PREGRASP1)
             self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP1)
             return
         if mode == PlannerState.GO_TO_PREGRASP1:
@@ -476,11 +485,7 @@ class TwoGraspPlanner(LeafSystem):
                 ).set_value(ScanState.IDLE)
             return
         if mode == PlannerState.SCANNING2:
-            state.get_mutable_abstract_state(
-                int(self._mode_index)
-            ).set_value(PlannerState.GO_TO_PREGRASP2)
-            self.PlanToPregrasp(context, state)
-            # self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP2)
+            self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP2)
             return
         if mode == PlannerState.GO_TO_PREGRASP2:
             traj_q= context.get_abstract_state(
@@ -562,167 +567,38 @@ class TwoGraspPlanner(LeafSystem):
 
 
     def GetPointCloud(self, context, state, after_scan_state):
-        scan_mode = context.get_abstract_state(int(self._scan_mode_index)).get_value()
-        traj_q = context.get_abstract_state(
-            int(self._current_joint_traj_idx)
-        ).get_value().trajectory
-        start_time = context.get_abstract_state(
-            int(self._current_joint_traj_idx)
-        ).get_value().start_time_s
+        cloud0 = self.GetInputPort("cloud_front").Eval(context)
+        pcd0 = cloud0.Crop(lower_xyz=[0.23, -0.17, 0.055], upper_xyz=[0.57, 0.17, 0.27])
+        pcd0.EstimateNormals(radius=0.1, num_closest=30)
+        pcd0.FlipNormalsTowardPoint(self._X_WC0.translation())
 
-        body_poses = self.GetInputPort("body_poses").Eval(context)
-        X_WC = body_poses[self._eef_body_index] @ self._X_EefC 
-        AddMeshcatTriad(self.meshcat, "X_WC", 
-                        X_PT=X_WC)
+        cloud1 = self.GetInputPort("cloud_back_left").Eval(context)
+        pcd1 = cloud1.Crop(lower_xyz=[0.23, -0.17, 0.055], upper_xyz=[0.57, 0.17, 0.27])
+        pcd1.EstimateNormals(radius=0.1, num_closest=30)
+        pcd1.FlipNormalsTowardPoint(self._X_WC1.translation())
 
-        def set_traj(scan_traj):
-            breaks = np.linspace(0, scan_traj.end_time(), int(1e3), endpoint=False)
-            knots = scan_traj.vector_values(breaks)
+        cloud2 = self.GetInputPort("cloud_back_right").Eval(context)
+        pcd2 = cloud2.Crop(lower_xyz=[0.23, -0.17, 0.055], upper_xyz=[0.57, 0.17, 0.27])
+        pcd2.EstimateNormals(radius=0.1, num_closest=30)
+        pcd2.FlipNormalsTowardPoint(self._X_WC2.translation())
 
-            toppra_traj = reparameterize_with_toppra(
-                trajectory=knots.T,
-                plant=self._iiwa_controller_plant,
-                velocity_limits=self.velocity_limits,
-                acceleration_limits=self.acceleration_limits,
-                num_grid_points=100,
-            )
-
-            current_time = context.get_time()
-            state.get_mutable_abstract_state(self._current_joint_traj_idx).set_value(
-                TrajectoryWithTimingInformation(
-                    trajectory=toppra_traj,
-                    start_time_s=current_time,
-                )
-            )
+        merged_pcd = Concatenate([pcd0, pcd1, pcd2])
+        down_sampled_pcd = merged_pcd.VoxelizedDownSample(voxel_size=0.005)
         
-        def get_pcd(start_new_pcd = False, ind=0):
-            body_poses = self.GetInputPort("body_poses").Eval(context)
-            cloud = self.GetInputPort("cloud_handeye").Eval(context)
-            new_pcd = cloud.Crop(lower_xyz=[0.23, -0.17, 0.055], upper_xyz=[0.57, 0.17, 0.27])
-            new_pcd.EstimateNormals(radius=0.1, num_closest=30)
-            X_WC = body_poses[self._eef_body_index] @ self._X_EefC 
-            new_pcd.FlipNormalsTowardPoint(X_WC.translation())
-            if start_new_pcd:
-                return new_pcd
-            
-            if ind == 0:
-                self.pcd0 = new_pcd
-            if ind == 1:
-                self.pcd1 = new_pcd
-            if ind == 2:
-                self.pcd2 = new_pcd
-            if ind == 3:
-                self.pcd3 = new_pcd
-
-        if scan_mode == ScanState.IDLE:
-            if context.get_time() > traj_q.end_time() + start_time:
-                state.get_mutable_abstract_state(
-                    int(self._scan_mode_index)
-                ).set_value(ScanState.GO_TO_1)
-
-                # start pcd with front camera view
-                body_poses = self.GetInputPort("body_poses").Eval(context)
-                cloud = self.GetInputPort("cloud_stationary").Eval(context)
-                new_pcd = cloud.Crop(lower_xyz=[0.23, -0.17, 0.055], upper_xyz=[0.57, 0.17, 0.27])
-                new_pcd.EstimateNormals(radius=0.1, num_closest=30)
-                X_WC = body_poses[self._eef_body_index] @ self._X_EefC 
-                new_pcd.FlipNormalsTowardPoint(X_WC.translation())
-                self.current_pcd = new_pcd
-                self.pcd0 = new_pcd
-
-                # load trajectory to first camera view
-                traj = CompositeBezierCurveTrajectoryAttributes.load(self._scanning_traj_dir + "/to1/").to_composite_bezier_curve_trajectory()
-                set_traj(traj)
-                return
-        if scan_mode == ScanState.GO_TO_1:
-            if context.get_time() > traj_q.end_time() + start_time:
-                state.get_mutable_abstract_state(
-                    int(self._scan_mode_index)
-                ).set_value(ScanState.GO_TO_2)
-
-                # update pcd (skip for now, too close to object)
-                get_pcd(ind=1)
-
-                # load trajectory to next camera view
-                traj = CompositeBezierCurveTrajectoryAttributes.load(self._scanning_traj_dir + "/to2/").to_composite_bezier_curve_trajectory()
-                set_traj(traj)
-                return
-        if scan_mode == ScanState.GO_TO_2:
-            if context.get_time() > traj_q.end_time() + start_time:
-                state.get_mutable_abstract_state(
-                    int(self._scan_mode_index)
-                ).set_value(ScanState.GO_TO_3)
-
-                # update pcd
-                get_pcd(ind=2)
-
-                # load trajectory to next camera view
-                traj = CompositeBezierCurveTrajectoryAttributes.load(self._scanning_traj_dir + "/to3/").to_composite_bezier_curve_trajectory()
-                set_traj(traj)
-                return
-        if scan_mode == ScanState.GO_TO_3:
-            if context.get_time() > traj_q.end_time() + start_time:
-                state.get_mutable_abstract_state(
-                    int(self._scan_mode_index)
-                ).set_value(ScanState.GO_HOME)
-
-                # update pcd
-                get_pcd(ind=3)
-
-                # merge all and downsample
-                # note: camera calibration is bad, manual tuning is added here
-                pcd_components = []
-                if self.pcd0:
-                    X_adjust = RigidTransform(RotationMatrix(),[0.0, 0.0, -0.0])
-                    transformed_xyzs = X_adjust @ self.pcd0.xyzs()
-                    self.pcd0.mutable_xyzs()[:] = transformed_xyzs
-                    pcd_components.append(self.pcd0)
-                if self.pcd1:
-                    X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0, 0, 0)),[0.0, -0.005, 0.0])
-                    transformed_xyzs = X_adjust @ self.pcd1.xyzs()
-                    self.pcd1.mutable_xyzs()[:] = transformed_xyzs
-                    pcd_components.append(self.pcd1)
-                if self.pcd2:
-                    X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.0, -0.01, 0.03)),[-0.01, -0.01, 0.0])
-                    transformed_xyzs = X_adjust @ self.pcd2.xyzs()
-                    self.pcd2.mutable_xyzs()[:] = transformed_xyzs
-                    pcd_components.append(self.pcd2)
-                if self.pcd3:
-                    X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[0.0, 0.005, 0.0])
-                    transformed_xyzs = X_adjust @ self.pcd3.xyzs()
-                    self.pcd3.mutable_xyzs()[:] = transformed_xyzs
-                    pcd_components.append(self.pcd3)
-
-                # merge
-                merged_pcd = Concatenate(pcd_components)
-                
-                # downsample
-                down_sampled_pcd = merged_pcd.VoxelizedDownSample(voxel_size=0.005)
-                
-                # remove outliers
-                o3d_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(down_sampled_pcd.xyzs().T))
-                cl, ind = o3d_cloud.remove_statistical_outlier(
-                    nb_neighbors=int(down_sampled_pcd.xyzs().shape[1] // 10), 
-                    std_ratio=1.0)
-                filtered_pts = np.asarray(o3d_cloud.points)[ind]
-                down_sampled_pcd.resize(filtered_pts.shape[0])
-                down_sampled_pcd.mutable_xyzs()[:] = filtered_pts.T
-                self.current_pcd = down_sampled_pcd
-
-                # load trajectory to return home
-                traj = CompositeBezierCurveTrajectoryAttributes.load(self._scanning_traj_dir + "/to_home/").to_composite_bezier_curve_trajectory()
-                set_traj(traj)
-                return
-        if scan_mode == ScanState.GO_HOME:
-            if context.get_time() > traj_q.end_time() + start_time:
-                state.get_mutable_abstract_state(
-                    int(self._scan_mode_index)
-                ).set_value(ScanState.DONE)
-                state.get_mutable_abstract_state(
-                    int(self._mode_index)
-                ).set_value(after_scan_state)
-                self.PlanToPregrasp(context, state)
-                return
+        # remove outliers
+        o3d_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(down_sampled_pcd.xyzs().T))
+        cl, ind = o3d_cloud.remove_statistical_outlier(
+            nb_neighbors=int(down_sampled_pcd.xyzs().shape[1] // 10), 
+            std_ratio=1.0)
+        filtered_pts = np.asarray(o3d_cloud.points)[ind]
+        down_sampled_pcd.resize(filtered_pts.shape[0])
+        down_sampled_pcd.mutable_xyzs()[:] = filtered_pts.T
+        self.current_pcd = down_sampled_pcd
+        
+        state.get_mutable_abstract_state(
+            int(self._mode_index)
+        ).set_value(after_scan_state)
+        self.PlanToPregrasp(context, state)
 
         return
 
@@ -814,7 +690,6 @@ class TwoGraspPlanner(LeafSystem):
         # Set gcs regions or generate if not given or not ignoring obstacles/loading trajectories
         if mode == PlannerState.SCANNING1:
             if not self.use_offline_regions1 and not self.no_obstacles and not loaded_traj:
-                # self.regions = get_regions(self.models_path, self.object_com, self.object_rot, self.object_dims)
                 q_in_regions = False
                 q_goal_in_regions = False
 
@@ -878,7 +753,7 @@ class TwoGraspPlanner(LeafSystem):
             else:
                 self.regions = self.regions2
 
-        input("regions generated, press [ENTER] to continue")
+        # input("regions generated, press [ENTER] to continue")
 
         if not loaded_traj:
             traj = plan_unconstrained_gcs_path_start_to_goal(

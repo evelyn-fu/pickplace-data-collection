@@ -185,83 +185,89 @@ def start_scenario(
     # initialize point cloud output ports and save camera instrinsics
     if not use_hardware:
         camera0 = station.GetSubsystemByName("rgbd_sensor_camera0")
-        handeye_camera = station.GetSubsystemByName("rgbd_sensor_handeye_camera")
+        camera1 = station.GetSubsystemByName("rgbd_sensor_camera1")
+        camera2 = station.GetSubsystemByName("rgbd_sensor_camera2")
         K = camera0.color_camera_info().intrinsic_matrix()
         if save_imgs:
             np.savetxt(dirstr+"/cam_K.txt", K)
 
-        handeye_camera_pcd = builder.AddSystem(DepthImageToPointCloud(handeye_camera.depth_camera_info()))
         camera0_pcd = builder.AddSystem(DepthImageToPointCloud(camera0.depth_camera_info()))
-        builder.Connect(station.GetOutputPort("handeye_camera.depth_image"), handeye_camera_pcd.GetInputPort("depth_image"))
+        camera1_pcd = builder.AddSystem(DepthImageToPointCloud(camera1.depth_camera_info()))
+        camera2_pcd = builder.AddSystem(DepthImageToPointCloud(camera2.depth_camera_info()))
         builder.Connect(station.GetOutputPort("camera0.depth_image"), camera0_pcd.GetInputPort("depth_image"))
+        builder.Connect(station.GetOutputPort("camera1.depth_image"), camera1_pcd.GetInputPort("depth_image"))
+        builder.Connect(station.GetOutputPort("camera2.depth_image"), camera2_pcd.GetInputPort("depth_image"))
 
     else:
-        handeye_camera_pcd = builder.AddSystem(DepthImageToPointCloud(CameraInfo(848, 480, 639.036, 639.036, 425.131, 244.165)))
         camera0_pcd = builder.AddSystem(DepthImageToPointCloud(CameraInfo(848, 480, 600.165, 600.165, 429.152, 232.822)))
+        camera1_pcd = builder.AddSystem(DepthImageToPointCloud(CameraInfo(848, 480, 626.633, 626.633, 432.041, 245.465)))
+        camera2_pcd = builder.AddSystem(DepthImageToPointCloud(CameraInfo(848, 480, 596.492, 596.492, 416.694, 240.225)))
 
-        builder.Connect(external_station.GetOutputPort("handeye_camera.depth_image"), handeye_camera_pcd.GetInputPort("depth_image"))
         builder.Connect(external_station.GetOutputPort("camera0.depth_image"), camera0_pcd.GetInputPort("depth_image"))
+        builder.Connect(external_station.GetOutputPort("camera1.depth_image"), camera1_pcd.GetInputPort("depth_image"))
+        builder.Connect(external_station.GetOutputPort("camera2.depth_image"), camera2_pcd.GetInputPort("depth_image"))
 
     
     if use_hardware:
         # from camera calibation
-        r = R.from_quat([0.0102867, -0.0159347, -0.706193, 0.707766])
-        x_ee_rgb = RigidTransform(
-            R=RotationMatrix(r.as_matrix()),
-            p = [-0.0697802, 0.0297534, 0.159606]
-        )
-        x_depth_rgb_handeye = RigidTransform([[    0.999996 ,   0.0017759,   0.00227238 ,   0.0149411],
-                                                [-0.00178663 ,    0.999987 ,  0.00473038, -0.000151408],
-                                                [-0.00226395 , -0.00473442 ,    0.999986, -8.65525e-05],
-                                                [       0  ,          0 ,           0,           1]])
-        x_ee_camera = x_ee_rgb @ x_depth_rgb_handeye
-    else:
-        rpy = np.array([2.0540215, -0.31583718, -89.24078404]) * np.pi / 180.
-        x_ee_camera = RigidTransform(RollPitchYaw(rpy[0], rpy[1], rpy[2]), [-0.0730357, 0.032904, 0.151341])
+        # Front camera
+        x_front_rgb = RigidTransform(np.loadtxt("/home/real2sim/calibrations/12_6_calibrations/front_calibration_12_6_daniilidis.txt"))
 
-    # connect handeye camera pcd source
-    handeye_camera_pose_source = builder.AddSystem(CameraPoseInWorldSource(x_ee_camera, handeye=True))
-    eef_pose = builder.AddSystem(
-        ExtractPose(
-            plant.GetBodyByName("iiwa_link_7").index()
-        )
-    )
-    builder.Connect(
-        station.GetOutputPort("body_poses"),
-        eef_pose.get_input_port(),
-    )
-    builder.Connect(
-        eef_pose.get_output_port(),
-        handeye_camera_pose_source.GetInputPort("X_EE")
-    )
+        # Back Right camera
+        x_back_right_rgb = RigidTransform(np.loadtxt("/home/real2sim/calibrations/12_6_calibrations/back_right_calibration_12_5_daniilidis.txt"))
 
-    builder.Connect(
-        handeye_camera_pose_source.GetOutputPort("X_WC"),
-        handeye_camera_pcd.GetInputPort("camera_pose"),
-    )
-    
-    if use_hardware:
-        # from camera calibation
-        r = R.from_quat([-0.698783, 0.0166324, 0.715101, 0.00750221])
-        x_world_rgb_camera0 = RigidTransform(
-            R=RotationMatrix(r.as_matrix()),
-            p = [0.864887, -0.00272318, 0.311732]
-        )
-        x_depth_rgb_camera0 = RigidTransform([[0.999986, -0.000127587,   0.00531376,     0.015102],
-                                            [0.000116105,     0.999998 ,  0.00216102,  6.44158e-05],
-                                            [-0.00531402,  -0.00216038,     0.999984, -0.000426644],
-                                            [          0,            0,            0,            1]])
-        x_world_camera0 = x_world_rgb_camera0 @ x_depth_rgb_camera0
+        # Back Left camera
+        x_back_left_rgb = RigidTransform(np.loadtxt("/home/real2sim/calibrations/12_6_calibrations/back_left_calibration_12_5_daniilidis.txt"))
+
+        # rgb calibration to depth calibration (from realsense specs)
+        # Front camera
+        x_depth_rgb_front = RigidTransform([[0.999986,      -0.000127587,   0.00531376, 0.015102],
+                                            [0.000116105,   0.999998,       0.00216102, 6.44158e-05],
+                                            [-0.00531402,   -0.00216038,    0.999984,   -0.000426644],
+                                            [0,             0,              0,          1]])
+        x_front_camera = x_front_rgb @ x_depth_rgb_front
+
+        # Back Right camera
+        x_depth_rgb_back_right = RigidTransform([[0.999968,  -0.00700185,   0.00399879,     0.015085],
+                                                [ 0.00701494,      0.99997,  -0.00326805,  -2.1265e-05],
+                                                [-0.00397579,   0.00329599,     0.999987, -0.000455872],
+                                                [          0,            0,            0,            1]])
+        x_back_right_camera = x_back_right_rgb @ x_depth_rgb_back_right
+
+        # Back Left camera
+        x_depth_rgb_back_left = RigidTransform([[0.999998, -0.000191981,  -0.00215977,    0.0150991],
+                                                [0.000214442,     0.999946,    0.0104041,  7.71731e-05],
+                                                [0.00215765,   -0.0104046,     0.999944, -0.000317806],
+                                                [          0,            0,            0,            1]])
+        x_back_left_camera = x_back_left_rgb @ x_depth_rgb_back_left
     else:
-        rpy = np.array([-110, 0, 90]) * np.pi / 180.
-        x_world_camera0 = RigidTransform(RollPitchYaw(rpy[0], rpy[1], rpy[2]), [1.2, 0.0, 0.54])
+        # Front camera
+        x_front_camera = RigidTransform(np.loadtxt("/home/real2sim/calibrations/12_6_calibrations/front_calibration_12_6_daniilidis.txt"))
+
+        # Back Right camera
+        x_back_right_camera = RigidTransform(np.loadtxt("/home/real2sim/calibrations/12_6_calibrations/back_right_calibration_12_5_daniilidis.txt"))
+
+        # Back Left camera
+        x_back_left_camera = RigidTransform(np.loadtxt("/home/real2sim/calibrations/12_6_calibrations/back_left_calibration_12_5_daniilidis.txt"))
 
     # connect stationary camera pcd source
-    camera0_pose_source = builder.AddSystem(CameraPoseInWorldSource(x_world_camera0, handeye=False))
+    camera0_pose_source = builder.AddSystem(CameraPoseInWorldSource(x_front_camera, handeye=False))
+    camera1_pose_source = builder.AddSystem(CameraPoseInWorldSource(x_back_right_camera, handeye=False))
+    camera2_pose_source = builder.AddSystem(CameraPoseInWorldSource(x_back_left_camera, handeye=False))
 
     builder.Connect(
         camera0_pose_source.GetOutputPort("X_WC"),
         camera0_pcd.GetInputPort("camera_pose"),
+    )
+
+    builder.Connect(
+        camera1_pose_source.GetOutputPort("X_WC"),
+        camera1_pcd.GetInputPort("camera_pose"),
+    )
+
+    builder.Connect(
+        camera2_pose_source.GetOutputPort("X_WC"),
+        camera2_pcd.GetInputPort("camera_pose"),
     )
 
     controller_plant = station.GetSubsystemByName(
@@ -286,8 +292,9 @@ def start_scenario(
     planner = builder.AddSystem(TwoGraspPlanner(
             plant=plant, 
             controller_plant=controller_plant,
-            eef_body_index=plant.GetBodyByName("iiwa_link_7").index(),
-            X_EefC=x_ee_camera,
+            X_WC0=x_front_camera,
+            X_WC1=x_back_left_camera,
+            X_WC2=x_back_right_camera,
             scanning_traj_dir=scanning_traj_dir,
             meshcat=meshcat,
             dirstr=dirstr,
@@ -374,12 +381,16 @@ def start_scenario(
         )
 
     builder.Connect(
-        handeye_camera_pcd.GetOutputPort("point_cloud"),
-        planner.GetInputPort("cloud_handeye"),
+        camera0_pcd.GetOutputPort("point_cloud"),
+        planner.GetInputPort("cloud_front"),
     )
     builder.Connect(
-        camera0_pcd.GetOutputPort("point_cloud"),
-        planner.GetInputPort("cloud_stationary"),
+        camera1_pcd.GetOutputPort("point_cloud"),
+        planner.GetInputPort("cloud_back_left"),
+    )
+    builder.Connect(
+        camera2_pcd.GetOutputPort("point_cloud"),
+        planner.GetInputPort("cloud_back_right"),
     )
     builder.Connect(
         station.GetOutputPort("body_poses"),
