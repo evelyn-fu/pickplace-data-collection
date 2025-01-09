@@ -187,13 +187,13 @@ def start_scenario(
         camera0 = station.GetSubsystemByName("rgbd_sensor_camera0")
         camera1 = station.GetSubsystemByName("rgbd_sensor_camera1")
         camera2 = station.GetSubsystemByName("rgbd_sensor_camera2")
-        K = camera0.color_camera_info().intrinsic_matrix()
+        K = camera0.default_color_render_camera().core().intrinsics().intrinsic_matrix()
         if save_imgs:
             np.savetxt(dirstr+"/cam_K.txt", K)
 
-        camera0_pcd = builder.AddSystem(DepthImageToPointCloud(camera0.depth_camera_info()))
-        camera1_pcd = builder.AddSystem(DepthImageToPointCloud(camera1.depth_camera_info()))
-        camera2_pcd = builder.AddSystem(DepthImageToPointCloud(camera2.depth_camera_info()))
+        camera0_pcd = builder.AddSystem(DepthImageToPointCloud(camera0.default_depth_render_camera().core().intrinsics()))
+        camera1_pcd = builder.AddSystem(DepthImageToPointCloud(camera1.default_depth_render_camera().core().intrinsics()))
+        camera2_pcd = builder.AddSystem(DepthImageToPointCloud(camera2.default_depth_render_camera().core().intrinsics()))
         builder.Connect(station.GetOutputPort("camera0.depth_image"), camera0_pcd.GetInputPort("depth_image"))
         builder.Connect(station.GetOutputPort("camera1.depth_image"), camera1_pcd.GetInputPort("depth_image"))
         builder.Connect(station.GetOutputPort("camera2.depth_image"), camera2_pcd.GetInputPort("depth_image"))
@@ -418,7 +418,7 @@ def start_scenario(
                 continue
             frame_id = inspector.GetFrameId(geometry_id)
             body = plant.GetBodyFromFrameId(frame_id)
-            if body.model_instance() == plant.GetModelInstanceByName("mustard_bottle"):
+            if body.model_instance() == plant.GetModelInstanceByName("spatula"):
                 properties.UpdateProperty("label", "id", RenderLabel(0)) # Make mustard label 0
             elif body.model_instance() == plant.GetModelInstanceByName("wsg"):
                 properties.UpdateProperty("label", "id", RenderLabel(1)) # Make gripper label 1

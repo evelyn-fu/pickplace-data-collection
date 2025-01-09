@@ -155,6 +155,18 @@ class GraspListener():
         X_GW = (X_G @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0])).inverse()
         pcd_G_np = X_GW.multiply(pcd_W_np)
         dist = self.hand_collision_model.get_distance(pcd_G_np.T)
+
+        if visualize:
+            manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd_G_np.T))
+            manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
+
+            gripper_xyzs = self.hand_collision_model.to_pcd()
+            gripper_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(gripper_xyzs)).voxel_down_sample(0.005)
+            gripper_cloud.paint_uniform_color([1.0, 0.0, 0.0])
+
+            viz_geoms = [manipuland_cloud, gripper_cloud]
+            o3d.visualization.draw_plotly(viz_geoms)
+
         return dist.min()
 
     def check_collision_batch(self, pcd, X_G, visualize=False):
@@ -205,7 +217,24 @@ class GraspListener():
             # o3d.visualization.draw_geometries(viz_geoms)
 
             # If the value crossed for the first time, return.
-            if (last_signed_distance > thre) and (signed_distance < thre):
+            if signed_distance < thre:
+                if X_WGlast is None:
+                    # input("no bueno, always crosses")
+                    return last_signed_distance, X_WGlast
+
+                # manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
+                # manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
+
+                # gripper_xyzs = self.hand_collision_model.to_pcd()
+                # gripper_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(gripper_xyzs)).voxel_down_sample(0.005).transform((X_WGlast @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0])).GetAsMatrix4())
+                # gripper_cloud.paint_uniform_color([1.0, 0.0, 0.0])
+                
+                # gripper_next_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(gripper_xyzs)).voxel_down_sample(0.005).transform((X_WGnew @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0])).GetAsMatrix4())
+                # gripper_next_cloud.paint_uniform_color([0.0, 1.0, 0.0])
+
+                # viz_geoms = [manipuland_cloud, gripper_cloud, gripper_next_cloud]
+                # o3d.visualization.draw_plotly(viz_geoms)
+                # input(f"Found grasp {last_signed_distance}, {signed_distance}, {X_WGlast}")
                 return last_signed_distance, X_WGlast
             
             # Record the computed values using last z.
@@ -218,6 +247,7 @@ class GraspListener():
         # viz_geoms = [manipuland_cloud]
         # viz_geoms.append(self.make_gripper_line_set(X_WG.GetAsMatrix4(), [0.0, 1.0, 0.0]))
         # o3d.visualization.draw_geometries(viz_geoms)
+        # input("no bueno, never crosses")
         return np.nan, None
 
     def find_minimum_distance_batch(self, pcds, X_WGs):
@@ -676,7 +706,7 @@ class GraspListener():
         return line_set
 
     def compute_candidate_grasps(
-        self, pcd: PointCloud, pcd_w_floor: PointCloud, candidate_num=30, num_samples=20, random_seed=5
+        self, pcd: PointCloud, pcd_with_background: PointCloud, candidate_num=30, num_samples=20, random_seed=5
     ):
         """
         Compute sorted candidate grasps.
@@ -788,7 +818,7 @@ class GraspListener():
                                 
                                 # Compute a new transform that minimizes y-direction distance without penetration
                                 # Use pcd with floor to avoid gripper smashing into the table
-                                distance, X_WPnew = self.find_minimum_distance(pcd_w_floor, X_WPnew)
+                                distance, X_WPnew = self.find_minimum_distance(pcd_with_background, X_WPnew)
                                 # If distance cannot be found, go over to the next iteration
                                 if np.isnan(distance):
                                     continue
@@ -809,8 +839,16 @@ class GraspListener():
                                         )
                                     )
                                     if VISUALIZE_EACH:
-                                        print(candidate_costs[-1])
-                                        o3d.visualization.draw_geometries([manipuland_cloud, self.make_triad_line_set(X_WP.GetAsMatrix4(), [0.0, 1.0, 0.0]), self.make_gripper_line_set(X_WPnew.GetAsMatrix4(), [1.0, 0.0, 0.0])])
+                                        # print(candidate_costs[-1])
+                                        manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
+                                        manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
+
+                                        gripper_xyzs = self.hand_collision_model.to_pcd()
+                                        gripper_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(gripper_xyzs)).voxel_down_sample(0.005).transform((X_WPnew @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0])).GetAsMatrix4())
+                                        gripper_cloud.paint_uniform_color([1.0, 0.0, 0.0])
+
+                                        viz_geoms = [manipuland_cloud, gripper_cloud]
+                                        o3d.visualization.draw_plotly(viz_geoms)
 
             print("sequential antipodal grasp time: {:.3f}".format(time.time() - start_time))
             if VISUALIZE_ALL:

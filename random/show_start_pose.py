@@ -34,7 +34,7 @@ builder = DiagramBuilder()
 plant, scene_graph = AddMultibodyPlantSceneGraph(builder, time_step=0.0005)
 parser = Parser(plant)
 ConfigureParser(parser)
-parser.AddModelsFromUrl("package://drake/manipulation/models/ycb/sdf/006_mustard_bottle.sdf")
+parser.AddModelsFromUrl("package://drake_models/ycb/006_mustard_bottle.sdf")
 plant.Finalize()
 
 params = MeshcatVisualizerParams()

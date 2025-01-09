@@ -55,27 +55,6 @@
         </geometry>
       </collision>
     </link>
-    <link name="hand_camera">
-      <visual name="visual">
-      <pose>0 -0.049133 -0.055 0 0 0</pose>
-        <geometry>
-          <box>
-            <size>0.146 0.0725 0.06</size>
-          </box>
-        </geometry>
-        <material>
-          <diffuse>0.5 0.5 0.5 0.3</diffuse>
-        </material>
-      </visual>
-      <collision name="collision">
-      <pose>0 -0.049133 -0.0452 0 0 0</pose>
-        <geometry>
-          <box>
-            <size>0.146 0.0725 0.06</size>
-          </box>
-        </geometry>
-      </collision>
-    </link>
     <frame name="body_frame">
       <pose relative_to="body"/>
     </frame>
@@ -152,10 +131,6 @@
     <joint name="buffer_to_body" type="fixed">
       <parent>body</parent>
       <child>buffer</child>
-    </joint>
-    <joint name="camera_to_body" type="fixed">
-      <parent>body</parent>
-      <child>hand_camera</child>
     </joint>
   </model>
 </sdf>
