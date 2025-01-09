@@ -187,13 +187,13 @@ def start_scenario(
         camera0 = station.GetSubsystemByName("rgbd_sensor_camera0")
         camera1 = station.GetSubsystemByName("rgbd_sensor_camera1")
         camera2 = station.GetSubsystemByName("rgbd_sensor_camera2")
-        K = camera0.color_camera_info().intrinsic_matrix()
+        K = camera0.default_color_render_camera().core().intrinsics().intrinsic_matrix()
         if save_imgs:
             np.savetxt(dirstr+"/cam_K.txt", K)
 
-        camera0_pcd = builder.AddSystem(DepthImageToPointCloud(camera0.depth_camera_info()))
-        camera1_pcd = builder.AddSystem(DepthImageToPointCloud(camera1.depth_camera_info()))
-        camera2_pcd = builder.AddSystem(DepthImageToPointCloud(camera2.depth_camera_info()))
+        camera0_pcd = builder.AddSystem(DepthImageToPointCloud(camera0.default_depth_render_camera().core().intrinsics()))
+        camera1_pcd = builder.AddSystem(DepthImageToPointCloud(camera1.default_depth_render_camera().core().intrinsics()))
+        camera2_pcd = builder.AddSystem(DepthImageToPointCloud(camera2.default_depth_render_camera().core().intrinsics()))
         builder.Connect(station.GetOutputPort("camera0.depth_image"), camera0_pcd.GetInputPort("depth_image"))
         builder.Connect(station.GetOutputPort("camera1.depth_image"), camera1_pcd.GetInputPort("depth_image"))
         builder.Connect(station.GetOutputPort("camera2.depth_image"), camera2_pcd.GetInputPort("depth_image"))
@@ -211,13 +211,13 @@ def start_scenario(
     if use_hardware:
         # from camera calibation
         # Front camera
-        x_front_rgb = RigidTransform(np.loadtxt("/home/real2sim/calibrations/12_6_calibrations/front_calibration_12_6_daniilidis.txt"))
+        x_front_rgb = RigidTransform(np.loadtxt("/home/evelyn/calibrations/12_9_calibrations/front.txt"))
 
         # Back Right camera
-        x_back_right_rgb = RigidTransform(np.loadtxt("/home/real2sim/calibrations/12_6_calibrations/back_right_calibration_12_5_daniilidis.txt"))
+        x_back_right_rgb = RigidTransform(np.loadtxt("/home/evelyn/calibrations/12_9_calibrations/back_right.txt"))
 
         # Back Left camera
-        x_back_left_rgb = RigidTransform(np.loadtxt("/home/real2sim/calibrations/12_6_calibrations/back_left_calibration_12_5_daniilidis.txt"))
+        x_back_left_rgb = RigidTransform(np.loadtxt("/home/evelyn/calibrations/12_9_calibrations/back_left.txt"))
 
         # rgb calibration to depth calibration (from realsense specs)
         # Front camera
@@ -242,13 +242,13 @@ def start_scenario(
         x_back_left_camera = x_back_left_rgb @ x_depth_rgb_back_left
     else:
         # Front camera
-        x_front_camera = RigidTransform(np.loadtxt("/home/real2sim/calibrations/12_6_calibrations/front_calibration_12_6_daniilidis.txt"))
+        x_front_camera = RigidTransform(np.loadtxt("/home/evelyn/calibrations/12_9_calibrations/front.txt"))
 
         # Back Right camera
-        x_back_right_camera = RigidTransform(np.loadtxt("/home/real2sim/calibrations/12_6_calibrations/back_right_calibration_12_5_daniilidis.txt"))
+        x_back_right_camera = RigidTransform(np.loadtxt("/home/evelyn/calibrations/12_9_calibrations/back_right.txt"))
 
         # Back Left camera
-        x_back_left_camera = RigidTransform(np.loadtxt("/home/real2sim/calibrations/12_6_calibrations/back_left_calibration_12_5_daniilidis.txt"))
+        x_back_left_camera = RigidTransform(np.loadtxt("/home/evelyn/calibrations/12_9_calibrations/back_left.txt"))
 
     # connect stationary camera pcd source
     camera0_pose_source = builder.AddSystem(CameraPoseInWorldSource(x_front_camera, handeye=False))
@@ -418,7 +418,7 @@ def start_scenario(
                 continue
             frame_id = inspector.GetFrameId(geometry_id)
             body = plant.GetBodyFromFrameId(frame_id)
-            if body.model_instance() == plant.GetModelInstanceByName("mustard_bottle"):
+            if body.model_instance() == plant.GetModelInstanceByName("spatula"):
                 properties.UpdateProperty("label", "id", RenderLabel(0)) # Make mustard label 0
             elif body.model_instance() == plant.GetModelInstanceByName("wsg"):
                 properties.UpdateProperty("label", "id", RenderLabel(1)) # Make gripper label 1
@@ -516,8 +516,8 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    gripper_model_path = "file://./home/real2sim/src/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_buffer.sdf"
-    # gripper_model_path = "file://./home/evelyn/sources/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_buffer.sdf"
+    # gripper_model_path = "file://./home/real2sim/src/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_buffer.sdf"
+    gripper_model_path = "file://./home/evelyn/sources/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_buffer.sdf"
     if args.use_hardware:
         gripper_model_path = "file://./home/real2sim/src/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_buffer.sdf"
 

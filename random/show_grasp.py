@@ -38,7 +38,7 @@ ConfigureParser(parser)
 parser.AddModelsFromUrl("file://./home/real2sim/src/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_buffer.sdf")
 # parser.AddModelsFromUrl("file://./home/real2sim/src/Real2SimObjectManipulation/models/box_2.sdf")
 parser.AddModelsFromUrl("file://./home/real2sim/src/Real2SimObjectManipulation/models/box.sdf")
-# parser.AddModelsFromUrl("package://drake/manipulation/models/ycb/sdf/006_mustard_bottle.sdf")
+# parser.AddModelsFromUrl("package://drake_models/ycb/006_mustard_bottle.sdf")
 plant.Finalize()
 
 params = MeshcatVisualizerParams()

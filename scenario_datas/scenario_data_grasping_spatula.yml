@@ -3,19 +3,19 @@ directives:
     name: iiwa
     file: package://drake_models/iiwa_description/sdf/iiwa7_no_collision.sdf
     default_joint_positions:
-        iiwa_joint_1: [-1.57]
+        iiwa_joint_1: [0.0]
         iiwa_joint_2: [0.4]
         iiwa_joint_3: [0]
         iiwa_joint_4: [-1.2]
         iiwa_joint_5: [0]
         iiwa_joint_6: [1.0]
-        iiwa_joint_7: [0]
+        iiwa_joint_7: [-1.57]
 - add_weld:
     parent: world
     child: iiwa::iiwa_link_0
 - add_model:
     name: wsg
-    file: file://./home/evelyn/sources/Real2SimObjectManipulation/models/schunk_wsg_50_with_tip.sdf
+    file: file://./home/evelyn/sources/Real2SimObjectManipulation/models/schunk_wsg_50_long_grippers_w_buffer.sdf
 - add_weld:
     parent: iiwa::iiwa_link_7
     child: wsg::body
@@ -28,13 +28,13 @@ directives:
     file: file://./home/evelyn/sources/Real2SimObjectManipulation/models/spatula.sdf
     default_free_body_pose:
         spatula:
-            translation: [0, -0.6, 0.08]
+            translation: [0.4, -0.05, 0.07]
             rotation: !Rpy { deg: [-25, 0, 0] }
 - add_frame:
     name: table_origin
     X_PF:
         base_frame: world
-        rotation: !Rpy { deg: [0.0, 0.0, 0.0 ]}
+        rotation: !Rpy { deg: [0.0, 0.0, 90.0 ]}
         translation: [0, 0, 0]
 
 - add_model:
@@ -50,7 +50,7 @@ directives:
     X_PF:
         base_frame: world
         rotation: !Rpy { deg: [0.0, 0.0, 0.0]}
-        translation: [0, -0.5, 0]
+        translation: [0.4, 0.0, -0.01]
 
 - add_model:
     name: box
@@ -70,82 +70,90 @@ directives:
     name: camera1_staging
     X_PF:
         base_frame: world
-        rotation: !Rpy { deg: [0, 0, 135.0]}
+        rotation: !Rpy { deg: [0, 0, 0.0]}
 
 - add_frame:
     name: camera2_staging
     X_PF:
         base_frame: world
-        rotation: !Rpy { deg: [0, 0, 45.0]}
+        rotation: !Rpy { deg: [0, 0, 0.0]}
 
 - add_frame:
     name: camera0_origin
     X_PF:
         base_frame: camera0_staging
-        rotation: !Rpy { deg: [-110, 0, 0]}
-        translation: [0, -1.1, 0.5]
-
-- add_model:
-    name: camera_main
-    file: package://manipulation/camera_box.sdf
-
-- add_weld:
-    parent: camera0_origin
-    child: camera_main::base
+        rotation: !Rpy { deg: [-150.41716671,   -0.75769095,   87.53658761]}
+        translation: [1.00934486, -0.016392,    1.12910952]
 
 - add_frame:
     name: camera1_origin
     X_PF:
         base_frame: camera1_staging
-        rotation: !Rpy { deg: [-100.0, 0, 90.0]}
-        translation: [.3, 0.3, .2]
-
-- add_model:
-    name: camera_1
-    file: package://manipulation/camera_box.sdf
-
-- add_weld:
-    parent: camera1_origin
-    child: camera_1::base
+        rotation: !Rpy { deg: [-105.89065076 ,   2.40034078,  -44.0119526 ]}
+        translation: [-0.09845756, -0.94152223,  0.39240136]
 
 - add_frame:
     name: camera2_origin
     X_PF:
         base_frame: camera2_staging
-        rotation: !Rpy { deg: [-100.0, 0, 90.0]}
-        translation: [.3, -0.3, .2]
+        rotation: !Rpy { deg: [-103.41127808 ,  -3.87555329, -149.41966751]}
+        translation: [-0.05829717,  1.00599635,  0.45108295]
 
 - add_model:
-    name: camera_2
+    name: camera_front
+    file: package://manipulation/camera_box.sdf
+
+- add_model:
+    name: camera_right
+    file: package://manipulation/camera_box.sdf
+
+- add_model:
+    name: camera_left
     file: package://manipulation/camera_box.sdf
 
 - add_weld:
+    parent: camera0_origin
+    child: camera_front::base
+
+- add_weld:
+    parent: camera1_origin
+    child: camera_right::base
+
+- add_weld:
     parent: camera2_origin
-    child: camera_2::base
+    child: camera_left::base
 
 cameras:
-    main_camera:
+    camera_front:
         name: camera0
         depth: True
+        width: 1920
+        height: 1440
         X_PB:
-            base_frame: camera_main::base
-    camera_1:
+            base_frame: camera_front::base
+    camera_right:
         name: camera1
         depth: True
+        width: 1920
+        height: 1440
         X_PB:
-            base_frame: camera_1::base
-    camera_2:
+            base_frame: camera_right::base
+    camera_left:
         name: camera2
         depth: True
+        width: 1920
+        height: 1440
         X_PB:
-            base_frame: camera_2::base
+            base_frame: camera_left::base
 
 plant_config:
     time_step: 0.001
     contact_model: "hydroelastic"
-    discrete_contact_solver: "sap"
+    discrete_contact_approximation: "sap"
 
 model_drivers:
     iiwa: !IiwaDriver
+      lcm_bus: "default"
       hand_model_name: wsg
+      control_mode: position_only
     wsg: !SchunkWsgDriver {}

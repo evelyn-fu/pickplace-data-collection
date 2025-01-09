@@ -161,6 +161,43 @@ class SignedDensityField(object):
         mlab.axes()
         mlab.show()
 
+    def to_pcd(sdf):
+        """
+        Convert the nonpositive regions of a Signed Density Field (SDF) to a point cloud.
+
+        Args:
+            sdf (SignedDensityField): An instance of the SignedDensityField class.
+
+        Returns:
+            numpy.ndarray: A point cloud as a Nx3 numpy array.
+        """
+        # Find grid indices where SDF value is <= 0
+        nonpositive_indices = np.argwhere(sdf.data <= 0)
+
+        # Convert indices to world coordinates
+        points = sdf.origin + sdf.delta * nonpositive_indices
+
+        return points
+
+    def to_pcd_torch(sdf):
+        """
+        Torch version to convert the nonpositive regions of a Signed Density Field (SDF) to a point cloud.
+
+        Args:
+            sdf (SignedDensityField): An instance of the SignedDensityField class.
+
+        Returns:
+            torch.Tensor: A point cloud as a Nx3 tensor.
+        """
+        # Find grid indices where SDF value is <= 0
+        nonpositive_mask = sdf.data_torch <= 0
+        nonpositive_indices = torch.nonzero(nonpositive_mask, as_tuple=False)
+
+        # Convert indices to world coordinates
+        points = sdf.origin_torch + sdf.delta_torch * nonpositive_indices.float()
+
+        return points
+
     @classmethod
     def from_sdf(cls, sdf_file):
 

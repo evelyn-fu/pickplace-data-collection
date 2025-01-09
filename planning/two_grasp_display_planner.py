@@ -276,7 +276,8 @@ class TwoGraspPlanner(LeafSystem):
         LeafSystem.__init__(self)
 
         # For grasp planner
-        self.current_pcd = PointCloud(0)
+        self.current_scene_pcd = PointCloud(0)
+        self.current_manipuland_pcd = PointCloud(0)
         self.DeclareAbstractInputPort("cloud_front", AbstractValue.Make(PointCloud(0)))
         self.DeclareAbstractInputPort("cloud_back_right", AbstractValue.Make(PointCloud(0)))
         self.DeclareAbstractInputPort("cloud_back_left", AbstractValue.Make(PointCloud(0)))
@@ -419,7 +420,7 @@ class TwoGraspPlanner(LeafSystem):
                 self.GoHome(context, state)
             return
         if mode == PlannerState.START:
-            traj_q= context.get_abstract_state(
+            traj_q = context.get_abstract_state(
                 int(self._current_joint_traj_idx)
             ).get_value().trajectory
             start_time = context.get_abstract_state(
@@ -436,9 +437,10 @@ class TwoGraspPlanner(LeafSystem):
             return
         if mode == PlannerState.SCANNING1:
             self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP1)
+            input("Next: Pregrasp 1 (gcs)") # pause for debugging
             return
         if mode == PlannerState.GO_TO_PREGRASP1:
-            traj_q= context.get_abstract_state(
+            traj_q = context.get_abstract_state(
                 int(self._current_joint_traj_idx)
             ).get_value().trajectory
             start_time = context.get_abstract_state(
@@ -453,12 +455,13 @@ class TwoGraspPlanner(LeafSystem):
                     int(self._pick_mode_index)
                 ).set_value(PickState.PREPICK)
                 self.PlanPickAndDisplay(context, state)
+                input("Next: Pick 1 (IK + toppra)") # pause for debugging
             return
         if mode == PlannerState.GRASP1:
             self.UpdateInGrasp(context, state, PlannerState.GO_HOME1)
             return
         if mode == PlannerState.GO_HOME1:
-            traj_q= context.get_abstract_state(
+            traj_q = context.get_abstract_state(
                 int(self._current_joint_traj_idx)
             ).get_value().trajectory
             start_time = context.get_abstract_state(
@@ -475,9 +478,10 @@ class TwoGraspPlanner(LeafSystem):
             return
         if mode == PlannerState.SCANNING2:
             self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP2)
+            input("Next: Pregrasp 2 (gcs)") # pause for debugging
             return
         if mode == PlannerState.GO_TO_PREGRASP2:
-            traj_q= context.get_abstract_state(
+            traj_q = context.get_abstract_state(
                 int(self._current_joint_traj_idx)
             ).get_value().trajectory
             start_time = context.get_abstract_state(
@@ -492,12 +496,13 @@ class TwoGraspPlanner(LeafSystem):
                     int(self._pick_mode_index)
                 ).set_value(PickState.PREPICK)
                 self.PlanPickAndDisplay(context, state)
+                input("Next: Pick 1 (IK + toppra)") # pause for debugging
             return
         if mode == PlannerState.GRASP2:
             self.UpdateInGrasp(context, state, PlannerState.GO_HOME2)
             return
         if mode == PlannerState.GO_HOME2:
-            traj_q= context.get_abstract_state(
+            traj_q = context.get_abstract_state(
                 int(self._current_joint_traj_idx)
             ).get_value().trajectory
             start_time = context.get_abstract_state(
@@ -531,6 +536,7 @@ class TwoGraspPlanner(LeafSystem):
                     int(self._pick_mode_index)
                 ).set_value(PickState.MOVE)
                 self.DoDisplay(context, state)
+                input("Next: Display (IK + toppra)") # pause for debugging
         if pick_mode == PickState.MOVE:
             if context.get_time() > traj_q.end_time() + start_time:
                 state.get_mutable_abstract_state(
@@ -543,6 +549,7 @@ class TwoGraspPlanner(LeafSystem):
                     int(self._pick_mode_index)
                 ).set_value(PickState.POSTPLACE)
                 self.DoPlace(context, state)
+                input("Next: Place (IK + toppra)") # pause for debugging
         if pick_mode == PickState.POSTPLACE:
             if context.get_time() > traj_q.end_time() + start_time:
                 state.get_mutable_abstract_state(
@@ -552,22 +559,23 @@ class TwoGraspPlanner(LeafSystem):
                     int(self._mode_index)
                 ).set_value(after_grasp_state)
                 self.GoHome(context, state)
+                input("Next: Postgrasp (gcs)") # pause for debugging
         return
 
 
     def GetPointCloud(self, context, state, after_scan_state):
         cloud0 = self.GetInputPort("cloud_front").Eval(context)
-        pcd0 = cloud0.Crop(lower_xyz=[0.23, -0.17, 0.055], upper_xyz=[0.57, 0.17, 0.27])
+        pcd0 = cloud0.Crop(lower_xyz=[0.23, -0.17, 0.07], upper_xyz=[0.57, 0.17, 0.27])
         pcd0.EstimateNormals(radius=0.1, num_closest=30)
         pcd0.FlipNormalsTowardPoint(self._X_WC0.translation())
 
         cloud1 = self.GetInputPort("cloud_back_left").Eval(context)
-        pcd1 = cloud1.Crop(lower_xyz=[0.23, -0.17, 0.055], upper_xyz=[0.57, 0.17, 0.27])
+        pcd1 = cloud1.Crop(lower_xyz=[0.23, -0.17, 0.07], upper_xyz=[0.57, 0.17, 0.27])
         pcd1.EstimateNormals(radius=0.1, num_closest=30)
         pcd1.FlipNormalsTowardPoint(self._X_WC1.translation())
 
         cloud2 = self.GetInputPort("cloud_back_right").Eval(context)
-        pcd2 = cloud2.Crop(lower_xyz=[0.23, -0.17, 0.055], upper_xyz=[0.57, 0.17, 0.27])
+        pcd2 = cloud2.Crop(lower_xyz=[0.23, -0.17, 0.07], upper_xyz=[0.57, 0.17, 0.27])
         pcd2.EstimateNormals(radius=0.1, num_closest=30)
         pcd2.FlipNormalsTowardPoint(self._X_WC2.translation())
 
@@ -582,12 +590,13 @@ class TwoGraspPlanner(LeafSystem):
         filtered_pts = np.asarray(o3d_cloud.points)[ind]
         down_sampled_pcd.resize(filtered_pts.shape[0])
         down_sampled_pcd.mutable_xyzs()[:] = filtered_pts.T
-        self.current_pcd = down_sampled_pcd
+        self.current_manipuland_pcd = down_sampled_pcd
         
         state.get_mutable_abstract_state(
             int(self._mode_index)
         ).set_value(after_scan_state)
         self.PlanToPregrasp(context, state)
+        print("pcd got")
 
         return
 
@@ -792,18 +801,18 @@ class TwoGraspPlanner(LeafSystem):
         X_GgraspGpregrasp = RigidTransform([0, 0.0, -self.pregrasp_dist])
         
         if mode == PlannerState.SCANNING1:
-            pcd_with_floor = self.current_pcd # Includes some floor on purpose
-            object_pcd = pcd_with_floor.Crop(lower_xyz=[0.23, -0.17, 0.07], upper_xyz=[0.57, 0.17, 0.27]) # just object
-            if self.pcd0:
-                self.meshcat.SetObject("cloud0", self.pcd0, point_size=0.0001, rgba=Rgba(1,0,0,1))
-            if self.pcd1:
-                self.meshcat.SetObject("cloud1", self.pcd1, point_size=0.0001, rgba=Rgba(1,1,0,1))
-            if self.pcd2:
-                self.meshcat.SetObject("cloud2", self.pcd2, point_size=0.0001, rgba=Rgba(0,1,0,1))
-            if self.pcd3:
-                self.meshcat.SetObject("cloud3", self.pcd3, point_size=0.0001, rgba=Rgba(0,0,1,1))
-            self.meshcat.SetObject("cloud", object_pcd, point_size=0.001)
-            # self.meshcat.SetObject("cloud_w_floor", pcd_with_floor, point_size=0.001, rgba=Rgba(1,1,0,1))
+            pcd_with_background = self.current_manipuland_pcd
+            object_pcd = pcd_with_background.Crop(lower_xyz=[0.23, -0.17, 0.07], upper_xyz=[0.57, 0.17, 0.27]) # just object
+            # if self.pcd0:
+            #     self.meshcat.SetObject("cloud0", self.pcd0, point_size=0.0001, rgba=Rgba(1,0,0,1))
+            # if self.pcd1:
+            #     self.meshcat.SetObject("cloud1", self.pcd1, point_size=0.0001, rgba=Rgba(1,1,0,1))
+            # if self.pcd2:
+            #     self.meshcat.SetObject("cloud2", self.pcd2, point_size=0.0001, rgba=Rgba(0,1,0,1))
+            # if self.pcd3:
+            #     self.meshcat.SetObject("cloud3", self.pcd3, point_size=0.0001, rgba=Rgba(0,0,1,1))
+            self.meshcat.SetObject("cloud", object_pcd, point_size=0.001, rgba=Rgba(1,1,0,1))
+            self.meshcat.SetObject("cloud_w_floor", pcd_with_background, point_size=0.001)
 
             pcd_points = object_pcd.xyzs().T
             principal_component, secondary_component, minor_component = compute_principal_minor_components(pcd_points)
@@ -827,7 +836,7 @@ class TwoGraspPlanner(LeafSystem):
             # Planning first grasping trajectory
             self.grasp_node.compute_candidate_grasps(
                 object_pcd,
-                pcd_with_floor,
+                pcd_with_background,
                 candidate_num=1,
                 num_samples=15,
                 random_seed=5,
@@ -873,6 +882,7 @@ class TwoGraspPlanner(LeafSystem):
                     
                 # check if configuration is in collision with scene
                 if check_configuration_has_collisions(self.models_path, com, rot, dims, q_goal1):
+                    print("grasp 1 configuration has collision with scene")
                     continue
 
                 q = self.get_input_port(self._iiwa_position_index).Eval(context)
@@ -902,6 +912,7 @@ class TwoGraspPlanner(LeafSystem):
 
                 # check if configuration is in collision with scene
                 if check_configuration_has_collisions(self.models_path, com, rot, dims, q_goal2):
+                    print("grasp 2 configuration has collision with scene")
                     continue
                 
                 self.q_pregrasp1 = q_goal1
