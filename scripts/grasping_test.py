@@ -211,13 +211,13 @@ def start_scenario(
     if use_hardware:
         # from camera calibation
         # Front camera
-        x_front_rgb = RigidTransform(np.loadtxt("/home/evelyn/calibrations/12_9_calibrations/front.txt"))
+        x_front_rgb = RigidTransform(np.loadtxt("/home/real2sim/calibrations/12_6_calibrations/front_calibration_12_6_daniilidis.txt"))
 
         # Back Right camera
-        x_back_right_rgb = RigidTransform(np.loadtxt("/home/evelyn/calibrations/12_9_calibrations/back_right.txt"))
+        x_back_right_rgb = RigidTransform(np.loadtxt("/home/real2sim/calibrations/12_6_calibrations/back_right_calibration_12_5_daniilidis.txt"))
 
         # Back Left camera
-        x_back_left_rgb = RigidTransform(np.loadtxt("/home/evelyn/calibrations/12_9_calibrations/back_left.txt"))
+        x_back_left_rgb = RigidTransform(np.loadtxt("/home/real2sim/calibrations/12_6_calibrations/back_left_calibration_12_5_daniilidis.txt"))
 
         # rgb calibration to depth calibration (from realsense specs)
         # Front camera
@@ -242,13 +242,13 @@ def start_scenario(
         x_back_left_camera = x_back_left_rgb @ x_depth_rgb_back_left
     else:
         # Front camera
-        x_front_camera = RigidTransform(np.loadtxt("/home/evelyn/calibrations/12_9_calibrations/front.txt"))
+        x_front_camera = RigidTransform(np.loadtxt("/home/real2sim/calibrations/12_6_calibrations/front_calibration_12_6_daniilidis.txt"))
 
         # Back Right camera
-        x_back_right_camera = RigidTransform(np.loadtxt("/home/evelyn/calibrations/12_9_calibrations/back_right.txt"))
+        x_back_right_camera = RigidTransform(np.loadtxt("/home/real2sim/calibrations/12_6_calibrations/back_right_calibration_12_5_daniilidis.txt"))
 
         # Back Left camera
-        x_back_left_camera = RigidTransform(np.loadtxt("/home/evelyn/calibrations/12_9_calibrations/back_left.txt"))
+        x_back_left_camera = RigidTransform(np.loadtxt("/home/real2sim/calibrations/12_6_calibrations/back_left_calibration_12_5_daniilidis.txt"))
 
     # connect stationary camera pcd source
     camera0_pose_source = builder.AddSystem(CameraPoseInWorldSource(x_front_camera, handeye=False))
@@ -516,8 +516,8 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    # gripper_model_path = "file://./home/real2sim/src/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_buffer.sdf"
-    gripper_model_path = "file://./home/evelyn/sources/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_buffer.sdf"
+    gripper_model_path = "file://./home/real2sim/src/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_buffer.sdf"
+    # gripper_model_path = "file://./home/evelyn/sources/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_buffer.sdf"
     if args.use_hardware:
         gripper_model_path = "file://./home/real2sim/src/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_buffer.sdf"
 

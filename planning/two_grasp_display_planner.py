@@ -2,7 +2,7 @@ import numpy as np
 import logging
 import pickle
 import datetime
-import random
+import time
 import open3d as o3d
 import os
 from scipy.spatial.transform import Rotation as R
@@ -564,18 +564,20 @@ class TwoGraspPlanner(LeafSystem):
 
 
     def GetPointCloud(self, context, state, after_scan_state):
+        start = time.time()
+        # Get manipuland pcd 
         cloud0 = self.GetInputPort("cloud_front").Eval(context)
-        pcd0 = cloud0.Crop(lower_xyz=[0.23, -0.17, 0.07], upper_xyz=[0.57, 0.17, 0.27])
+        pcd0 = cloud0.Crop(lower_xyz=[0.23, -0.17, 0.071], upper_xyz=[0.57, 0.17, 0.27])
         pcd0.EstimateNormals(radius=0.1, num_closest=30)
         pcd0.FlipNormalsTowardPoint(self._X_WC0.translation())
 
         cloud1 = self.GetInputPort("cloud_back_left").Eval(context)
-        pcd1 = cloud1.Crop(lower_xyz=[0.23, -0.17, 0.07], upper_xyz=[0.57, 0.17, 0.27])
+        pcd1 = cloud1.Crop(lower_xyz=[0.23, -0.17, 0.071], upper_xyz=[0.57, 0.17, 0.27])
         pcd1.EstimateNormals(radius=0.1, num_closest=30)
         pcd1.FlipNormalsTowardPoint(self._X_WC1.translation())
 
         cloud2 = self.GetInputPort("cloud_back_right").Eval(context)
-        pcd2 = cloud2.Crop(lower_xyz=[0.23, -0.17, 0.07], upper_xyz=[0.57, 0.17, 0.27])
+        pcd2 = cloud2.Crop(lower_xyz=[0.23, -0.17, 0.071], upper_xyz=[0.57, 0.17, 0.27])
         pcd2.EstimateNormals(radius=0.1, num_closest=30)
         pcd2.FlipNormalsTowardPoint(self._X_WC2.translation())
 
@@ -591,12 +593,42 @@ class TwoGraspPlanner(LeafSystem):
         down_sampled_pcd.resize(filtered_pts.shape[0])
         down_sampled_pcd.mutable_xyzs()[:] = filtered_pts.T
         self.current_manipuland_pcd = down_sampled_pcd
+        print("object pcd got in", time.time()-start, "seconds")
+
+        start =time.time()
+        # Get table pcd 
+        cloud0 = self.GetInputPort("cloud_front").Eval(context)
+        pcd0 = cloud0.Crop(lower_xyz=[0.1, -0.3, 0.0], upper_xyz=[0.7, 0.3, 0.07]).VoxelizedDownSample(voxel_size=0.01)
+        pcd0.EstimateNormals(radius=0.1, num_closest=30)
+        pcd0.FlipNormalsTowardPoint(self._X_WC0.translation())
+
+        cloud1 = self.GetInputPort("cloud_back_left").Eval(context)
+        pcd1 = cloud1.Crop(lower_xyz=[0.1, -0.3, 0.0], upper_xyz=[0.7, 0.3, 0.07]).VoxelizedDownSample(voxel_size=0.01)
+        pcd1.EstimateNormals(radius=0.1, num_closest=30)
+        pcd1.FlipNormalsTowardPoint(self._X_WC1.translation())
+
+        cloud2 = self.GetInputPort("cloud_back_right").Eval(context)
+        pcd2 = cloud2.Crop(lower_xyz=[0.1, -0.3, 0.0], upper_xyz=[0.7, 0.3, 0.07]).VoxelizedDownSample(voxel_size=0.01)
+        pcd2.EstimateNormals(radius=0.1, num_closest=30)
+        pcd2.FlipNormalsTowardPoint(self._X_WC2.translation())
+
+        merged_pcd = Concatenate([pcd0, pcd1, pcd2])
+        
+        # remove outliers
+        o3d_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(merged_pcd.xyzs().T))
+        cl, ind = o3d_cloud.remove_statistical_outlier(
+            nb_neighbors=int(merged_pcd.xyzs().shape[1] // 10), 
+            std_ratio=1.0)
+        filtered_pts = np.asarray(o3d_cloud.points)[ind]
+        merged_pcd.resize(filtered_pts.shape[0])
+        merged_pcd.mutable_xyzs()[:] = filtered_pts.T
+        self.current_scene_pcd = merged_pcd
+        print("table pcd got in", time.time()-start, "seconds")
         
         state.get_mutable_abstract_state(
             int(self._mode_index)
         ).set_value(after_scan_state)
         self.PlanToPregrasp(context, state)
-        print("pcd got")
 
         return
 
@@ -801,8 +833,6 @@ class TwoGraspPlanner(LeafSystem):
         X_GgraspGpregrasp = RigidTransform([0, 0.0, -self.pregrasp_dist])
         
         if mode == PlannerState.SCANNING1:
-            pcd_with_background = self.current_manipuland_pcd
-            object_pcd = pcd_with_background.Crop(lower_xyz=[0.23, -0.17, 0.07], upper_xyz=[0.57, 0.17, 0.27]) # just object
             # if self.pcd0:
             #     self.meshcat.SetObject("cloud0", self.pcd0, point_size=0.0001, rgba=Rgba(1,0,0,1))
             # if self.pcd1:
@@ -811,10 +841,11 @@ class TwoGraspPlanner(LeafSystem):
             #     self.meshcat.SetObject("cloud2", self.pcd2, point_size=0.0001, rgba=Rgba(0,1,0,1))
             # if self.pcd3:
             #     self.meshcat.SetObject("cloud3", self.pcd3, point_size=0.0001, rgba=Rgba(0,0,1,1))
-            self.meshcat.SetObject("cloud", object_pcd, point_size=0.001, rgba=Rgba(1,1,0,1))
-            self.meshcat.SetObject("cloud_w_floor", pcd_with_background, point_size=0.001)
+            self.meshcat.SetObject("cloud", self.current_manipuland_pcd, point_size=0.001, rgba=Rgba(1,1,0,1))
+            self.meshcat.SetObject("floor", self.current_scene_pcd, point_size=0.001)
+            pcd_with_background = Concatenate([self.current_manipuland_pcd, self.current_scene_pcd])
 
-            pcd_points = object_pcd.xyzs().T
+            pcd_points = self.current_manipuland_pcd.xyzs().T
             principal_component, secondary_component, minor_component = compute_principal_minor_components(pcd_points)
 
             # visualize axes, principal axis is z axis (blue), minor axis is x axis (red)
@@ -835,7 +866,7 @@ class TwoGraspPlanner(LeafSystem):
             
             # Planning first grasping trajectory
             self.grasp_node.compute_candidate_grasps(
-                object_pcd,
+                self.current_manipuland_pcd,
                 pcd_with_background,
                 candidate_num=1,
                 num_samples=15,
@@ -930,13 +961,20 @@ class TwoGraspPlanner(LeafSystem):
                 exit(1)
 
             X_WG = self.X_WG1
-            manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(object_pcd.xyzs().T))
+
+            manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(self.current_manipuland_pcd.xyzs().T))
             manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
-            viz_geoms = [manipuland_cloud]
-            viz_geoms.append(self.grasp_node.make_gripper_line_set(self.X_WG1, [0.0, 1.0, 0.0]))
-            viz_geoms.append(self.grasp_node.make_gripper_line_set(self.X_WG2, [1.0, 0.0, 0.0]))
-            viz_geoms.append(self.grasp_node.make_triad_line_set(RigidTransform().GetAsMatrix4()))
-            o3d.visualization.draw_geometries(viz_geoms)
+
+            gripper1_xyzs = self.grasp_node.hand_collision_model.to_pcd()
+            gripper1_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(gripper1_xyzs)).voxel_down_sample(0.005).transform((self.X_WG1 @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0]).GetAsMatrix4()))
+            gripper1_cloud.paint_uniform_color([1.0, 0.0, 0.0])
+
+            gripper2_xyzs = self.grasp_node.hand_collision_model.to_pcd()
+            gripper2_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(gripper2_xyzs)).voxel_down_sample(0.005).transform((self.X_WG2 @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0]).GetAsMatrix4()))
+            gripper2_cloud.paint_uniform_color([0.0, 1.0, 0.0])
+
+            viz_geoms = [manipuland_cloud, gripper1_cloud, gripper2_cloud]
+            o3d.visualization.draw_plotly(viz_geoms)
         else:
             X_WG = self.X_WG2
 
@@ -949,12 +987,15 @@ class TwoGraspPlanner(LeafSystem):
         state.get_mutable_abstract_state(self._grasp_X_G_index).set_value(X_WE)
 
         # # visualize grasp in o3d
-        # manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(object_pcd.xyzs().T))
+        # manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(self.current_manipuland_pcd.xyzs().T))
         # manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
-        # viz_geoms = [manipuland_cloud]
-        # viz_geoms.append(self.grasp_node.make_gripper_line_set(X_WG.GetAsMatrix4(), [0.0, 1.0, 0.0]))
-        # viz_geoms.append(self.grasp_node.make_gripper_line_set(X_WE.GetAsMatrix4(), [1.0, 0.0, 0.0]))
-        # o3d.visualization.draw_geometries(viz_geoms)
+
+        # gripper_xyzs = self.grasp_node.hand_collision_model.to_pcd()
+        # gripper_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(gripper_xyzs)).voxel_down_sample(0.005).transform((X_WG @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0])).GetAsMatrix4())
+        # gripper_cloud.paint_uniform_color([1.0, 0.0, 0.0])
+
+        # viz_geoms = [manipuland_cloud, gripper_cloud]
+        # o3d.visualization.draw_plotly(viz_geoms)
 
         return X_WE
 
@@ -1049,7 +1090,7 @@ class TwoGraspPlanner(LeafSystem):
 
     def PlanGripper(self, context, state, direction="open"):
         opened = np.array([0.107])
-        closed = np.array([0.02])
+        closed = np.array([0.00])
         current_time = context.get_time()
 
         traj_wsg_command = PiecewisePolynomial.FirstOrderHold(
@@ -1095,7 +1136,7 @@ class TwoGraspPlanner(LeafSystem):
     def CalcWsgPosition(self, context, output):
         pick_mode = context.get_abstract_state(int(self._pick_mode_index)).get_value()
         opened = np.array([0.107])
-        closed = np.array([0.02])
+        closed = np.array([0.00])
 
         traj_wsg = context.get_abstract_state(
             int(self._traj_wsg_index)
