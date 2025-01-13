@@ -46,7 +46,7 @@ def Visualizer(dirstr):
 
     # Make plant, scene graph, add body
     plant, scene_graph = AddMultibodyPlantSceneGraph(builder, time_step=0.0)
-    mustard_url = "package://drake/manipulation/models/ycb/sdf/006_mustard_bottle.sdf"
+    mustard_url = "package://drake_models/ycb/006_mustard_bottle.sdf"
     (mustard,) = Parser(plant).AddModels(url=mustard_url)
     mustard_body = plant.GetBodyByName("base_link_mustard", mustard)
     

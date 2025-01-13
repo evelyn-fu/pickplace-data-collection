@@ -3,7 +3,7 @@ directives:
     file: package://manipulation/iiwa_and_wsg.dmd.yaml
 - add_model:
     name: mustard_bottle
-    file: package://drake/manipulation/models/ycb/sdf/006_mustard_bottle.sdf
+    file: package://drake_models/ycb/006_mustard_bottle.sdf
     default_free_body_pose:
         base_link_mustard:
             translation: [0, -0.6, 0.2]

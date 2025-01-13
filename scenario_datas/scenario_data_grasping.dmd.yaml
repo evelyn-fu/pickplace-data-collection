@@ -25,7 +25,7 @@ directives:
         
 - add_model:
     name: mustard_bottle
-    file: package://drake/manipulation/models/ycb/sdf/006_mustard_bottle.sdf
+    file: package://drake_models/ycb/006_mustard_bottle.sdf
 - add_frame:
     name: mustard_origin
     X_PF:
