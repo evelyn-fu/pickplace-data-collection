@@ -1,0 +1,250 @@
+<?xml version="1.0" encoding="utf-8"?>
+<robot name="iiwa7">
+  <material name="Black">
+    <color rgba="0.0 0.0 0.0 1.0"/>
+  </material>
+  <material name="Blue">
+    <color rgba="0.0 0.0 0.8 1.0"/>
+  </material>
+  <material name="Green">
+    <color rgba="0.0 0.8 0.0 1.0"/>
+  </material>
+  <material name="Grey">
+    <color rgba="0.4 0.4 0.4 1.0"/>
+  </material>
+  <material name="Orange">
+    <color rgba="1 0.423529 0.039216 1.0"/>
+  </material>
+  <material name="Brown">
+    <color rgba="0.870588 0.811765 0.764706 1.0"/>
+  </material>
+  <material name="Red">
+    <color rgba="0.8 0.0 0.0 1.0"/>
+  </material>
+  <material name="White">
+    <color rgba="1.0 1.0 1.0 1.0"/>
+  </material>
+  <link name="iiwa_link_0">
+    <inertial>
+      <origin rpy="0 0 0" xyz="-0.1 0 0.07"/>
+      <mass value="5"/>
+      <inertia ixx="0.05" ixy="0" ixz="0" iyy="0.06" iyz="0" izz="0.03"/>
+    </inertial>
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+        <mesh filename="package://iiwa_description/meshes/iiwa7/visual/link_0.obj"/>
+      </geometry>
+      <material name="Grey"/>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="0.216759 0.207644 0.1575"/>
+      </geometry>
+      <material name="Grey"/>
+      <origin rpy="0.0 -0.0 0.0" xyz="-0.0046205 0.0 0.07875"/>
+    </collision>
+  </link>
+  <joint name="iiwa_joint_1" type="revolute">
+    <parent link="iiwa_link_0"/>
+    <child link="iiwa_link_1"/>
+    <origin rpy="0 0 0" xyz="0 0 0.15"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="300" lower="-2.96706" upper="2.96706" velocity="10"/>
+  </joint>
+  <link name="iiwa_link_1">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0 -0.03 0.12"/>
+      <mass value="3.4525"/>
+      <inertia ixx="0.02183" ixy="0" ixz="0" iyy="0.007703" iyz="-0.003887" izz="0.02083"/>
+    </inertial>
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0.0075"/>
+      <geometry>
+        <mesh filename="package://iiwa_description/meshes/iiwa7/visual/link_1.obj"/>
+      </geometry>
+      <material name="Grey"/>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="0.13596 0.182584 0.26099300000000003"/>
+      </geometry>
+      <material name="Orange"/>
+      <origin rpy="0.0 -0.0 0.0" xyz="0.0 -0.023301000000000002 0.1279965"/>
+    </collision>
+  </link>
+  <joint name="iiwa_joint_2" type="revolute">
+    <parent link="iiwa_link_1"/>
+    <child link="iiwa_link_2"/>
+    <origin rpy="1.570796   0 3.1415926535897931" xyz="0 0 0.19"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="300" lower="-2.094395" upper="2.094395" velocity="10"/>
+  </joint>
+  <link name="iiwa_link_2">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.0003 0.059 0.042"/>
+      <mass value="3.4821"/>
+      <inertia ixx="0.02076" ixy="0" ixz="-0.003626" iyy="0.02179" iyz="0" izz="0.00779"/>
+    </inertial>
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+        <mesh filename="package://iiwa_description/meshes/iiwa7/visual/link_2.obj"/>
+      </geometry>
+      <material name="Orange"/>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="0.135988 0.251998 0.18240699999999999"/>
+      </geometry>
+      <material name="Orange"/>
+      <origin rpy="0.0 -0.0 0.0" xyz="0.0 0.058001 0.023204499999999996"/>
+    </collision>
+  </link>
+  <joint name="iiwa_joint_3" type="revolute">
+    <parent link="iiwa_link_2"/>
+    <child link="iiwa_link_3"/>
+    <origin rpy="1.570796 0 3.1415926535897931" xyz="0 0.21 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="300" lower="-2.96706" upper="2.96706" velocity="10"/>
+  </joint>
+  <link name="iiwa_link_3">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0 0.03 0.13"/>
+      <mass value="4.05623"/>
+      <inertia ixx="0.03204" ixy="0" ixz="0" iyy="0.00972" iyz="0.006227" izz="0.03042"/>
+    </inertial>
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 -0.026"/>
+      <geometry>
+        <mesh filename="package://iiwa_description/meshes/iiwa7/visual/link_3.obj"/>
+      </geometry>
+      <material name="Grey"/>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="0.136 0.182593 0.29349400000000003"/>
+      </geometry>
+      <material name="Orange"/>
+      <origin rpy="0.0 -0.0 0.0" xyz="0.0 0.023296499999999998 0.11074700000000001"/>
+    </collision>
+  </link>
+  <joint name="iiwa_joint_4" type="revolute">
+    <parent link="iiwa_link_3"/>
+    <child link="iiwa_link_4"/>
+    <origin rpy="1.570796 0 0" xyz="0 0 0.19"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="300" lower="-2.094395" upper="2.094395" velocity="10"/>
+  </joint>
+  <link name="iiwa_link_4">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0 0.067 0.034"/>
+      <mass value="3.4822"/>
+      <inertia ixx="0.02178" ixy="0" ixz="0" iyy="0.02075" iyz="-0.003625" izz="0.007785"/>
+    </inertial>
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+        <mesh filename="package://iiwa_description/meshes/iiwa7/visual/link_4.obj"/>
+      </geometry>
+      <material name="Orange"/>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="0.135988 0.251998 0.18240699999999999"/>
+      </geometry>
+      <material name="Orange"/>
+      <origin rpy="0.0 -0.0 0.0" xyz="0.0 0.058001 0.023204499999999996"/>
+    </collision>
+  </link>
+  <joint name="iiwa_joint_5" type="revolute">
+    <parent link="iiwa_link_4"/>
+    <child link="iiwa_link_5"/>
+    <origin rpy="-1.570796 3.1415926535897931 0" xyz="0 0.21 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="300" lower="-2.96706" upper="2.96706" velocity="10"/>
+  </joint>
+  <link name="iiwa_link_5">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.0001 0.021 0.076"/>
+      <mass value="2.1633"/>
+      <inertia ixx="0.01287" ixy="0" ixz="0" iyy="0.005708" iyz="-0.003946" izz="0.01112"/>
+    </inertial>
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 -0.026"/>
+      <geometry>
+        <mesh filename="package://iiwa_description/meshes/iiwa7/visual/link_5.obj"/>
+      </geometry>
+      <material name="Grey"/>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="0.136 0.16702 0.276793"/>
+      </geometry>
+      <material name="Orange"/>
+      <origin rpy="0.0 -0.0 0.0" xyz="0.0 0.015509999999999996 0.1023965"/>
+    </collision>
+  </link>
+  <joint name="iiwa_joint_6" type="revolute">
+    <parent link="iiwa_link_5"/>
+    <child link="iiwa_link_6"/>
+    <origin rpy="1.570796 0 0" xyz="0 0.06070 0.19"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="300" lower="-2.094395" upper="2.094395" velocity="10"/>
+  </joint>
+  <link name="iiwa_link_6">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0 0.0006 0.0004"/>
+      <mass value="2.3466"/>
+      <inertia ixx="0.006509" ixy="0" ixz="0" iyy="0.006259" iyz="0.00031891" izz="0.004527"/>
+    </inertial>
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+        <mesh filename="package://iiwa_description/meshes/iiwa7/visual/link_6.obj"/>
+      </geometry>
+      <material name="Orange"/>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="0.132301 0.17726 0.137409"/>
+      </geometry>
+      <material name="Orange"/>
+      <origin rpy="0.0 -0.0 0.0" xyz="1.5000000000015001e-06 0.0022699999999999942 0.0582045"/>
+    </collision>
+  </link>
+  <joint name="iiwa_joint_7" type="revolute">
+    <parent link="iiwa_link_6"/>
+    <child link="iiwa_link_7"/>
+    <origin rpy="-1.570796 3.1415926535897931 0" xyz="0 0.081 0.06070"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="300" lower="-3.054326" upper="3.054326" velocity="10"/>
+  </joint>
+  <link name="iiwa_link_7">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0 0 0.02"/>
+      <mass value="3.129"/>
+      <inertia ixx="0.01464" ixy="0.0005912" ixz="0" iyy="0.01465" iyz="0" izz="0.002872"/>
+    </inertial>
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 -0.0005"/>
+      <geometry>
+        <mesh filename="package://iiwa_description/meshes/iiwa7/visual/link_7.obj"/>
+      </geometry>
+      <material name="Grey"/>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="0.103835 0.103813 0.045000000000000005"/>
+      </geometry>
+      <material name="Grey"/>
+      <origin rpy="0.0 -0.0 0.0" xyz="1.3499999999999623e-05 3.650000000000181e-05 0.021997"/>
+    </collision>
+  </link>
+  <joint name="iiwa_joint_ee" type="fixed">
+    <parent link="iiwa_link_7"/>
+    <child link="iiwa_link_ee"/>
+    <origin rpy="0 0 0" xyz="0 0 0.045"/>
+  </joint>
+  <link name="iiwa_link_ee"/>
+</robot>

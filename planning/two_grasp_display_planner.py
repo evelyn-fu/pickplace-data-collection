@@ -16,6 +16,7 @@ from planning.trajectories import (
 from planning.trajectory_sources import TrajectoryWithTimingInformationSource
 from planning.gcs import plan_unconstrained_gcs_path_start_to_goal
 from planning.inverse_kinematics import solve_global_inverse_kinematics
+from planning.rrt import collision_checker_and_cspace, rrt_planning
 from iiwa_setup_dataclasses.trajectories import TrajectoryWithTimingInformation
 from iiwa_setup_dataclasses.bspline_trajectory import CompositeBezierCurveTrajectoryAttributes
 from pydrake.systems.framework import LeafSystem
@@ -47,6 +48,13 @@ from pydrake.geometry import Rgba
 
 from manipulation.meshcat_utils import AddMeshcatTriad
 from enum import Enum
+
+import sys
+# append path to pycuci to system path
+PYCUCI_ROOT = os.path.dirname(__file__) + "/../../" + "cuciv0" 
+sys.path.append(PYCUCI_ROOT+'/bazel-bin/cuci/src/pybind/pycuci')
+import pycuci as cci
+PETE_ASSETS =  os.path.dirname(__file__)+"/../pete_assets/"
 
 def get_seeded_region(models_path, com, rot, dims, q_nominal):
     # Get bounding box of object
@@ -145,6 +153,61 @@ def get_regions(models_path, com, rot, dims):
         return sets
     else:
         print("No solvers available")
+    
+def get_regions_cci(waypoints, voxels, voxel_radius, verbose=False):
+    '''
+    Inputs:
+        waypoints: List[np.ndarray(7,1)], list of precomputed waypoints for a
+        trajectory in configuration space around which we want to compute regions
+        voxels: np.ndarray(3, n), 3xn array of occupied 3D voxels in space
+        voxel_radius: radius of voxels in voxels
+    Returns:
+        regions: List[HPolyhedron]
+    '''
+    cci_parser = cci.URDFParser()
+    cci_parser.register_package("adaptive_decomp", PETE_ASSETS+"assets")
+    cci_parser.register_package("iiwa_description", PETE_ASSETS+"assets/iiwa")
+    cci_parser.register_package("wsg_description", PETE_ASSETS+"assets/wsg_description")
+    cci_parser.register_package("tri_finray_gripper", PETE_ASSETS+"assets/tri_finray_gripper")
+    cci_parser.parse_directives(PETE_ASSETS+"assets/directives/iiwa7_on_table.yaml")
+    cci_plant = cci_parser.build_plant()
+    cci_mplant = cci_plant.getMinimalPlant()
+    cci_domain = cci.HPolyhedron()
+    cci_domain.MakeBox(cci_plant.getPositionLowerLimits(), 
+                    cci_plant.getPositionUpperLimits())
+    cci_objects = {
+        'cci_plant' : cci_plant,
+        'cci_mplant' : cci_mplant,
+        'cci_domain' : cci_domain
+    }
+
+    cci_fei_opts = cci.FastEdgeInflationOptions()
+    cci_fei_opts.num_particles = 10000
+    cci_fei_opts.max_hyperplanes_per_iteration = 20
+    cci_fei_opts.epsilon = 0.005
+    cci_fei_opts.delta = 0.005
+    cci_fei_opts.max_iterations = 30
+    cci_fei_opts.mixing_steps = 60
+    cci_fei_opts.configurataon_margin = 0.01
+    cci_fei_opts.verbose = verbose
+
+
+    edge_inflator = cci.CudaEdgeInflator(cci_objects['cci_mplant'], 
+                                        cci_objects['cci_plant'].getRobotGeometryIds(), 
+                                        cci_fei_opts, 
+                                        cci_objects['cci_domain'])
+
+    regions = []
+    for i in range(len(waypoints)-1):
+        cci_region : cci.HPolyhedron = edge_inflator.inflateEdge(waypoints[i], 
+                                                                waypoints[i+1], 
+                                                                cci.Voxels(voxels), 
+                                                                voxel_radius, 
+                                                                verbose=verbose)
+
+        regions.append(HPolyhedron(cci_region.A(), cci_region.b()))
+    
+    return regions
 
 def save_regions_pkl(sets, models_path, dirstr, name=None):
     pkl_path = dirstr + f'/{name}.pkl'
@@ -679,6 +742,10 @@ class TwoGraspPlanner(LeafSystem):
         # Set gcs regions or generate if not given or not ignoring obstacles/loading trajectories
         if mode == PlannerState.SCANNING1:
             if not self.use_offline_regions1 and not self.no_obstacles and not loaded_traj:
+                collision_checker, cspace = collision_checker_and_cspace(self.models_path, self.object_com, self.object_rot, self.object_dims)
+                rrt_path = rrt_planning(q, q_goal, cspace, collision_checker)
+                get_regions_cci(rrt_path, self.current_pcd, 0.005)
+
                 q_in_regions = False
                 q_goal_in_regions = False
 

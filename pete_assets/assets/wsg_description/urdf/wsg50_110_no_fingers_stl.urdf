@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="wsg50">
+    <!-- Materials -->
+    <material name="wsg50_Gray">
+      <color rgba="0.7 0.7 0.7 1.0"/>
+    </material>
+    <material name="wsg50_DarkGray">
+      <color rgba="0.3 0.3 0.3 1.0"/>
+    </material>
+
+    <!-- Gripper Body -->
+    <link name="wsg50_gripper_link">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://wsg_description/meshes/wsg50_110.stl"
+            scale="0.001 0.001 0.001"/>
+        </geometry>
+        <material name="wsg50_Gray"/>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://wsg_description/meshes/wsg50_110.stl"
+            scale="0.001 0.001 0.001"/>
+        </geometry>
+      </collision> 
+    </link> 
+</robot>

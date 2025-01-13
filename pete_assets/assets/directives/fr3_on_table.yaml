@@ -1,0 +1,71 @@
+directives:
+
+# Add kinova gen 3
+- add_model:
+    name: fr3
+    file: package://franka_description/urdfs/fr3_franka_hand_box_collisions.urdf
+    #file: package://franka_description/urdfs/fr3_franka_hand_sphere_collisions.urdf
+
+- add_weld:
+    parent: world
+    child: fr3::base
+
+# - add_model:
+#     name: table
+#     file: package://adaptive_decomp/models/table/table_wide.urdf
+
+# - add_frame:
+#     name: table_origin
+#     X_PF:
+#       base_frame: world
+#       translation: [0.4, 0.0, 0.0]
+#       rotation: !Rpy { deg: [0., 0., 00]}
+
+# - add_weld:
+#     parent: table_origin
+#     child: table::table_body
+
+# - add_frame:
+#     name: cam_tripod_origin_0
+#     X_PF:
+#       base_frame: world
+#       translation: [0.6, 0.66, 0.0]
+#       rotation: !Rpy { deg: [0., 0., 00]}
+
+# - add_model: #1link #0 joints #8 col geoms
+#     name: cam_tripod_0
+#     file: package://adaptive_decomp/camera_and_tripod_red.urdf
+
+# - add_weld: #1 joint
+#     parent: cam_tripod_origin_0
+#     child: cam_tripod_0::camera_tripod_link
+
+# - add_frame: #1link #1joint 
+#     name: cam_tripod_origin_1
+#     X_PF:
+#       base_frame: world
+#       translation: [0.54, -1.04, 0.0]
+#       rotation: !Rpy { deg: [0., 0., 00]}
+
+# - add_model: #1 link #8 geoms
+#     name: cam_tripod_1
+#     file: package://adaptive_decomp/camera_and_tripod_red.urdf
+
+# - add_weld: #1joint
+#     parent: cam_tripod_origin_1
+#     child: cam_tripod_1::camera_tripod_link
+
+# - add_frame:
+#     name: wall
+#     X_PF:
+#       base_frame: world
+#       translation: [-.5, 0, 0.0]
+#       rotation: !Rpy { deg: [0., 0., 00]}
+
+# - add_model:
+#     name: box_to_protect_pete
+#     file: package://adaptive_decomp/box.urdf
+
+# - add_weld:
+#     parent: wall
+#     child: box_to_protect_pete::box_link    

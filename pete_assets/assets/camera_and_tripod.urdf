@@ -1,0 +1,53 @@
+<?xml version="1.0"?>
+<robot name="camera_and_tripod">
+  <link name="camera_tripod_link">
+    <collision name="cam_tri_sph_1">
+      <origin xyz="0 0 0.0625" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.0625"/>
+      </geometry>
+    </collision>
+    <collision name="cam_tri_sph_2">
+      <origin xyz="0 0 0.1875" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.0625"/>
+      </geometry>
+    </collision>
+    <collision name="cam_tri_sph_3">
+      <origin xyz="0 0 0.3125" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.0625"/>
+      </geometry>
+    </collision>
+    <collision name="cam_tri_sph_4">
+      <origin xyz="0 0 0.4375" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.0625"/>
+      </geometry>
+    </collision>
+    <collision name="cam_tri_sph_5">
+      <origin xyz="0 0 0.5625" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.0625"/>
+      </geometry>
+    </collision>
+    <collision name="cam_tri_sph_6">
+      <origin xyz="0 0 0.6875" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.0625"/>
+      </geometry>
+    </collision>
+    <collision name="cam_tri_sph_7">
+      <origin xyz="0 0 0.8125" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.0625"/>
+      </geometry>
+    </collision>
+    <collision name="cam_tri_sph_8">
+      <origin xyz="0 0 0.9375" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.0625"/>
+      </geometry>
+    </collision>
+  </link>
+</robot>

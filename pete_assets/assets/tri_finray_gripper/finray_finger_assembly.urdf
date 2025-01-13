@@ -1,0 +1,120 @@
+<?xml version="1.0"?>
+<robot name="tri_finray_gripper">
+    <!-- Material definitions -->
+    <material name="black">
+        <color rgba="0.0 0.0 0.0 1.0"/>
+    </material>
+    <material name="white">
+        <color rgba="1.0 1.0 1.0 1.0"/>
+    </material>
+    <material name="blue">
+        <color rgba="0.1 0.1 0.8 1.0"/>
+    </material>
+    <material name="gray">
+        <color rgba="0.5 0.5 0.5 1.0"/>
+    </material>
+
+    <!-- Base Link -->
+    <link name="base_link">
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.01 0.01 0.01"/>
+            </geometry>
+            <material name="black"/>
+        </visual>
+    </link>
+
+    <!-- Left Finger Holder -->
+    <link name="finger_holder_left">
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://tri_finray_gripper/meshes/wsg50_mount - finger_holder_left.stl" scale="0.001 0.001 0.001"/>
+            </geometry>
+            <material name="gray"/>
+        </visual>
+        <collision>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://tri_finray_gripper/meshes/wsg50_mount - finger_holder_left.stl" scale="0.001 0.001 0.001"/>
+            </geometry>
+        </collision>
+    </link>
+
+    <!-- Right Finger Holder -->
+    <link name="finger_holder_right">
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://tri_finray_gripper/meshes/wsg50_mount - finger_holder_right.stl" scale="0.001 0.001 0.001"/>
+            </geometry>
+            <material name="gray"/>
+        </visual>
+        <collision>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://tri_finray_gripper/meshes/wsg50_mount - finger_holder_right.stl" scale="0.001 0.001 0.001"/>
+            </geometry>
+        </collision>
+    </link>
+
+    <!-- Soft Gripper Finger Left -->
+    <link name="soft_finger_left">
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://tri_finray_gripper/meshes/soft_gripper_finger.stl" scale="0.001 0.001 0.001"/>
+            </geometry>
+            <material name="blue"/>
+        </visual>
+        <collision>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://tri_finray_gripper/meshes/soft_gripper_finger.stl" scale="0.001 0.001 0.001"/>
+            </geometry>
+        </collision>
+    </link>
+
+    <!-- Soft Gripper Finger Right -->
+    <link name="soft_finger_right">
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://tri_finray_gripper/meshes/soft_gripper_finger.stl" scale="0.001 0.001 0.001"/>
+            </geometry>
+            <material name="blue"/>
+        </visual>
+        <collision>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://tri_finray_gripper/meshes/soft_gripper_finger.stl" scale="0.001 0.001 0.001"/>
+            </geometry>
+        </collision>
+    </link>
+
+    <!-- Joint Connections -->
+    <joint name="base_to_left_holder" type="fixed">
+        <parent link="base_link"/>
+        <child link="finger_holder_left"/>
+        <origin xyz="-0.03 0.08 0" rpy="0 0 0"/>
+    </joint>
+
+    <joint name="base_to_right_holder" type="fixed">
+        <parent link="base_link"/>
+        <child link="finger_holder_right"/>
+        <origin xyz="0.03 0.08 0" rpy="0 0 0"/>
+    </joint>
+
+    <joint name="left_holder_to_finger" type="fixed">
+        <parent link="finger_holder_left"/>
+        <child link="soft_finger_left"/>
+        <origin xyz="0.0 -0.1 0.012" rpy="-1.57 3.14 0"/>
+    </joint>
+
+    <joint name="right_holder_to_finger" type="fixed">
+        <parent link="finger_holder_right"/>
+        <child link="soft_finger_right"/>
+        <origin xyz="0.0 -0.1 -0.012" rpy="-1.57 0 0"/>
+    </joint>
+</robot>

@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<robot name="camera_box_small">
+  <link name="camera_box_link">
+    <collision name="cam_box">
+      <origin xyz="0.0 0.0 0.23" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.3 0.3 0.46"/>
+      </geometry>
+    </collision>
+  </link>
+</robot>
