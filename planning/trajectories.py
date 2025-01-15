@@ -229,8 +229,6 @@ def MakePickAndDisplayJointPositionsTrajectory(
             elif name == "postpick":
                 positions2.append(q_next)
             elif name == "preplace" or name == "place_start":
-                if name == "preplace":
-                    q_preplace = q_next # save for gcs from display
                 positions4.append(q_next)
             elif name == "place_end" or name == "postplace":
                 if place_flipped:
@@ -241,8 +239,12 @@ def MakePickAndDisplayJointPositionsTrajectory(
                 else:
                     positions5 = list(positions1[1:].__reversed__())
 
+    q_display_center = positions3[0]
+    q_preplace = positions4[0]
     sample_times2 = [t - sample_times2[0] for t in sample_times2]
     sample_times3 = [t - sample_times3[0] for t in sample_times3]
+    sample_times4 = [t - sample_times4[0] for t in sample_times4]
+    sample_times5 = [t - sample_times5[0] for t in sample_times5]
     
     t1 = PiecewisePolynomial.FirstOrderHold(sample_times1, np.array(positions1).T)
     t2 = PiecewisePolynomial.FirstOrderHold(sample_times2, np.array(positions2).T)

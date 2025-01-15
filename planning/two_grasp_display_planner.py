@@ -706,7 +706,7 @@ class TwoGraspPlanner(LeafSystem):
             return
         if mode == PlannerState.SCANNING1:
             self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP1)
-            input("Next: Pregrasp 1 (gcs)") # pause for debugging
+            input("Next: Pregrasp 1 (scs)") # pause for debugging
             return
         if mode == PlannerState.GO_TO_PREGRASP1:
             traj_q = context.get_abstract_state(
@@ -722,9 +722,9 @@ class TwoGraspPlanner(LeafSystem):
                 # Update pick + display state
                 state.get_mutable_abstract_state(
                     int(self._pick_mode_index)
-                ).set_value(PickState.CLOSING)
+                ).set_value(PickState.PREPICK)
                 self.PlanPickAndDisplay(context, state)
-                # input("Next: Pick 1 (IK + toppra)") # pause for debugging
+                input("Next: Pick 1 (IK + toppra)") # pause for debugging
             return
         if mode == PlannerState.GRASP1:
             self.UpdateInGrasp(context, state, PlannerState.GO_HOME1)
@@ -747,7 +747,7 @@ class TwoGraspPlanner(LeafSystem):
             return
         if mode == PlannerState.SCANNING2:
             self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP2)
-            input("Next: Pregrasp 2 (gcs)") # pause for debugging
+            input("Next: Pregrasp 2 (scs)") # pause for debugging
             return
         if mode == PlannerState.GO_TO_PREGRASP2:
             traj_q = context.get_abstract_state(
@@ -763,9 +763,9 @@ class TwoGraspPlanner(LeafSystem):
                 # Update pick + display state
                 state.get_mutable_abstract_state(
                     int(self._pick_mode_index)
-                ).set_value(PickState.CLOSING)
+                ).set_value(PickState.PREPICK)
                 self.PlanPickAndDisplay(context, state)
-                # input("Next: Pick 2 (IK + toppra)") # pause for debugging
+                input("Next: Pick 2 (IK + toppra)") # pause for debugging
             return
         if mode == PlannerState.GRASP2:
             self.UpdateInGrasp(context, state, PlannerState.GO_HOME2)
@@ -844,14 +844,9 @@ class TwoGraspPlanner(LeafSystem):
             if context.get_time() > self._gripper_traj_end_time:
                 state.get_mutable_abstract_state(
                     int(self._pick_mode_index)
-                ).set_value(PickState.IDLE)
-                # self.DoPlace(context, state)
-                # input("Next: Place (IK + toppra)") # pause for debugging
-                state.get_mutable_abstract_state(
-                    int(self._mode_index)
-                ).set_value(after_grasp_state)
-                self.GoHome(context, state)
-                input("Next: Postgrasp (gcs)") # pause for debugging
+                ).set_value(PickState.POSTPLACE)
+                self.DoPlace(context, state)
+                input("Next: Place (IK + toppra)") # pause for debugging
         if pick_mode == PickState.POSTPLACE:
             if context.get_time() > traj_q.end_time() + start_time:
                 state.get_mutable_abstract_state(
@@ -861,7 +856,7 @@ class TwoGraspPlanner(LeafSystem):
                     int(self._mode_index)
                 ).set_value(after_grasp_state)
                 self.GoHome(context, state)
-                input("Next: Postgrasp (gcs)") # pause for debugging
+                input("Next: Postgrasp (scs)") # pause for debugging
         return
 
 
@@ -1224,8 +1219,8 @@ class TwoGraspPlanner(LeafSystem):
 
                 X_WG1 = grasp_pairs[i][0]
                 X_WG2 = grasp_pairs[i][1]
-                X_WPregrasp1 = (RigidTransform(X_WG1) @ X_GE) #@ X_GgraspGpregrasp
-                X_WPregrasp2 = (RigidTransform(X_WG2) @ X_GE) #@ X_GgraspGpregrasp
+                X_WPregrasp1 = (RigidTransform(X_WG1) @ X_GE) @ X_GgraspGpregrasp
+                X_WPregrasp2 = (RigidTransform(X_WG2) @ X_GE) @ X_GgraspGpregrasp
 
                 # Check that IK passes
                 # q_goal1, _ = sample_goal_drm(
@@ -1263,10 +1258,10 @@ class TwoGraspPlanner(LeafSystem):
                 if q_goal1 is None:
                     continue
                     
-                # # check if configuration is in collision with scene
-                # if check_configuration_has_collisions(self.models_path, com, rot, dims, q_goal1):
-                #     print("grasp 1 configuration has collision with scene")
-                #     continue
+                # check if configuration is in collision with scene
+                if check_configuration_has_collisions(self.models_path, com, rot, dims, q_goal1):
+                    print("grasp 1 configuration has collision with scene")
+                    continue
 
                 q_goal2 = solve_global_inverse_kinematics(
                     plant=self._iiwa_controller_plant,
@@ -1304,10 +1299,10 @@ class TwoGraspPlanner(LeafSystem):
                 if q_goal2 is None:
                     continue
 
-                # # check if configuration is in collision with scene
-                # if check_configuration_has_collisions(self.models_path, com, rot, dims, q_goal2):
-                #     print("grasp 2 configuration has collision with scene")
-                #     continue
+                # check if configuration is in collision with scene
+                if check_configuration_has_collisions(self.models_path, com, rot, dims, q_goal2):
+                    print("grasp 2 configuration has collision with scene")
+                    continue
                 
                 self.q_pregrasp1 = q_goal1
                 self.q_pregrasp2 = q_goal2
@@ -1381,23 +1376,23 @@ class TwoGraspPlanner(LeafSystem):
         q = self.get_input_port(self._iiwa_position_index).Eval(context)
         traj_q1, traj_q2, traj_q3, traj_q4, traj_q5, self.q_display_center, self.q_preplace = MakePickAndDisplayJointPositionsTrajectory(X_G, times, self._iiwa_controller_plant, q, self.q_pregrasp1, place_flipped, 8, joint_limits=self.joint_limits)
         
-        # toppra_traj_pick = reparameterize_with_toppra(
-        #     trajectory=traj_q1,
-        #     plant=self._iiwa_controller_plant,
-        #     velocity_limits=self.velocity_limits,
-        #     acceleration_limits=self.acceleration_limits,
-        #     num_grid_points=100,
-        #     is_pl=True,
-        # )
+        toppra_traj_pick = reparameterize_with_toppra(
+            trajectory=traj_q1,
+            plant=self._iiwa_controller_plant,
+            velocity_limits=self.velocity_limits,
+            acceleration_limits=self.acceleration_limits,
+            num_grid_points=100,
+            is_pl=True,
+        )
 
-        # # start pick traj
-        # current_time = context.get_time()
-        # state.get_mutable_abstract_state(self._current_joint_traj_idx).set_value(
-        #     TrajectoryWithTimingInformation(
-        #         trajectory=toppra_traj_pick,
-        #         start_time_s=current_time,
-        #     )
-        # )
+        # start pick traj
+        current_time = context.get_time()
+        state.get_mutable_abstract_state(self._current_joint_traj_idx).set_value(
+            TrajectoryWithTimingInformation(
+                trajectory=toppra_traj_pick,
+                start_time_s=current_time,
+            )
+        )
 
         # Store the display traj for later
         state.get_mutable_abstract_state(self._to_postpick_traj_index).set_value(
