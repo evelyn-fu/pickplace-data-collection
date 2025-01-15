@@ -78,7 +78,15 @@ def MakePickAndDisplayGripperFrames(X_G, gripper_length, pregrasp_dist, place_fl
 
     return X_G, times
 
-def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q, q_prepick, place_flipped=False, max_display_frames=6):
+def MakePickAndDisplayJointPositionsTrajectory(
+        X_G, 
+        times, 
+        plant, 
+        q, 
+        q_prepick, 
+        place_flipped=False, 
+        max_display_frames=6,
+        joint_limits=None):
     """
     Constructs a gripper position trajectory from the plan "sketch".
     Returns three piecewise polynomial trajectories. One for before grasp, one for during, one for after.
@@ -98,18 +106,36 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q, q_prepick, 
     positions2 = []
     sample_times3 = []
     positions3 = []
+    sample_times4 = []
+    positions4 = []
+    sample_times5 = []
+    positions5 = []
     q_prev = q
+    q_display_center = None
+    q_preplace = None
     for name in [
+        #### Traj 1 Start ###
         "prepick",
         "pick_start",
+        #### Traj 1 End ###
+        #### Traj 2 Start ###
         "pick_end",
         "postpick",
+        #### Traj 2 End ###
+        # plan with gcs between postpick and display
+        #### Traj 3 Start ###
         "display_traj",
-        "preplace",
+        #### Traj 3 End ###
+        # plan with gcs between display and preplace
+        #### Traj 4 Start ###
+        "preplace", 
         "place_start",
+        #### Traj 4 End ###
+        #### Traj 5 Start ###
         "place_end",
         "postplace",
         "postpostplace"
+        #### Traj 5 End ###
     ]:
         if name == "display_traj":
             center_found = False
@@ -122,6 +148,7 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q, q_prepick, 
                     position_tolerance=0.0,
                     orientation_tolerance=0.0,
                     gripper_frame_name="iiwa_link_7",
+                    joint_limits=joint_limits
                 )
                 if q_display_center is not None:
                     # construct trajectory of rotating 7th joint
@@ -131,12 +158,12 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q, q_prepick, 
                     for i in range(len(q7s)):
                         q_temp = q_display_center.copy()
                         q_temp[6] = q7s[i]
-                        positions2.append(q_temp)
+                        positions3.append(q_temp)
                         
                         if i == 0:
-                            sample_times2.append((sample_times2[-1] if len(sample_times2) != 0 else 0) + times[name][0])
+                            sample_times3.append((sample_times3[-1] if len(sample_times3) != 0 else 0) + times[name][0])
                         else:
-                            sample_times2.append((sample_times2[-1] if len(sample_times2) != 0 else 0) + times[name][1])
+                            sample_times3.append((sample_times3[-1] if len(sample_times3) != 0 else 0) + times[name][1])
 
                     center_found = True
                     q_prev = q_temp
@@ -149,10 +176,12 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q, q_prepick, 
             
             if name == "prepick" or name == "pick_start":
                 sample_times1.append((sample_times1[-1] if len(sample_times1) != 0 else 0) + times[name])
-            elif name == "place_end" or name == "postplace" or name == "postpostplace":
-                sample_times3.append((sample_times3[-1] if len(sample_times3) != 0 else 0) + times[name])
-            else:
+            elif name == "pick_end" or name == "postpick":
                 sample_times2.append((sample_times2[-1] if len(sample_times2) != 0 else 0) + times[name])
+            elif name == "preplace" or name == "place_start":
+                sample_times4.append((sample_times4[-1] if len(sample_times4) != 0 else 0) + times[name])
+            elif name == "place_end" or name == "postplace" or name == "postpostplace":
+                sample_times5.append((sample_times5[-1] if len(sample_times5) != 0 else 0) + times[name])
 
             if name == "postpostplace":
                 positions3.append(q_prepick)
@@ -165,6 +194,7 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q, q_prepick, 
                 position_tolerance=0.0,
                 orientation_tolerance=0.0,
                 gripper_frame_name="iiwa_link_7",
+                joint_limits=joint_limits
             )
             if q_next is None:
                 print("IK failed at", name)
@@ -178,6 +208,7 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q, q_prepick, 
                         position_tolerance=0.0,
                         orientation_tolerance=0.0,
                         gripper_frame_name="iiwa_link_7",
+                        joint_limits=joint_limits
                     )
                     attempts += 1
 
@@ -193,13 +224,22 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q, q_prepick, 
                 positions1.append(q_prepick)
             elif name == "pick_start":
                 positions1.append(q_next)
+            elif name == "pick_end":
+                positions2.append(positions1[-1])
+            elif name == "postpick":
+                positions2.append(q_next)
+            elif name == "preplace" or name == "place_start":
+                if name == "preplace":
+                    q_preplace = q_next # save for gcs from display
+                positions4.append(q_next)
             elif name == "place_end" or name == "postplace":
                 if place_flipped:
-                    positions3.append(q_next)
+                    if name == "place_end":
+                        positions5.append(positions4[-1])
+                    else:
+                        positions5.append(q_next)
                 else:
-                    positions3 = list(positions1[1:].__reversed__())
-            else:
-                positions2.append(q_next)
+                    positions5 = list(positions1[1:].__reversed__())
 
     sample_times2 = [t - sample_times2[0] for t in sample_times2]
     sample_times3 = [t - sample_times3[0] for t in sample_times3]
@@ -207,4 +247,6 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q, q_prepick, 
     t1 = PiecewisePolynomial.FirstOrderHold(sample_times1, np.array(positions1).T)
     t2 = PiecewisePolynomial.FirstOrderHold(sample_times2, np.array(positions2).T)
     t3 = PiecewisePolynomial.FirstOrderHold(sample_times3, np.array(positions3).T)
-    return t1, t2, t3
+    t4 = PiecewisePolynomial.FirstOrderHold(sample_times4, np.array(positions4).T)
+    t5 = PiecewisePolynomial.FirstOrderHold(sample_times5, np.array(positions5).T)
+    return t1, t2, t3, t4, t5, q_display_center, q_preplace

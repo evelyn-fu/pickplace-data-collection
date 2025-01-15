@@ -56,7 +56,7 @@
           <drake:mesh_resolution_hint>0.005</drake:mesh_resolution_hint>
           <drake:compliant_hydroelastic/>
           <drake:hydroelastic_modulus>1e8</drake:hydroelastic_modulus>
-          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:hunt_crossley_dissipation>0.01</drake:hunt_crossley_dissipation>
           <drake:mu_dynamic>1.0</drake:mu_dynamic>
         </drake:proximity_properties>
       </collision>
@@ -70,7 +70,7 @@
           <drake:mesh_resolution_hint>0.005</drake:mesh_resolution_hint>
           <drake:compliant_hydroelastic/>
           <drake:hydroelastic_modulus>1e8</drake:hydroelastic_modulus>
-          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:hunt_crossley_dissipation>0.01</drake:hunt_crossley_dissipation>
           <drake:mu_dynamic>1.0</drake:mu_dynamic>
         </drake:proximity_properties>
       </collision>
@@ -86,7 +86,7 @@
           <drake:mesh_resolution_hint>0.005</drake:mesh_resolution_hint>
           <drake:compliant_hydroelastic/>
           <drake:hydroelastic_modulus>1e8</drake:hydroelastic_modulus>
-          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:hunt_crossley_dissipation>0.01</drake:hunt_crossley_dissipation>
           <drake:mu_dynamic>1.0</drake:mu_dynamic>
         </drake:proximity_properties>
       </collision>

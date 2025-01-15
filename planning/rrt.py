@@ -4,7 +4,7 @@ import numpy as np
 from pydrake.planning import (RobotDiagramBuilder,
                               SceneGraphCollisionChecker)
 
-def collision_checker_and_joint_limits(models_path, com, rot, dims):
+def get_collision_checker(models_path, com, rot, dims):
     # Get bounding box of object
     rpy = rot.ToRollPitchYaw().vector()
     bounding_box_urdf = """<?xml version="1.0"?>
@@ -36,15 +36,7 @@ def collision_checker_and_joint_limits(models_path, com, rot, dims):
     params["model"] = builder.Build()
     checker = SceneGraphCollisionChecker(**params)
 
-    # Construct configuration space for IIWA.
-    nq = 7
-    joint_limits = np.zeros((nq, 2))
-    for i in range(nq):
-        joint = plant.GetJointByName("iiwa_joint_%i" % (i + 1))
-        joint_limits[i, 0] = joint.position_lower_limits()
-        joint_limits[i, 1] = joint.position_upper_limits()
-
-    return checker, joint_limits
+    return checker
 
 class TreeNode:
     def __init__(self, value, cost_to, parent=None):
@@ -202,7 +194,7 @@ class RRT_tools:
                 smoothed_path = smoothed_path[:one + 1] + smoothed_path[two:]
         return smoothed_path
     
-def rrt_planning(q_start, q_goal, joint_limits, collision_checker, max_iterations=2000, prob_sample_q_goal=0.05):
+def rrt_planning(q_start, q_goal, joint_limits, collision_checker, max_iterations=100, max_restarts=None, prob_sample_q_goal=0.05):
     """
     Input:
         problem (IiwaProblem): instance of a utility class
@@ -216,21 +208,28 @@ def rrt_planning(q_start, q_goal, joint_limits, collision_checker, max_iteration
     rrt_tools = RRT_tools(q_start, q_goal, joint_limits, collision_checker)
     
     path = None
-    for i in range(max_iterations):
-        q_sample = rrt_tools.sample_node_in_configuration_space()
-        r = uniform(0, 1)
-        if r < prob_sample_q_goal:
-            q_sample = q_goal
-        n_near = rrt_tools.find_nearest_node_in_RRT_graph(q_sample)
-
-        intermediate_qs = list(rrt_tools.calc_intermediate_qs_wo_collision(n_near.value, q_sample))
-        last_node = n_near
-        for q in intermediate_qs:
-            last_node = rrt_tools.grow_rrt_tree(last_node, q)
-        
-        if rrt_tools.node_reaches_goal(last_node):
-            path = rrt_tools.backup_path_from_node(last_node)
+    if max_restarts is None:
+        max_restarts = 1000
+    for restart in range(max_restarts):
+        print("Restart", restart)
+        if path != None:
             break
+        for i in range(max_iterations):
+            q_sample = rrt_tools.sample_node_in_configuration_space()
+            r = uniform(0, 1)
+            if r < prob_sample_q_goal:
+                q_sample = q_goal
+            n_near = rrt_tools.find_nearest_node_in_RRT_graph(q_sample)
+
+            intermediate_qs = list(rrt_tools.calc_intermediate_qs_wo_collision(n_near.value, q_sample))
+            last_node = n_near
+            for q in intermediate_qs:
+                last_node = rrt_tools.grow_rrt_tree(last_node, q)
+            
+            if rrt_tools.node_reaches_goal(last_node):
+                path = rrt_tools.backup_path_from_node(last_node)
+                print("rrt iters", i)
+                break
     
     if path is None:
         print("no path found")

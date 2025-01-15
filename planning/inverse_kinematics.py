@@ -20,6 +20,7 @@ def solve_global_inverse_kinematics(
     position_tolerance: float,
     orientation_tolerance: float,
     gripper_frame_name: str = "body",
+    joint_limits = None
 ) -> Optional[np.ndarray]:
     """Computes global IK.
 
@@ -65,6 +66,14 @@ def solve_global_inverse_kinematics(
 
     prog = ik.prog()
     prog.SetInitialGuess(q_variables, initial_guess)
+    if joint_limits is not None: 
+        # Set the joint limits to be a little less than the actual joint limits
+        # to prevent q from being at the edge of cspace
+        prog.AddBoundingBoxConstraint(
+            joint_limits[:,0] + 0.02*np.ones(7), 
+            joint_limits[:,1] - 0.02*np.ones(7), 
+            q_variables
+        )
 
     result = Solve(prog)
     # if not result.is_success():
