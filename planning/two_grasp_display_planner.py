@@ -15,7 +15,7 @@ from planning.trajectories import (
 )
 from planning.trajectory_sources import TrajectoryWithTimingInformationSource
 from planning.gcs import plan_unconstrained_gcs_path_start_to_goal
-from planning.inverse_kinematics import solve_global_inverse_kinematics
+from planning.inverse_kinematics import solve_global_inverse_kinematics, solve_ik_problem_pete
 from planning.rrt import get_collision_checker, rrt_planning
 from iiwa_setup_dataclasses.trajectories import TrajectoryWithTimingInformation
 from iiwa_setup_dataclasses.bspline_trajectory import CompositeBezierCurveTrajectoryAttributes
@@ -43,7 +43,16 @@ from pydrake.planning import (RobotDiagramBuilder,
                               SceneGraphCollisionChecker)
 from pydrake.solvers import MosekSolver, GurobiSolver
 from pydrake.geometry.optimization import IrisOptions, IrisInConfigurationSpace
-from pydrake.all import IrisZo, IrisZoOptions, Hyperellipsoid, HPolyhedron
+from pydrake.all import (
+    IrisZo, 
+    IrisZoOptions, 
+    Hyperellipsoid, 
+    HPolyhedron,
+    MultibodyPlant,
+    Context,
+    LoadModelDirectives,
+    ProcessModelDirectives
+)
 from pydrake.geometry import Rgba
 
 from manipulation.meshcat_utils import AddMeshcatTriad
@@ -51,10 +60,16 @@ from enum import Enum
 
 import sys
 # append path to pycuci to system path
+MMT_GCS_ROOT = os.path.abspath(os.path.join(__file__ ,"../../../mmt_gcs/"))
 PYCUCI_ROOT = os.path.dirname(__file__) + "/../../" + "cuciv0" 
+ONLINE_VOXEL_RADIUS = 0.005
 sys.path.append(PYCUCI_ROOT+'/bazel-bin/cuci/src/pybind/pycuci')
 import pycuci as cci
 PETE_ASSETS =  os.path.dirname(__file__)+"/../pete_assets/"
+
+from mmt_gcs.planning.mintime_scs import MintimeSCSWithPathFixing
+from mmt_gcs.planning.corridor_planning_utils import CCICollisionChecker, CollisionCheckerBase
+from mmt_gcs.planning.region_generation import CCI_inflate_edges_given_pwl_path
 
 def get_seeded_region(models_path, com, rot, dims, q_nominal):
     # Get bounding box of object
@@ -208,6 +223,175 @@ def get_regions_cci(waypoints, voxels, voxel_radius, verbose=False):
         regions.append(HPolyhedron(cci_region.A(), cci_region.b()))
     
     return regions
+
+def get_cci_edge_inflator(verbose=False):
+    cci_parser = cci.URDFParser()
+    cci_parser.register_package("adaptive_decomp", PETE_ASSETS+"assets")
+    cci_parser.register_package("iiwa_description", PETE_ASSETS+"assets/iiwa")
+    cci_parser.register_package("wsg_description", PETE_ASSETS+"assets/wsg_description")
+    cci_parser.register_package("tri_finray_gripper", PETE_ASSETS+"assets/tri_finray_gripper")
+    cci_parser.parse_directives(PETE_ASSETS+"assets/directives/iiwa7_on_table.yaml")
+    cci_plant = cci_parser.build_plant()
+    cci_mplant = cci_plant.getMinimalPlant()
+    cci_domain = cci.HPolyhedron()
+    cci_domain.MakeBox(cci_plant.getPositionLowerLimits(), 
+                    cci_plant.getPositionUpperLimits())
+    cci_objects = {
+        'cci_plant' : cci_plant,
+        'cci_mplant' : cci_mplant,
+        'cci_domain' : cci_domain
+    }
+
+    cci_fei_opts = cci.FastEdgeInflationOptions()
+    cci_fei_opts.num_particles = 10000
+    cci_fei_opts.max_hyperplanes_per_iteration = 20
+    cci_fei_opts.epsilon = 0.005
+    cci_fei_opts.delta = 0.005
+    cci_fei_opts.max_iterations = 30
+    cci_fei_opts.mixing_steps = 60
+    cci_fei_opts.configurataon_margin = 0.01
+    cci_fei_opts.verbose = verbose
+
+
+    edge_inflator = cci.CudaEdgeInflator(cci_objects['cci_mplant'], 
+                                        cci_objects['cci_plant'].getRobotGeometryIds(), 
+                                        cci_fei_opts, 
+                                        cci_objects['cci_domain'])
+
+    return edge_inflator, cci_objects
+
+def make_iiwa_plant():
+    directives_file = PETE_ASSETS+'assets/directives/iiwa7_on_table.yaml'
+    builder = RobotDiagramBuilder()
+    plant = builder.plant()
+    scene_graph = builder.scene_graph()
+    parser = builder.parser()
+
+    parser.package_map().Add("adaptive_decomp", PETE_ASSETS+"assets")
+    parser.package_map().Add("iiwa_description", PETE_ASSETS+"assets/iiwa")
+    parser.package_map().Add("wsg_description", PETE_ASSETS+"assets/wsg_description")
+    parser.package_map().Add("tri_finray_gripper", PETE_ASSETS+"assets/tri_finray_gripper")
+
+    directives = LoadModelDirectives(directives_file)
+    models = ProcessModelDirectives(directives, plant, parser)
+    plant.Finalize()
+
+    diagram = builder.Build()
+    diagram_context = diagram.CreateDefaultContext()
+    plant_context = plant.GetMyContextFromRoot(diagram_context)
+    diagram.ForcedPublish(diagram_context)
+
+    return plant, plant_context
+
+def sample_goal_drm(
+        goal_pose: RigidTransform, 
+        current_config,
+        plant: MultibodyPlant,
+        plant_context: Context,
+        drm_planner : cci.DrmPlanner,
+        domain : HPolyhedron,
+        checker : CollisionCheckerBase,
+        num_configs_to_try : int = 10,
+        search_cutoff_distance : float = 0.5,
+        ):
+
+    close_configs = drm_planner.GetClosestNonCollidingConfigurationsByPose(goal_pose.GetAsMatrix4(), 
+                                                                    num_configs_to_try, 
+                                                                    search_cutoff_distance)
+    close_configs_array = np.array(close_configs)
+    delta = close_configs_array - current_config
+    sorted = close_configs_array[np.argsort(np.linalg.norm(delta,axis =1))]
+
+    for c in sorted[:2]:
+        goal_config = solve_ik_problem_pete(goal_pose, 
+                        plant, 
+                        plant_context,
+                        c,
+                        domain = domain, 
+                        tol = 0.005, 
+                        collision_free=True)
+        
+        if goal_config is None:
+            print("[sample_goal_drm] IK failed")
+        elif not checker.CheckConfigsCollisionFree(goal_config.reshape(-1,1))[0]:
+            print("[sample_goal_biased] IK solution in collision")
+            goal_config = None
+        else:
+            break
+
+        attempts = 0
+        while goal_config is None and attempts < 10:
+            print("trying global inverse kinematics with new initial guess randomized around c")
+            goal_config = solve_ik_problem_pete(goal_pose, 
+                            plant, 
+                            plant_context,
+                            c + np.random.normal(0, np.pi/4, 7),
+                            domain = domain, 
+                            tol = 0.005, 
+                            collision_free=True)
+            if goal_config is None:
+                print("[sample_goal_drm] IK failed")
+            elif not checker.CheckConfigsCollisionFree(goal_config.reshape(-1,1))[0]:
+                print("[sample_goal_biased] IK solution in collision")
+                goal_config = None
+            attempts += 1
+        
+        if goal_config is not None:
+            break
+    
+    return goal_config, goal_pose
+
+def drm_planner(cci_obj, vox=None):
+    drm_pl_opts = cci.DrmPlannerOptions()
+    drm_pl_opts.max_number_planning_attempts = 50
+    drm_pl_opts.try_shortcutting = True
+    drm_pl_opts.online_edge_step_size = 0.005
+
+    drm_planner = cci.DrmPlanner(cci_obj['cci_plant'], drm_pl_opts)
+    drm_planner.LoadRoadmap(MMT_GCS_ROOT+"/tmp/iiwa_hardware/iiwa_roadmap_0_0_0.01_0.2_35000_10_4.5_0.45.rm")
+
+    if vox is not None:
+        online_voxel_observation = cci.Voxels(vox.T)
+        drm_planner.BuildCollisionSet(online_voxel_observation)
+    
+    return drm_planner
+
+def scs_trajopt(start, goal, drm_planner, cci_obj, edge_inflator, vox, vel_limits, acc_limits):
+    online_voxel_observation = cci.Voxels(vox)
+    
+    success, pwl_plan = drm_planner.Plan(start,
+                     goal,
+                     online_voxel_observation,
+                     ONLINE_VOXEL_RADIUS)
+    
+    regions, edges = CCI_inflate_edges_given_pwl_path(pwl_plan, 
+                                     edge_inflator, 
+                                     online_voxel_observation,
+                                     ONLINE_VOXEL_RADIUS,
+                                     verbose = True
+                                     )
+    
+    cci_checker = CCICollisionChecker(cci_obj['cci_mplant'], 
+                                    cci_obj['cci_plant'].getRobotGeometryIds(), 
+                                    online_voxel_observation, 
+                                    ONLINE_VOXEL_RADIUS)
+
+    vel_limits_reflected = [-vel_limits, vel_limits]
+    acc_limits_reflected = [-acc_limits, acc_limits]
+    traj, cost, timing_info, traj_col_free, \
+    first_solve_collision_free, collisions =  MintimeSCSWithPathFixing(start,
+                             goal,
+                             regions,
+                             edges,
+                             vel_limits_reflected,
+                             acc_limits_reflected,
+                             cci_checker,
+                             edge_inflator,
+                             online_voxel_observation,
+                             ONLINE_VOXEL_RADIUS,
+                             )
+
+    return traj
 
 def save_regions_pkl(sets, models_path, dirstr, name=None):
     pkl_path = dirstr + f'/{name}.pkl'
@@ -449,6 +633,7 @@ class TwoGraspPlanner(LeafSystem):
         self.meshcat = meshcat
         self.plant = plant
         self._iiwa_controller_plant = controller_plant
+        self.fake_plant, self.fake_plant_context = make_iiwa_plant()
         self.velocity_limits = 0.4 * np.ones(7)
         self.acceleration_limits = 0.4 * np.ones(7)
         self.display_velocity_limits = 0.2 * np.ones(7)
@@ -471,6 +656,10 @@ class TwoGraspPlanner(LeafSystem):
             joint = controller_plant.GetJointByName("iiwa_joint_%i" % (i + 1))
             self.joint_limits[i, 0] = joint.position_lower_limits()
             self.joint_limits[i, 1] = joint.position_upper_limits()
+        self.ik_domain = HPolyhedron.MakeBox(controller_plant.GetPositionLowerLimits()+1e-2, 
+                                        controller_plant.GetPositionUpperLimits()-1e-2)
+        self.edge_inflator, self.cci_objects = get_cci_edge_inflator()
+        self.drm_planner = drm_planner(self.cci_objects)
 
         if not self.use_offline_regions1 or not self.use_offline_regions1:
             if models_path == None:
@@ -533,9 +722,9 @@ class TwoGraspPlanner(LeafSystem):
                 # Update pick + display state
                 state.get_mutable_abstract_state(
                     int(self._pick_mode_index)
-                ).set_value(PickState.PREPICK)
+                ).set_value(PickState.CLOSING)
                 self.PlanPickAndDisplay(context, state)
-                input("Next: Pick 1 (IK + toppra)") # pause for debugging
+                # input("Next: Pick 1 (IK + toppra)") # pause for debugging
             return
         if mode == PlannerState.GRASP1:
             self.UpdateInGrasp(context, state, PlannerState.GO_HOME1)
@@ -574,9 +763,9 @@ class TwoGraspPlanner(LeafSystem):
                 # Update pick + display state
                 state.get_mutable_abstract_state(
                     int(self._pick_mode_index)
-                ).set_value(PickState.PREPICK)
+                ).set_value(PickState.CLOSING)
                 self.PlanPickAndDisplay(context, state)
-                input("Next: Pick 1 (IK + toppra)") # pause for debugging
+                # input("Next: Pick 2 (IK + toppra)") # pause for debugging
             return
         if mode == PlannerState.GRASP2:
             self.UpdateInGrasp(context, state, PlannerState.GO_HOME2)
@@ -655,9 +844,14 @@ class TwoGraspPlanner(LeafSystem):
             if context.get_time() > self._gripper_traj_end_time:
                 state.get_mutable_abstract_state(
                     int(self._pick_mode_index)
-                ).set_value(PickState.POSTPLACE)
-                self.DoPlace(context, state)
-                input("Next: Place (IK + toppra)") # pause for debugging
+                ).set_value(PickState.IDLE)
+                # self.DoPlace(context, state)
+                # input("Next: Place (IK + toppra)") # pause for debugging
+                state.get_mutable_abstract_state(
+                    int(self._mode_index)
+                ).set_value(after_grasp_state)
+                self.GoHome(context, state)
+                input("Next: Postgrasp (gcs)") # pause for debugging
         if pick_mode == PickState.POSTPLACE:
             if context.get_time() > traj_q.end_time() + start_time:
                 state.get_mutable_abstract_state(
@@ -690,7 +884,7 @@ class TwoGraspPlanner(LeafSystem):
         pcd2.FlipNormalsTowardPoint(self._X_WC2.translation())
 
         merged_pcd = Concatenate([pcd0, pcd1, pcd2])
-        down_sampled_pcd = merged_pcd.VoxelizedDownSample(voxel_size=0.005)
+        down_sampled_pcd = merged_pcd.VoxelizedDownSample(voxel_size=ONLINE_VOXEL_RADIUS)
         
         # remove outliers
         o3d_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(down_sampled_pcd.xyzs().T))
@@ -759,14 +953,24 @@ class TwoGraspPlanner(LeafSystem):
                 loaded_traj = True
 
         if not loaded_traj:
-            if mode == PlannerState.WAIT_FOR_OBJECTS_TO_SETTLE:
-                traj = plan_unconstrained_gcs_path_start_to_goal(
-                    plant=self._iiwa_controller_plant, q_start=q, q_goal=q_goal, regions=None, no_obstacles=True
-                )
-            else:
-                traj = plan_unconstrained_gcs_path_start_to_goal(
-                    plant=self._iiwa_controller_plant, q_start=q, q_goal=q_goal, regions=self.regions, no_obstacles=self.no_obstacles
-                )
+            traj = scs_trajopt(
+                q, 
+                q_goal, 
+                self.drm_planner,
+                self.cci_objects, 
+                self.edge_inflator, 
+                self.current_manipuland_pcd.xyzs(), 
+                self.velocity_limits, 
+                self.acceleration_limits
+            )
+            # if mode == PlannerState.WAIT_FOR_OBJECTS_TO_SETTLE:
+            #     traj = plan_unconstrained_gcs_path_start_to_goal(
+            #         plant=self._iiwa_controller_plant, q_start=q, q_goal=q_goal, regions=None, no_obstacles=True
+            #     )
+            # else:
+            #     traj = plan_unconstrained_gcs_path_start_to_goal(
+            #         plant=self._iiwa_controller_plant, q_start=q, q_goal=q_goal, regions=self.regions, no_obstacles=self.no_obstacles
+            #     )
 
             if traj is None:
                 logging.error("Failed to find a path to the home positions.")
@@ -825,89 +1029,99 @@ class TwoGraspPlanner(LeafSystem):
                 traj = CompositeBezierCurveTrajectoryAttributes.load(self.traj_dir + "/grasp2_pregrasp_traj/").to_composite_bezier_curve_trajectory()
                 loaded_traj = True
 
-        # Set gcs regions or generate if not given or not ignoring obstacles/loading trajectories
-        if mode == PlannerState.SCANNING1:
-            if not self.use_offline_regions1 and not self.no_obstacles and not loaded_traj:
-                collision_checker = get_collision_checker(self.models_path, self.object_com, self.object_rot, self.object_dims)
-                start = time.time()
-                rrt_path = rrt_planning(q, q_goal, self.joint_limits, collision_checker)
-                print("rrt_time", time.time() - start)
-                start = time.time()
-                if rrt_path is not None:
-                    self.regions = get_regions_cci(rrt_path, self.current_manipuland_pcd.xyzs(), 0.005)
-                    print("regions cci time", time.time() - start)
-                else:
-                    self.regions = []
+        # # Set gcs regions or generate if not given or not ignoring obstacles/loading trajectories
+        # if mode == PlannerState.SCANNING1:
+        #     if not self.use_offline_regions1 and not self.no_obstacles and not loaded_traj:
+        #         collision_checker = get_collision_checker(self.models_path, self.object_com, self.object_rot, self.object_dims)
+        #         start = time.time()
+        #         rrt_path = rrt_planning(q, q_goal, self.joint_limits, collision_checker)
+        #         print("rrt_time", time.time() - start)
+        #         start = time.time()
+        #         if rrt_path is not None:
+        #             self.regions = get_regions_cci(rrt_path, self.current_manipuland_pcd.xyzs(), ONLINE_VOXEL_RADIUS)
+        #             print("regions cci time", time.time() - start)
+        #         else:
+        #             self.regions = []
 
-                # make sure the start and pregrasp positions are in the regions
-                q_in_regions = False
-                q_goal_in_regions = False
+        #         # make sure the start and pregrasp positions are in the regions
+        #         q_in_regions = False
+        #         q_goal_in_regions = False
 
-                for region in self.regions:
-                    if region.PointInSet(q_goal):
-                        q_goal_in_regions = True
+        #         for region in self.regions:
+        #             if region.PointInSet(q_goal):
+        #                 q_goal_in_regions = True
 
-                if not q_goal_in_regions:
-                    print("getting seeded region for q goal")
-                    self.regions.append(get_seeded_region(self.models_path, self.object_com, self.object_rot, self.object_dims, q_goal))
+        #         if not q_goal_in_regions:
+        #             print("getting seeded region for q goal")
+        #             self.regions.append(get_seeded_region(self.models_path, self.object_com, self.object_rot, self.object_dims, q_goal))
 
-                for region in self.regions:
-                    if region.PointInSet(q):
-                        q_in_regions = True
+        #         for region in self.regions:
+        #             if region.PointInSet(q):
+        #                 q_in_regions = True
 
-                if not q_in_regions:
-                    print("getting seeded region for q")
-                    self.regions.append(get_seeded_region(self.models_path, self.object_com, self.object_rot, self.object_dims, q))
+        #         if not q_in_regions:
+        #             print("getting seeded region for q")
+        #             self.regions.append(get_seeded_region(self.models_path, self.object_com, self.object_rot, self.object_dims, q))
                
-                save_regions_pkl(self.regions, self.models_path, self.savedir, "regions_1")
-            else:
-                self.regions = self.regions1
-        else:
-            if not self.use_offline_regions2 and not self.no_obstacles and not loaded_traj:
-                collision_checker = get_collision_checker(self.models_path, self.object_com, self.object_rot, self.object_dims)
-                start = time.time()
-                rrt_path = rrt_planning(q, q_goal, self.joint_limits, collision_checker)
-                print("rrt_time", time.time() - start)
-                start = time.time()
-                if rrt_path is not None:
-                    self.regions = get_regions_cci(rrt_path, self.current_manipuland_pcd.xyzs(), 0.005)
-                    print("regions cci time", time.time() - start)
-                else:
-                    self.regions = []
+        #         save_regions_pkl(self.regions, self.models_path, self.savedir, "regions_1")
+        #     else:
+        #         self.regions = self.regions1
+        # else:
+        #     if not self.use_offline_regions2 and not self.no_obstacles and not loaded_traj:
+        #         collision_checker = get_collision_checker(self.models_path, self.object_com, self.object_rot, self.object_dims)
+        #         start = time.time()
+        #         rrt_path = rrt_planning(q, q_goal, self.joint_limits, collision_checker)
+        #         print("rrt_time", time.time() - start)
+        #         start = time.time()
+        #         if rrt_path is not None:
+        #             self.regions = get_regions_cci(rrt_path, self.current_manipuland_pcd.xyzs(), ONLINE_VOXEL_RADIUS)
+        #             print("regions cci time", time.time() - start)
+        #         else:
+        #             self.regions = []
 
-                # make sure the start and pregrasp positions are in the regions
-                q_in_regions = False
-                q_goal_in_regions = False
+        #         # make sure the start and pregrasp positions are in the regions
+        #         q_in_regions = False
+        #         q_goal_in_regions = False
                 
-                if self.regions is None:
-                    self.regions = []
+        #         if self.regions is None:
+        #             self.regions = []
                     
-                for region in self.regions:
-                    if region.PointInSet(q):
-                        q_in_regions = True
+        #         for region in self.regions:
+        #             if region.PointInSet(q):
+        #                 q_in_regions = True
                 
-                if not q_in_regions:
-                    print("getting seeded region for q")
-                    self.regions.append(get_seeded_region(self.models_path, self.object_com, self.object_rot, self.object_dims, q))
+        #         if not q_in_regions:
+        #             print("getting seeded region for q")
+        #             self.regions.append(get_seeded_region(self.models_path, self.object_com, self.object_rot, self.object_dims, q))
                 
-                for region in self.regions:
-                    if region.PointInSet(q_goal):
-                        q_goal_in_regions = True
+        #         for region in self.regions:
+        #             if region.PointInSet(q_goal):
+        #                 q_goal_in_regions = True
 
-                if not q_goal_in_regions:
-                    print("getting seeded region for q goal")
-                    self.regions.append(get_seeded_region(self.models_path, self.object_com, self.object_rot, self.object_dims, q_goal))
+        #         if not q_goal_in_regions:
+        #             print("getting seeded region for q goal")
+        #             self.regions.append(get_seeded_region(self.models_path, self.object_com, self.object_rot, self.object_dims, q_goal))
 
-                save_regions_pkl(self.regions, self.models_path, self.savedir, "regions_2")
-            else:
-                self.regions = self.regions2
+        #         save_regions_pkl(self.regions, self.models_path, self.savedir, "regions_2")
+        #     else:
+        #         self.regions = self.regions2
 
         # input("regions generated, press [ENTER] to continue")
 
         if not loaded_traj:
-            traj = plan_unconstrained_gcs_path_start_to_goal(
-                plant=self._iiwa_controller_plant, q_start=q, q_goal=q_goal, regions=self.regions, no_obstacles=self.no_obstacles
+            traj = scs_trajopt(
+                q, 
+                q_goal, 
+                self.drm_planner,
+                self.cci_objects, 
+                self.edge_inflator, 
+                self.current_manipuland_pcd.xyzs(), 
+                self.velocity_limits, 
+                self.acceleration_limits
             )
+            # traj = plan_unconstrained_gcs_path_start_to_goal(
+            #     plant=self._iiwa_controller_plant, q_start=q, q_goal=q_goal, regions=self.regions, no_obstacles=self.no_obstacles
+            # )
             if traj is None:
                 logging.error("Failed to find a path to the grasping start positions.")
                 exit(1)
@@ -984,99 +1198,125 @@ class TwoGraspPlanner(LeafSystem):
                             [com[0], com[1], com[2]]))
             
             grasps_found = False
-            while not grasps_found:
-                # Planning first grasping trajectory
-                self.grasp_node.compute_candidate_grasps(
-                    self.current_manipuland_pcd,
-                    pcd_with_background,
-                    candidate_num=1,
-                    num_samples=15,
-                    random_seed=np.random.randint(1000),
+
+            # Initialize DRM with current pcd
+            self.drm_planner = drm_planner(self.cci_objects, self.current_manipuland_pcd.xyzs().T)
+
+            cci_checker = CCICollisionChecker(self.cci_objects['cci_mplant'], 
+                                            self.cci_objects['cci_plant'].getRobotGeometryIds(), 
+                                            cci.Voxels(self.current_manipuland_pcd.xyzs()), 
+                                            ONLINE_VOXEL_RADIUS)
+            # while not grasps_found:
+            # Planning first grasping trajectory
+            self.grasp_node.compute_candidate_grasps(
+                self.current_manipuland_pcd,
+                pcd_with_background,
+                candidate_num=1,
+                num_samples=15,
+                random_seed=np.random.randint(1000),
+            )
+
+            grasp_pairs = self.grasp_node.get_best_grasps()
+            print("grasp pairs:", len(grasp_pairs))
+            q = self.get_input_port(self._iiwa_position_index).Eval(context)
+            for i in range(len(grasp_pairs)):
+                print("Grasp Pair:", grasp_pairs[i])
+
+                X_WG1 = grasp_pairs[i][0]
+                X_WG2 = grasp_pairs[i][1]
+                X_WPregrasp1 = (RigidTransform(X_WG1) @ X_GE) #@ X_GgraspGpregrasp
+                X_WPregrasp2 = (RigidTransform(X_WG2) @ X_GE) #@ X_GgraspGpregrasp
+
+                # Check that IK passes
+                # q_goal1, _ = sample_goal_drm(
+                #     X_WPregrasp1, 
+                #     q,
+                #     self.fake_plant,
+                #     self.fake_plant_context,
+                #     self.drm_planner,
+                #     self.ik_domain,
+                #     cci_checker
+                # )
+                q_goal1 = solve_global_inverse_kinematics(
+                    plant=self._iiwa_controller_plant,
+                    X_G=X_WPregrasp1,
+                    initial_guess=q,
+                    position_tolerance=0.0,
+                    orientation_tolerance=0.0,
+                    gripper_frame_name="iiwa_link_7",
+                    joint_limits=self.joint_limits
                 )
-
-                grasp_pairs = self.grasp_node.get_best_grasps()
-                print("grasp pairs:", len(grasp_pairs))
-                for i in range(len(grasp_pairs)):
-                    print("Grasp Pair:", grasp_pairs[i])
-
-                    X_WG1 = grasp_pairs[i][0]
-                    X_WG2 = grasp_pairs[i][1]
-                    X_WPregrasp1 = (RigidTransform(X_WG1) @ X_GE) @ X_GgraspGpregrasp
-                    X_WPregrasp2 = (RigidTransform(X_WG2) @ X_GE) @ X_GgraspGpregrasp
-
-                    # Check that IK passes
-                    q = self.get_input_port(self._iiwa_position_index).Eval(context)
+                attempts = 0
+                while q_goal1 is None and attempts < 10:
+                    print("trying global inverse kinematics with new initial guess randomized around q")
                     q_goal1 = solve_global_inverse_kinematics(
                         plant=self._iiwa_controller_plant,
                         X_G=X_WPregrasp1,
-                        initial_guess=q,
+                        initial_guess=q + np.random.normal(0, np.pi/4, 7),
                         position_tolerance=0.0,
                         orientation_tolerance=0.0,
                         gripper_frame_name="iiwa_link_7",
                         joint_limits=self.joint_limits
                     )
-                    attempts = 0
-                    while q_goal1 is None and attempts < 10:
-                        print("trying global inverse kinematics with new initial guess randomized around q")
-                        q_goal1 = solve_global_inverse_kinematics(
-                            plant=self._iiwa_controller_plant,
-                            X_G=X_WPregrasp1,
-                            initial_guess=q + np.random.normal(0, np.pi/4, 7),
-                            position_tolerance=0.0,
-                            orientation_tolerance=0.0,
-                            gripper_frame_name="iiwa_link_7",
-                            joint_limits=self.joint_limits
-                        )
-                        attempts += 1
+                    attempts += 1
 
-                    if q_goal1 is None:
-                        continue
-                        
-                    # check if configuration is in collision with scene
-                    if check_configuration_has_collisions(self.models_path, com, rot, dims, q_goal1):
-                        print("grasp 1 configuration has collision with scene")
-                        continue
+                if q_goal1 is None:
+                    continue
+                    
+                # # check if configuration is in collision with scene
+                # if check_configuration_has_collisions(self.models_path, com, rot, dims, q_goal1):
+                #     print("grasp 1 configuration has collision with scene")
+                #     continue
 
-                    q = self.get_input_port(self._iiwa_position_index).Eval(context)
+                q_goal2 = solve_global_inverse_kinematics(
+                    plant=self._iiwa_controller_plant,
+                    X_G=X_WPregrasp2,
+                    initial_guess=q,
+                    position_tolerance=0.0,
+                    orientation_tolerance=0.0,
+                    gripper_frame_name="iiwa_link_7",
+                    joint_limits=self.joint_limits
+                )
+                attempts = 0
+                while q_goal2 is None and attempts < 10:
+                    print("trying global inverse kinematics with new initial guess randomized around q")
                     q_goal2 = solve_global_inverse_kinematics(
                         plant=self._iiwa_controller_plant,
                         X_G=X_WPregrasp2,
-                        initial_guess=q,
+                        initial_guess=q + np.random.normal(0, np.pi/4, 7),
                         position_tolerance=0.0,
                         orientation_tolerance=0.0,
                         gripper_frame_name="iiwa_link_7",
                         joint_limits=self.joint_limits
                     )
-                    attempts = 0
-                    while q_goal2 is None and attempts < 10:
-                        print("trying global inverse kinematics with new initial guess randomized around q")
-                        q_goal2 = solve_global_inverse_kinematics(
-                            plant=self._iiwa_controller_plant,
-                            X_G=X_WPregrasp2,
-                            initial_guess=q + np.random.normal(0, np.pi/4, 7),
-                            position_tolerance=0.0,
-                            orientation_tolerance=0.0,
-                            gripper_frame_name="iiwa_link_7",
-                            joint_limits=self.joint_limits
-                        )
-                        attempts += 1
+                    attempts += 1
 
-                    if q_goal2 is None:
-                        continue
+                # q_goal2, _ = sample_goal_drm(
+                #     X_WPregrasp2, 
+                #     q,
+                #     self.fake_plant,
+                #     self.fake_plant_context,
+                #     self.drm_planner,
+                #     self.ik_domain,
+                #     cci_checker
+                # )
 
-                    # check if configuration is in collision with scene
-                    if check_configuration_has_collisions(self.models_path, com, rot, dims, q_goal2):
-                        print("grasp 2 configuration has collision with scene")
-                        continue
-                    
-                    self.q_pregrasp1 = q_goal1
-                    self.q_pregrasp2 = q_goal2
-                    self.X_WG1 = X_WG1
-                    self.X_WG2 = X_WG2
-                    break
+                if q_goal2 is None:
+                    continue
+
+                # # check if configuration is in collision with scene
+                # if check_configuration_has_collisions(self.models_path, com, rot, dims, q_goal2):
+                #     print("grasp 2 configuration has collision with scene")
+                #     continue
                 
-                if not(self.q_pregrasp1 is None or self.q_pregrasp2 is None):
-                    grasps_found = True
+                self.q_pregrasp1 = q_goal1
+                self.q_pregrasp2 = q_goal2
+                self.X_WG1 = X_WG1
+                self.X_WG2 = X_WG2
+                break
+            
+            if not(self.q_pregrasp1 is None or self.q_pregrasp2 is None):
+                grasps_found = True
 
             X_WG = self.X_WG1
 
@@ -1084,11 +1324,11 @@ class TwoGraspPlanner(LeafSystem):
             manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
 
             gripper1_xyzs = self.grasp_node.hand_collision_model.to_pcd()
-            gripper1_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(gripper1_xyzs)).voxel_down_sample(0.005).transform((self.X_WG1 @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0]).GetAsMatrix4()))
+            gripper1_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(gripper1_xyzs)).voxel_down_sample(ONLINE_VOXEL_RADIUS).transform((self.X_WG1 @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0]).GetAsMatrix4()))
             gripper1_cloud.paint_uniform_color([1.0, 0.0, 0.0])
 
             gripper2_xyzs = self.grasp_node.hand_collision_model.to_pcd()
-            gripper2_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(gripper2_xyzs)).voxel_down_sample(0.005).transform((self.X_WG2 @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0]).GetAsMatrix4()))
+            gripper2_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(gripper2_xyzs)).voxel_down_sample(ONLINE_VOXEL_RADIUS).transform((self.X_WG2 @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0]).GetAsMatrix4()))
             gripper2_cloud.paint_uniform_color([0.0, 1.0, 0.0])
 
             viz_geoms = [manipuland_cloud, gripper1_cloud, gripper2_cloud]
@@ -1109,7 +1349,7 @@ class TwoGraspPlanner(LeafSystem):
         # manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
 
         # gripper_xyzs = self.grasp_node.hand_collision_model.to_pcd()
-        # gripper_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(gripper_xyzs)).voxel_down_sample(0.005).transform((X_WG @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0])).GetAsMatrix4())
+        # gripper_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(gripper_xyzs)).voxel_down_sample(ONLINE_VOXEL_RADIUS).transform((X_WG @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0])).GetAsMatrix4())
         # gripper_cloud.paint_uniform_color([1.0, 0.0, 0.0])
 
         # viz_geoms = [manipuland_cloud, gripper_cloud]
@@ -1141,23 +1381,23 @@ class TwoGraspPlanner(LeafSystem):
         q = self.get_input_port(self._iiwa_position_index).Eval(context)
         traj_q1, traj_q2, traj_q3, traj_q4, traj_q5, self.q_display_center, self.q_preplace = MakePickAndDisplayJointPositionsTrajectory(X_G, times, self._iiwa_controller_plant, q, self.q_pregrasp1, place_flipped, 8, joint_limits=self.joint_limits)
         
-        toppra_traj_pick = reparameterize_with_toppra(
-            trajectory=traj_q1,
-            plant=self._iiwa_controller_plant,
-            velocity_limits=self.velocity_limits,
-            acceleration_limits=self.acceleration_limits,
-            num_grid_points=100,
-            is_pl=True,
-        )
+        # toppra_traj_pick = reparameterize_with_toppra(
+        #     trajectory=traj_q1,
+        #     plant=self._iiwa_controller_plant,
+        #     velocity_limits=self.velocity_limits,
+        #     acceleration_limits=self.acceleration_limits,
+        #     num_grid_points=100,
+        #     is_pl=True,
+        # )
 
-        # start pick traj
-        current_time = context.get_time()
-        state.get_mutable_abstract_state(self._current_joint_traj_idx).set_value(
-            TrajectoryWithTimingInformation(
-                trajectory=toppra_traj_pick,
-                start_time_s=current_time,
-            )
-        )
+        # # start pick traj
+        # current_time = context.get_time()
+        # state.get_mutable_abstract_state(self._current_joint_traj_idx).set_value(
+        #     TrajectoryWithTimingInformation(
+        #         trajectory=toppra_traj_pick,
+        #         start_time_s=current_time,
+        #     )
+        # )
 
         # Store the display traj for later
         state.get_mutable_abstract_state(self._to_postpick_traj_index).set_value(

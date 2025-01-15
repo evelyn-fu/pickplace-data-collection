@@ -1,6 +1,6 @@
 import logging
 
-from typing import Optional
+from typing import Optional, Union
 
 import numpy as np
 
@@ -10,6 +10,7 @@ from pydrake.all import (
     RigidTransform,
     RotationMatrix,
     Solve,
+    HPolyhedron
 )
 
 
@@ -81,3 +82,45 @@ def solve_global_inverse_kinematics(
     #     return None
     q_sol = result.GetSolution(q_variables)
     return q_sol
+
+def solve_ik_problem_pete(pose, 
+                     plant,
+                     plant_context, 
+                     q0,
+                     domain:Union[HPolyhedron, None] = None,
+                     track_orientation = True,
+                     collision_free = True,
+                     tol = 0.005):
+
+    ik = InverseKinematics(plant, plant_context)
+    prog = ik.get_mutable_prog()
+    q = ik.q()  
+    if domain is not None:
+        domain_restrict = HPolyhedron(domain.A(), domain.b()-0.01)
+        domain_restrict.AddPointInSetConstraints(prog, q)
+
+    ik.AddPositionConstraint(plant.GetFrameByName('iiwa_link_7'), 
+                         np.zeros(3),
+                         plant.world_frame(),
+                         pose.translation()-tol,
+                         pose.translation()+tol,
+                         )
+    
+    if track_orientation:
+            ik.AddOrientationConstraint(
+                plant.GetFrameByName('iiwa_link_7'),
+                RotationMatrix(),
+                plant.world_frame(),
+                pose.rotation(),
+                tol,
+            )
+    if collision_free:
+        ik.AddMinimumDistanceLowerBoundConstraint(0.015, 0.1)
+        #ik.AddMinimumDistanceConstraint(0.01, 0.1)
+    prog.AddQuadraticErrorCost(np.identity(len(q)), q0, q)
+    prog.SetInitialGuess(q, q0)
+    result = Solve(ik.prog())
+    if result.is_success():
+            return result.GetSolution(q)
+    else:
+        return None
