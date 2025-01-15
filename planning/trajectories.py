@@ -65,15 +65,20 @@ def MakePickAndDisplayGripperFrames(X_G, gripper_length, pregrasp_dist, place_fl
     times["place_end"] = 0.0
 
     # Go back to prepick pose
-    X_GgraspGpostgrasp = RigidTransform([0, 0.0, -pregrasp_dist])
-    X_G["postplace"] = X_G["place"] @ X_GgraspGpostgrasp
-    times["postplace"] = 1.0
-    X_G["postpostplace"] = X_G["prepick"]
-    times["postpostplace"] = 1.0
+    if place_flipped:
+        X_GgraspGpostgrasp = RigidTransform([0, 0.0, -pregrasp_dist])
+        X_G["postplace"] = X_G["place"] @ X_GgraspGpostgrasp
+        times["postplace"] = 1.0
+        X_G["postpostplace"] = X_G["prepick"]
+        times["postpostplace"] = 1.0
+    else:
+        X_G["postplace"] = X_G["prepick"]
+        times["postplace"] = 1.0
+
 
     return X_G, times
 
-def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q, max_display_frames=6):
+def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q, q_prepick, place_flipped=False, max_display_frames=6):
     """
     Constructs a gripper position trajectory from the plan "sketch".
     Returns three piecewise polynomial trajectories. One for before grasp, one for during, one for after.
@@ -94,8 +99,6 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q, max_display
     sample_times3 = []
     positions3 = []
     q_prev = q
-    positions3_failed = False
-    q_prepick = None
     for name in [
         "prepick",
         "pick_start",
@@ -141,6 +144,9 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q, max_display
             if not center_found:
                 raise Exception("Failed to solve global IK for display trajectory center")
         else:
+            if name == "postpostplace" and not place_flipped:
+                continue
+            
             if name == "prepick" or name == "pick_start":
                 sample_times1.append((sample_times1[-1] if len(sample_times1) != 0 else 0) + times[name])
             elif name == "place_end" or name == "postplace" or name == "postpostplace":
@@ -184,17 +190,14 @@ def MakePickAndDisplayJointPositionsTrajectory(X_G, times, plant, q, max_display
                 q_prev = q_next
 
             if name == "prepick":
-                q_prepick = q_next
-            if name == "prepick" or name == "pick_start":
+                positions1.append(q_prepick)
+            elif name == "pick_start":
                 positions1.append(q_next)
-            elif (name == "place_end" or name == "postplace") and not positions3_failed:
-                if q_next is None:
-                    # use the prepick and pick start reversed if this fails since it should be the same thing
-                    print(f"IK failed at {name}, using prepick/pick_start positions for postpick/place_end")
-                    positions3 = list(positions1[1:].__reversed__())
-                    positions3_failed = True
-                else:
+            elif name == "place_end" or name == "postplace":
+                if place_flipped:
                     positions3.append(q_next)
+                else:
+                    positions3 = list(positions1[1:].__reversed__())
             else:
                 positions2.append(q_next)
 

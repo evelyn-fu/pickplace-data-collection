@@ -16,7 +16,7 @@ from planning.trajectories import (
 from planning.trajectory_sources import TrajectoryWithTimingInformationSource
 from planning.gcs import plan_unconstrained_gcs_path_start_to_goal
 from planning.inverse_kinematics import solve_global_inverse_kinematics
-from planning.rrt import collision_checker_and_cspace, rrt_planning
+from planning.rrt import collision_checker_and_joint_limits, rrt_planning
 from iiwa_setup_dataclasses.trajectories import TrajectoryWithTimingInformation
 from iiwa_setup_dataclasses.bspline_trajectory import CompositeBezierCurveTrajectoryAttributes
 from pydrake.systems.framework import LeafSystem
@@ -783,15 +783,17 @@ class TwoGraspPlanner(LeafSystem):
         # Set gcs regions or generate if not given or not ignoring obstacles/loading trajectories
         if mode == PlannerState.SCANNING1:
             if not self.use_offline_regions1 and not self.no_obstacles and not loaded_traj:
-                collision_checker, cspace = collision_checker_and_cspace(self.models_path, self.object_com, self.object_rot, self.object_dims)
-                rrt_path = rrt_planning(q, q_goal, cspace, collision_checker)
-                get_regions_cci(rrt_path, self.current_pcd, 0.005)
+                collision_checker, joint_limits = collision_checker_and_joint_limits(self.models_path, self.object_com, self.object_rot, self.object_dims)
+                start = time.time()
+                rrt_path = rrt_planning(q, q_goal, joint_limits, collision_checker)
+                print("rrt_time", time.time() - start)
+                start = time.time()
+                self.regions = get_regions_cci(rrt_path, self.current_manipuland_pcd.xyzs(), 0.005)
+                print("regions cci time", time.time() - start)
 
+                # make sure the start and pregrasp positions are in the regions
                 q_in_regions = False
                 q_goal_in_regions = False
-
-                if self.regions is None:
-                    self.regions = []
 
                 for region in self.regions:
                     if region.PointInSet(q_goal):
@@ -805,25 +807,24 @@ class TwoGraspPlanner(LeafSystem):
                     if region.PointInSet(q):
                         q_in_regions = True
 
-                # make sure the start and pregrasp positions are in the regions
                 if not q_in_regions:
                     print("getting seeded region for q")
                     self.regions.append(get_seeded_region(self.models_path, self.object_com, self.object_rot, self.object_dims, q))
-                
-                
-                # if not q_in_regions:
-                #     raise Exception("q not in regions?")
-                
-                # if not q_goal_in_regions:
-                #     raise Exception("q_goal not in regions?")
-
+               
                 save_regions_pkl(self.regions, self.models_path, self.savedir, "regions_1")
             else:
                 self.regions = self.regions1
         else:
             if not self.use_offline_regions2 and not self.no_obstacles and not loaded_traj:
-                # self.regions = get_regions(self.models_path, self.object_com, self.object_rot, self.object_dims)
+                collision_checker, joint_limits = collision_checker_and_joint_limits(self.models_path, self.object_com, self.object_rot, self.object_dims)
+                start = time.time()
+                rrt_path = rrt_planning(q, q_goal, joint_limits, collision_checker)
+                print("rrt_time", time.time() - start)
+                start = time.time()
+                self.regions = get_regions_cci(rrt_path, self.current_manipuland_pcd.xyzs(), 0.005)
+                print("regions cci time", time.time() - start)
 
+                # make sure the start and pregrasp positions are in the regions
                 q_in_regions = False
                 q_goal_in_regions = False
                 
@@ -1088,7 +1089,7 @@ class TwoGraspPlanner(LeafSystem):
         )
 
         q = self.get_input_port(self._iiwa_position_index).Eval(context)
-        traj_q1, traj_q2, traj_q3 = MakePickAndDisplayJointPositionsTrajectory(X_G, times, self._iiwa_controller_plant, q, 8)
+        traj_q1, traj_q2, traj_q3 = MakePickAndDisplayJointPositionsTrajectory(X_G, times, self._iiwa_controller_plant, q, self.q_pregrasp1, place_flipped, 8)
         
         toppra_traj_pick = reparameterize_with_toppra(
             trajectory=traj_q1,
