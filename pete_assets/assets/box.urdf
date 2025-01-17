@@ -1,6 +1,11 @@
 <?xml version="1.0"?>
 <robot name="box">
   <link name="box_link">
+    <visual>
+      <geometry>
+        <box size="0.05 3 2"/>
+      </geometry>
+    </visual>
     <collision>
       <geometry>
         <box size="0.05 3 2"/>

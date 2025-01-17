@@ -418,7 +418,7 @@ def start_scenario(
                 continue
             frame_id = inspector.GetFrameId(geometry_id)
             body = plant.GetBodyFromFrameId(frame_id)
-            if body.model_instance() == plant.GetModelInstanceByName("spatula"):
+            if body.model_instance() == plant.GetModelInstanceByName("mustard_bottle"):
                 properties.UpdateProperty("label", "id", RenderLabel(0)) # Make mustard label 0
             elif body.model_instance() == plant.GetModelInstanceByName("wsg"):
                 properties.UpdateProperty("label", "id", RenderLabel(1)) # Make gripper label 1

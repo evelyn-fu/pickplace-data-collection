@@ -71,15 +71,16 @@ def solve_global_inverse_kinematics(
         # Set the joint limits to be a little less than the actual joint limits
         # to prevent q from being at the edge of cspace
         prog.AddBoundingBoxConstraint(
-            joint_limits[:,0] + 0.02*np.ones(7), 
-            joint_limits[:,1] - 0.02*np.ones(7), 
+            joint_limits[:,0] + 0.01*np.ones(7), 
+            joint_limits[:,1] - 0.01*np.ones(7), 
             q_variables
         )
+    prog.AddQuadraticErrorCost(np.identity(len(q_variables)), initial_guess, q_variables)
 
     result = Solve(prog)
-    # if not result.is_success():
-    #     logging.error(f"Failed to solve global IK for gripper pose {X_G}.")
-    #     return None
+    if not result.is_success():
+        logging.error(f"Failed to solve global IK for gripper pose {X_G}.")
+        return None
     q_sol = result.GetSolution(q_variables)
     return q_sol
 

@@ -66,10 +66,38 @@ ONLINE_VOXEL_RADIUS = 0.005
 sys.path.append(PYCUCI_ROOT+'/bazel-bin/cuci/src/pybind/pycuci')
 import pycuci as cci
 PETE_ASSETS =  os.path.dirname(__file__)+"/../pete_assets/"
+SAFE_DIRECTIVES = PETE_ASSETS+'assets/directives/iiwa7_on_table_with_ceiling.yaml'
 
 from mmt_gcs.planning.mintime_scs import MintimeSCSWithPathFixing
 from mmt_gcs.planning.corridor_planning_utils import CCICollisionChecker, CollisionCheckerBase
 from mmt_gcs.planning.region_generation import CCI_inflate_edges_given_pwl_path
+
+def get_seeded_region_safe(q_nominal):
+    models_path = PETE_ASSETS+'assets/directives/iiwa7_on_table_with_ceiling.dmd.yaml'
+    print("getting safe seeded region around", q_nominal)
+
+    use_native_cpp_logging()
+    params = dict(edge_step_size=0.125)
+    builder = RobotDiagramBuilder()
+    builder.parser().package_map().Add("adaptive_decomp", PETE_ASSETS+"assets")
+    builder.parser().package_map().Add("iiwa_description", PETE_ASSETS+"assets/iiwa")
+    builder.parser().package_map().Add("wsg_description", PETE_ASSETS+"assets/wsg_description")
+    builder.parser().package_map().Add("tri_finray_gripper", PETE_ASSETS+"assets/tri_finray_gripper")
+    builder.parser().AddModels(models_path)
+    iiwa_model_instance_index = builder.plant().GetModelInstanceByName("iiwa7")
+    wsg_model_instance_index = builder.plant().GetModelInstanceByName("wsg")
+    plant = builder.plant()
+    plant.Finalize()
+    params["robot_model_instances"] = [iiwa_model_instance_index, wsg_model_instance_index]
+    params["model"] = builder.Build()
+    domain = HPolyhedron.MakeBox(plant.GetPositionLowerLimits(), plant.GetPositionUpperLimits())
+    checker = SceneGraphCollisionChecker(**params)
+
+    opts = IrisZoOptions()
+    opts.max_iterations = 10
+    region = IrisZo(checker, Hyperellipsoid.MakeHypersphere(1e-4, q_nominal), domain, opts)
+
+    return region
 
 def get_seeded_region(models_path, com, rot, dims, q_nominal):
     # Get bounding box of object
@@ -559,17 +587,8 @@ class TwoGraspPlanner(LeafSystem):
             AbstractValue.Make(RigidTransform())
         )
 
-        # Store the path parameterized display trajectories
-        self._to_postpick_traj_index = self.DeclareAbstractState(
-            AbstractValue.Make(PiecewisePolynomial())
-        )
+        # Store the path parameterized display trajectory
         self._display_traj_index = self.DeclareAbstractState(
-            AbstractValue.Make(PiecewisePolynomial())
-        )
-        self._to_place_traj_index = self.DeclareAbstractState(
-            AbstractValue.Make(PiecewisePolynomial())
-        )
-        self._place_traj_index = self.DeclareAbstractState(
             AbstractValue.Make(PiecewisePolynomial())
         )
 
@@ -626,8 +645,7 @@ class TwoGraspPlanner(LeafSystem):
         self.grasp_node = GraspListener(gripper_model_path=gripper_model_path)
         self.q_pregrasp1 = None
         self.q_pregrasp2 = None
-        self.q_display_center = None
-        self.q_preplace = None
+        self.q_display_sequence = {}
         self.X_WG1 = None
         self.X_WG2 = None
         self.meshcat = meshcat
@@ -639,7 +657,7 @@ class TwoGraspPlanner(LeafSystem):
         self.display_velocity_limits = 0.2 * np.ones(7)
         # self.display_velocity_limits[6] = 0.05
         self.display_acceleration_limits = 0.2 * np.ones(7)
-        self.regions = None #regions
+        self.regions = [] #regions
         self.object_com = None
         self.object_dims = None
         self.object_rot = None
@@ -724,7 +742,7 @@ class TwoGraspPlanner(LeafSystem):
                     int(self._pick_mode_index)
                 ).set_value(PickState.PREPICK)
                 self.PlanPickAndDisplay(context, state)
-                input("Next: Pick 1 (IK + toppra)") # pause for debugging
+                input("Next: Pick 1 (gcs)") # pause for debugging
             return
         if mode == PlannerState.GRASP1:
             self.UpdateInGrasp(context, state, PlannerState.GO_HOME1)
@@ -765,7 +783,7 @@ class TwoGraspPlanner(LeafSystem):
                     int(self._pick_mode_index)
                 ).set_value(PickState.PREPICK)
                 self.PlanPickAndDisplay(context, state)
-                input("Next: Pick 2 (IK + toppra)") # pause for debugging
+                input("Next: Pick 2 (gcs)") # pause for debugging
             return
         if mode == PlannerState.GRASP2:
             self.UpdateInGrasp(context, state, PlannerState.GO_HOME2)
@@ -804,14 +822,14 @@ class TwoGraspPlanner(LeafSystem):
                 state.get_mutable_abstract_state(
                     int(self._pick_mode_index)
                 ).set_value(PickState.POSTPICK)
-                self.GoToPostpick(context, state)
-                input("Next: GoToPostpick (IK + toppra)") # pause for debugging
+                self.GcsToConfig(context, state, "postpick")
+                input("Next: GoToPostpick (gcs)") # pause for debugging
         if pick_mode == PickState.POSTPICK:
             if context.get_time() > traj_q.end_time() + start_time:
                 state.get_mutable_abstract_state(
                     int(self._pick_mode_index)
                 ).set_value(PickState.TO_DISPLAY)
-                self.GoToDisplay(context, state)
+                self.GcsToConfig(context, state, "display_center")
                 input("Next: GoToDisplay (gcs)") # pause for debugging
         if pick_mode == PickState.TO_DISPLAY:
             if context.get_time() > traj_q.end_time() + start_time:
@@ -825,15 +843,15 @@ class TwoGraspPlanner(LeafSystem):
                 state.get_mutable_abstract_state(
                     int(self._pick_mode_index)
                 ).set_value(PickState.TO_PREPLACE)
-                self.GoToPreplace(context, state)
+                self.GcsToConfig(context, state, "preplace")
                 input("Next: GoToPreplace (gcs)") # pause for debugging
         if pick_mode == PickState.TO_PREPLACE:
             if context.get_time() > traj_q.end_time() + start_time:
                 state.get_mutable_abstract_state(
                     int(self._pick_mode_index)
                 ).set_value(PickState.PLACE)
-                self.GoToPlace(context, state)
-                input("Next: GoToPlace (IK + toppra)") # pause for debugging
+                self.GcsToConfig(context, state, "place_start")
+                input("Next: GoToPlace (gcs)") # pause for debugging
         if pick_mode == PickState.PLACE:
             if context.get_time() > traj_q.end_time() + start_time:
                 state.get_mutable_abstract_state(
@@ -845,8 +863,8 @@ class TwoGraspPlanner(LeafSystem):
                 state.get_mutable_abstract_state(
                     int(self._pick_mode_index)
                 ).set_value(PickState.POSTPLACE)
-                self.DoPlace(context, state)
-                input("Next: Place (IK + toppra)") # pause for debugging
+                self.GcsToConfig(context, state, "postplace")
+                input("Next: Place (gcs)") # pause for debugging
         if pick_mode == PickState.POSTPLACE:
             if context.get_time() > traj_q.end_time() + start_time:
                 state.get_mutable_abstract_state(
@@ -1236,8 +1254,8 @@ class TwoGraspPlanner(LeafSystem):
                     plant=self._iiwa_controller_plant,
                     X_G=X_WPregrasp1,
                     initial_guess=q,
-                    position_tolerance=0.0,
-                    orientation_tolerance=0.0,
+                    position_tolerance=0.005,
+                    orientation_tolerance=0.005,
                     gripper_frame_name="iiwa_link_7",
                     joint_limits=self.joint_limits
                 )
@@ -1248,8 +1266,8 @@ class TwoGraspPlanner(LeafSystem):
                         plant=self._iiwa_controller_plant,
                         X_G=X_WPregrasp1,
                         initial_guess=q + np.random.normal(0, np.pi/4, 7),
-                        position_tolerance=0.0,
-                        orientation_tolerance=0.0,
+                        position_tolerance=0.005,
+                        orientation_tolerance=0.005,
                         gripper_frame_name="iiwa_link_7",
                         joint_limits=self.joint_limits
                     )
@@ -1374,63 +1392,36 @@ class TwoGraspPlanner(LeafSystem):
         )
 
         q = self.get_input_port(self._iiwa_position_index).Eval(context)
-        traj_q1, traj_q2, traj_q3, traj_q4, traj_q5, self.q_display_center, self.q_preplace = MakePickAndDisplayJointPositionsTrajectory(X_G, times, self._iiwa_controller_plant, q, self.q_pregrasp1, place_flipped, 8, joint_limits=self.joint_limits)
+        display_traj, self.q_display_sequence = MakePickAndDisplayJointPositionsTrajectory(X_G, times, self._iiwa_controller_plant, q, self.q_pregrasp1, place_flipped, 8, joint_limits=self.joint_limits)
         
-        toppra_traj_pick = reparameterize_with_toppra(
-            trajectory=traj_q1,
-            plant=self._iiwa_controller_plant,
-            velocity_limits=self.velocity_limits,
-            acceleration_limits=self.acceleration_limits,
-            num_grid_points=100,
-            is_pl=True,
-        )
+        state.get_mutable_abstract_state(self._display_traj_index).set_value(display_traj)
 
-        # start pick traj
-        current_time = context.get_time()
-        state.get_mutable_abstract_state(self._current_joint_traj_idx).set_value(
-            TrajectoryWithTimingInformation(
-                trajectory=toppra_traj_pick,
-                start_time_s=current_time,
-            )
-        )
+        for config_name in [
+            "pick_start",
+            "postpick",
+            "display_center",
+            "preplace",
+            "place_start",
+            "postplace"
+        ]:
+            q_goal_in_regions = False
+            q_goal = self.q_display_sequence[config_name]
+            for region in self.regions:
+                if region.PointInSet(q_goal):
+                    q_goal_in_regions = True
 
-        # Store the display traj for later
-        state.get_mutable_abstract_state(self._to_postpick_traj_index).set_value(
-            traj_q2
-        )
-        state.get_mutable_abstract_state(self._display_traj_index).set_value(
-            traj_q3
-        )
-        state.get_mutable_abstract_state(self._to_place_traj_index).set_value(
-            traj_q4
-        )
-        state.get_mutable_abstract_state(self._place_traj_index).set_value(
-            traj_q5
-        )
+            if not q_goal_in_regions:
+                print(f"getting seeded region for {config_name}")
+                self.regions.append(get_seeded_region_safe(q_goal))
+            
+        self.GcsToConfig(context, state, "pick_start")
     
-    def GoToPostpick(self, context, state):
-        current_time = context.get_time()
-        display_traj = context.get_abstract_state(int(self._to_postpick_traj_index)).get_value()
-        toppra_traj = reparameterize_with_toppra(
-            trajectory=display_traj,
-            plant=self._iiwa_controller_plant,
-            velocity_limits=self.display_velocity_limits,
-            acceleration_limits=self.display_acceleration_limits,
-            num_grid_points=100,
-            is_pl=True,
-        )
-
-        state.get_mutable_abstract_state(self._current_joint_traj_idx).set_value(
-            TrajectoryWithTimingInformation(
-                trajectory=toppra_traj,
-                start_time_s=current_time,
-            )
-        )
-
-    def GoToDisplay(self, context, state):
+    def GcsToConfig(self, context, state, config_name):
         q = self.get_input_port(self._iiwa_position_index).Eval(context)
+        q_goal = self.q_display_sequence[config_name]
+
         traj = plan_unconstrained_gcs_path_start_to_goal(
-            plant=self._iiwa_controller_plant, q_start=q, q_goal=self.q_display_center, regions=None, no_obstacles=True
+            plant=self._iiwa_controller_plant, q_start=q, q_goal=q_goal, regions=None, no_obstacles=True
         )
         breaks = np.linspace(0, traj.end_time(), int(1e3), endpoint=False)
         knots = traj.vector_values(breaks)
@@ -1469,69 +1460,6 @@ class TwoGraspPlanner(LeafSystem):
                 start_time_s=current_time,
             )
         )
-    
-    def GoToPreplace(self, context, state):
-        q = self.get_input_port(self._iiwa_position_index).Eval(context)
-        traj = plan_unconstrained_gcs_path_start_to_goal(
-            plant=self._iiwa_controller_plant, q_start=q, q_goal=self.q_preplace, regions=None, no_obstacles=True
-        )
-        breaks = np.linspace(0, traj.end_time(), int(1e3), endpoint=False)
-        knots = traj.vector_values(breaks)
-
-        toppra_traj = reparameterize_with_toppra(
-            trajectory=knots.T,
-            plant=self._iiwa_controller_plant,
-            velocity_limits=self.velocity_limits,
-            acceleration_limits=self.acceleration_limits,
-            num_grid_points=100,
-        )
-
-        current_time = context.get_time()
-        state.get_mutable_abstract_state(self._current_joint_traj_idx).set_value(
-            TrajectoryWithTimingInformation(
-                trajectory=toppra_traj,
-                start_time_s=current_time,
-            )
-        )
-
-    def GoToPlace(self, context, state):
-        current_time = context.get_time()
-        display_traj = context.get_abstract_state(int(self._to_place_traj_index)).get_value()
-        toppra_traj = reparameterize_with_toppra(
-            trajectory=display_traj,
-            plant=self._iiwa_controller_plant,
-            velocity_limits=self.display_velocity_limits,
-            acceleration_limits=self.display_acceleration_limits,
-            num_grid_points=100,
-            is_pl=True,
-        )
-
-        state.get_mutable_abstract_state(self._current_joint_traj_idx).set_value(
-            TrajectoryWithTimingInformation(
-                trajectory=toppra_traj,
-                start_time_s=current_time,
-            )
-        )
-
-    def DoPlace(self, context, state):
-        current_time = context.get_time()
-        place_traj = context.get_abstract_state(int(self._place_traj_index)).get_value()
-        toppra_traj = reparameterize_with_toppra(
-            trajectory=place_traj,
-            plant=self._iiwa_controller_plant,
-            velocity_limits=self.velocity_limits,
-            acceleration_limits=self.acceleration_limits,
-            num_grid_points=100,
-            is_pl=True,
-        )
-
-        state.get_mutable_abstract_state(self._current_joint_traj_idx).set_value(
-            TrajectoryWithTimingInformation(
-                trajectory=toppra_traj,
-                start_time_s=current_time,
-            )
-        )
-
 
     def PlanGripper(self, context, state, direction="open"):
         opened = np.array([0.107])
