@@ -22,7 +22,7 @@ from pydrake.perception import (
     DepthImageToPointCloud
 )
 
-from manipulation.scenarios import AddIiwaDifferentialIK
+from manipulation.systems import AddIiwaDifferentialIK
 from manipulation.systems import ExtractPose
 from manipulation.station import MakeHardwareStation, LoadScenario
 
@@ -88,7 +88,6 @@ def start_scenario(
         scenario_path="scenario_data_grasping.yml", 
         models_path="scenario_data_grasping_no_object.dmd.yaml", 
         gripper_model_path="",
-        scanning_traj_dir="scanning_traj",
         pkl1_path="", 
         pkl2_path="", 
         traj_dir="",
@@ -295,7 +294,6 @@ def start_scenario(
             X_WC0=x_front_camera,
             X_WC1=x_back_left_camera,
             X_WC2=x_back_right_camera,
-            scanning_traj_dir=scanning_traj_dir,
             meshcat=meshcat,
             dirstr=dirstr,
             regions1=iris_regions1,
@@ -371,14 +369,39 @@ def start_scenario(
             station.GetInputPort("wsg.position"),
         )
 
+    # Set up differential inverse kinematics.
+    diff_ik = AddIiwaDifferentialIK(builder, controller_plant)
+    builder.Connect(planner.GetOutputPort("X_WG"), diff_ik.get_input_port(0))
     if use_hardware:
         builder.Connect(
-            joint_traj_source.get_output_port(), external_station.GetInputPort("iiwa.position")
+            external_station.GetOutputPort("iiwa.state_estimated"),
+            diff_ik.GetInputPort("robot_state"),
         )
     else:
         builder.Connect(
-            joint_traj_source.get_output_port(), station.GetInputPort("iiwa.position")
+            station.GetOutputPort("iiwa.state_estimated"),
+            diff_ik.GetInputPort("robot_state"),
         )
+    builder.Connect(
+        planner.GetOutputPort("reset_diff_ik"),
+        diff_ik.GetInputPort("use_robot_state"),
+    )
+
+    # The DiffIK and the direct position-control modes go through a PortSwitch
+    switch = builder.AddSystem(PortSwitch(7))
+    builder.Connect(diff_ik.get_output_port(), switch.DeclareInputPort("diff_ik"))
+    builder.Connect(
+        joint_traj_source.get_output_port(),
+        switch.DeclareInputPort("position"),
+    )
+    if use_hardware:
+        builder.Connect(switch.get_output_port(), external_station.GetInputPort("iiwa.position"))
+    else:
+        builder.Connect(switch.get_output_port(), station.GetInputPort("iiwa.position"))
+    builder.Connect(
+        planner.GetOutputPort("control_mode"),
+        switch.get_port_selector_input_port(),
+    )
 
     builder.Connect(
         camera0_pcd.GetOutputPort("point_cloud"),
@@ -525,13 +548,11 @@ if __name__ == "__main__":
     meshcat = StartMeshcat()
 
     save_dir_path = os.path.abspath(os.path.join(os.path.dirname( __file__ ), '..', 'tests', args.save_dir))
-    scanning_traj_path = os.path.abspath(os.path.join(os.path.dirname( __file__ ), '..', 'scanning_traj'))
     start_scenario(
         save_dir_path, 
         scenario_path= args.scenario_path, 
         gripper_model_path=gripper_model_path,
         models_path=args.models_path, 
-        scanning_traj_dir=scanning_traj_path,
         pkl1_path=args.pkl1_path,
         pkl2_path=args.pkl2_path,
         traj_dir=args.traj_dir,

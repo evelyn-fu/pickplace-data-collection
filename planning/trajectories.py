@@ -1,6 +1,7 @@
 import numpy as np
 from pydrake.all import (
     PiecewisePolynomial,
+    PiecewisePose,
     RigidTransform,
     RotationMatrix,
     RollPitchYaw
@@ -35,62 +36,119 @@ def MakePickAndDisplayGripperFrames(X_G, gripper_length, pregrasp_dist, place_fl
     X_GprepickGpredisplay = X_G["prepick"].inverse() @ X_G["display_traj"][0]
 
     # Amount of time it takes to GET TO each frame
-    times = {"prepick": 0.5}
+    times = {"prepick": 0.0}
     
     # Allow some time for the gripper to close.
     X_G["pick_start"] = X_G["pick"]
     X_G["pick_end"] = X_G["pick"]
-    times["pick_start"] = 1.0
-    times["pick_end"] = 0.0
+    times["pick_start"] = 2.0
+    times["pick_end"] = 1.0
 
     # raise object off surface
     X_G["postpick"] = RigidTransform(X_G["pick"].rotation(), X_G["pick"].translation() + [0, 0, 0.2])
-    times["postpick"] = 1.0
+    times["postpick"] = 2.0
 
-    # Give time to get to start of display trajectory
-    time_to_predisplay = 5.0 * np.linalg.norm(
-        X_GprepickGpredisplay.translation()
-    )
-    # special case where first value is time to first frame in traj, and second is time to consecutive frames
-    times["display_traj"] = [time_to_predisplay, 0.1] 
+    # time to consecutive frames
+    times["display_traj"] = 0.1
 
     # Prepare to place back down
-    X_G["preplace"] = RigidTransform(X_G["place"].rotation(), X_G["place"].translation() + [0, 0, 0.2])
-    times["preplace"] = time_to_predisplay
+    if place_flipped:
+        X_G["preplace"] = RigidTransform(X_G["place"].rotation(), X_G["place"].translation() + [0, 0, 0.2])
+    else:
+        X_G["preplace"] = X_G["postpick"]
+    times["preplace"] = 0.0
 
     # Place back down and allow some time for gripper to open
     X_G["place_start"] = X_G["place"]
     X_G["place_end"] = X_G["place"]
-    times["place_start"] = 1.0
-    times["place_end"] = 0.0
+    times["place_start"] = 2.0
+    times["place_end"] = 1.0
 
     # Go back to prepick pose
     if place_flipped:
         X_GgraspGpostgrasp = RigidTransform([0, 0.0, -pregrasp_dist])
         X_G["postplace"] = X_G["place"] @ X_GgraspGpostgrasp
-        times["postplace"] = 1.0
+        times["postplace"] = 2.0
         X_G["postpostplace"] = X_G["prepick"]
-        times["postpostplace"] = 1.0
+        times["postpostplace"] = 2.0
     else:
         X_G["postplace"] = X_G["prepick"]
-        times["postplace"] = 1.0
-
+        times["postplace"] = 2.0
 
     return X_G, times
 
-def MakePickAndDisplayJointPositionsTrajectory(
+def MakeGripperPoseTrajectory(X_G, times, predisplay=True, t0=0.0):
+    """Constructs a gripper position trajectory from the plan "sketch"."""
+    if predisplay:
+        names = [
+        "prepick",
+        "pick_start",
+        "pick_end",
+        "postpick",
+        ]
+    else:
+        names = [
+        "preplace", 
+        "place_start",
+        "place_end",
+        "postplace",
+        ]
+
+    sample_times = []
+    poses = []
+    for name in names:
+        if len(sample_times) == 0:
+            sample_times.append(times[name] + t0)
+        else:
+            sample_times.append(sample_times[-1] + times[name])
+        poses.append(X_G[name])
+
+    return PiecewisePose.MakeLinear(sample_times, poses)
+
+def MakeGripperCommandTrajectory(times, predisplay=True, t0=0.0):
+    """Constructs a WSG command trajectory from the plan "sketch"."""
+    opened = np.array([0.107])
+    closed = np.array([0.0])
+
+    if predisplay:
+        names = [
+        "prepick",
+        "pick_start",
+        "pick_end",
+        "postpick",
+        ]
+    else:
+        names = [
+        "preplace", 
+        "place_start",
+        "place_end",
+        "postplace",
+        ]
+
+    sample_times = []
+    positions = []
+    for name in names:
+        if len(sample_times) == 0:
+            sample_times.append(times[name] + t0)
+        else:
+            sample_times.append(sample_times[-1] + times[name])
+        
+        if name == "prepick" or name == "pick_start" or name == "place_end" or name == "postplace":
+            positions.append(opened)
+        else:
+            positions.append(closed)
+
+    t = PiecewisePolynomial.FirstOrderHold(sample_times, np.array(positions).T)
+    return t
+
+def MakeDisplayJointPositionsTrajectory(
         X_G, 
         times, 
         plant, 
-        q, 
-        q_prepick, 
-        place_flipped=False, 
-        max_display_frames=6,
+        q,
         joint_limits=None):
     """
-    Constructs a gripper position trajectory from the plan "sketch".
-    Returns joint configuration for each gripper position in a dictionary joint_configs and a peicewise polynomial
-    trajectory for the display along the last joint
+    Returns a peicewise polynomial trajectory for the display along the last joint
 
     X_G: map of gripper poses for each frame, with X_G["display_traj"] being a list of possible poses
         to center the display trajectory at
@@ -102,135 +160,60 @@ def MakePickAndDisplayJointPositionsTrajectory(
     """
     sample_times = []
     positions = []
-    q_prev = q
     q_display_center = None
-    joint_configs = {}
-    for name in [
-        #### Traj 1 Start ###
-        "prepick",
-        "pick_start",
-        #### Traj 1 End ###
-        #### Traj 2 Start ###
-        "pick_end",
-        "postpick",
-        #### Traj 2 End ###
-        # plan with gcs between postpick and display
-        #### Traj 3 Start ###
-        "display_traj",
-        #### Traj 3 End ###
-        # plan with gcs between display and preplace
-        #### Traj 4 Start ###
-        "preplace", 
-        "place_start",
-        #### Traj 4 End ###
-        #### Traj 5 Start ###
-        "place_end",
-        "postplace",
-        #### Traj 5 End ###
-    ]:
-        if name == "display_traj":
-            center_found = False
-            for i in range(len(X_G["display_traj"])):
-                # find one display pose to act as center
+
+    center_found = False
+    for i in range(len(X_G["display_traj"])):
+        # find one display pose to act as center
+        q_display_center = solve_global_inverse_kinematics(
+            plant=plant,
+            X_G=X_G["display_traj"][i],
+            initial_guess=q,
+            position_tolerance=0.0,
+            orientation_tolerance=0.005,
+            gripper_frame_name="iiwa_link_7",
+            joint_limits=joint_limits
+        )
+        if q_display_center is None:
+            print("IK failed at q_display_center")
+            attempts = 0
+            while q_display_center is None and attempts < 10:
+                print("trying global inverse kinematics with new initial guess randomized around q")
                 q_display_center = solve_global_inverse_kinematics(
                     plant=plant,
                     X_G=X_G["display_traj"][i],
-                    initial_guess=q_prev,
+                    initial_guess=q + np.random.normal(0, np.pi/4, 7),
                     position_tolerance=0.0,
                     orientation_tolerance=0.005,
                     gripper_frame_name="iiwa_link_7",
                     joint_limits=joint_limits
                 )
-                if q_display_center is None:
-                    print("IK failed at q_display_center")
-                    attempts = 0
-                    while q_display_center is None and attempts < 10:
-                        print("trying global inverse kinematics with new initial guess randomized around q")
-                        q_display_center = solve_global_inverse_kinematics(
-                            plant=plant,
-                            X_G=X_G["display_traj"][i],
-                            initial_guess=q_prev + np.random.normal(0, np.pi/4, 7),
-                            position_tolerance=0.0,
-                            orientation_tolerance=0.005,
-                            gripper_frame_name="iiwa_link_7",
-                            joint_limits=joint_limits
-                        )
-                        attempts += 1
+                attempts += 1
 
-                    if q_next is None:
-                        print("IK failed again at q_display_center")
-                    else:
-                        print("phew.")
-                if q_display_center is not None:
-                    # construct trajectory of rotating 7th joint
-                    q7s = [0.0, np.pi/4, np.pi/2, 3*np.pi/4, np.pi * 165.0 / 180.0, 
-                               3*np.pi/4, np.pi/2, np.pi/4, 
-                               0.0, -np.pi/4, -np.pi/2, -3*np.pi/4, -np.pi * 165.0 / 180.0]
-                    for i in range(len(q7s)):
-                        q_temp = q_display_center.copy()
-                        q_temp[6] = q7s[i]
-                        positions.append(q_temp)
-                        
-                        if i == 0:
-                            sample_times.append((sample_times[-1] if len(sample_times) != 0 else 0) + times[name][0])
-                        else:
-                            sample_times.append((sample_times[-1] if len(sample_times) != 0 else 0) + times[name][1])
-
-                    center_found = True
-                    q_prev = q_temp
-                    break
-            if not center_found:
-                raise Exception("Failed to solve global IK for display trajectory center")
+            if q_display_center is None:
+                print("IK failed again at q_display_center")
             else:
-                joint_configs["display_center"] = q_display_center
-        else:
-            q_next = solve_global_inverse_kinematics(
-                plant=plant,
-                X_G=X_G[name],
-                initial_guess=q_prev,
-                position_tolerance=0.0,
-                orientation_tolerance=0.0,
-                gripper_frame_name="iiwa_link_7",
-                joint_limits=joint_limits
-            )
-            if q_next is None:
-                print("IK failed at", name)
-                attempts = 0
-                while q_next is None and attempts < 10:
-                    print("trying global inverse kinematics with new initial guess randomized around q")
-                    q_next = solve_global_inverse_kinematics(
-                        plant=plant,
-                        X_G=X_G[name],
-                        initial_guess=q_prev + np.random.normal(0, np.pi/4, 7),
-                        position_tolerance=0.0,
-                        orientation_tolerance=0.0,
-                        gripper_frame_name="iiwa_link_7",
-                        joint_limits=joint_limits
-                    )
-                    attempts += 1
+                print("phew.")
+        if q_display_center is not None:
+            # construct trajectory of rotating 7th joint
+            q7s = [0.0, np.pi/4, np.pi/2, 3*np.pi/4, np.pi * 165.0 / 180.0, 
+                        3*np.pi/4, np.pi/2, np.pi/4, 
+                        0.0, -np.pi/4, -np.pi/2, -3*np.pi/4, -np.pi * 165.0 / 180.0,
+                        -np.pi/2, 0.0]
+            for j in range(len(q7s)):
+                q_temp = q_display_center.copy()
+                q_temp[6] = q7s[j]
+                positions.append(q_temp)
+                
+                sample_times.append((sample_times[-1] if len(sample_times) != 0 else 0) + times["display_traj"])
 
-                if q_next is None:
-                    print("IK failed again at", name)
-                else:
-                    print("phew.")
-            
-            if q_next is not None:
-                q_prev = q_next
+            center_found = True
+            display_center = X_G["display_traj"][i]
+            break
 
-            joint_configs[name] = q_next
-
-            if name == "prepick":
-                joint_configs[name] = q_prepick
-            elif name == "pick_end":
-                joint_configs[name] = joint_configs["pick_start"]
-            elif name == "preplace" and not place_flipped:
-                joint_configs[name] = joint_configs["postpick"]
-            elif name == "place_start" and not place_flipped:
-                joint_configs[name] = joint_configs["pick_start"]
-            elif name == "place_end":
-                joint_configs[name] = joint_configs["place_start"]
-            elif name == "postplace" and not place_flipped:
-                joint_configs[name] = joint_configs["prepick"]
+    if not center_found:
+        raise Exception("Failed to solve global IK for display trajectory center")
     
+    q_display_center[6] = 0.0
     t = PiecewisePolynomial.FirstOrderHold(sample_times, np.array(positions).T)
-    return t, joint_configs
+    return t, q_display_center
