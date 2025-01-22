@@ -42,7 +42,7 @@ def MakePickAndDisplayGripperFrames(X_G, gripper_length, pregrasp_dist, place_fl
     X_G["pick_start"] = X_G["pick"]
     X_G["pick_end"] = X_G["pick"]
     times["pick_start"] = 2.0
-    times["pick_end"] = 1.0
+    times["pick_end"] = 2.0
 
     # raise object off surface
     X_G["postpick"] = RigidTransform(X_G["pick"].rotation(), X_G["pick"].translation() + [0, 0, 0.2])
@@ -62,7 +62,7 @@ def MakePickAndDisplayGripperFrames(X_G, gripper_length, pregrasp_dist, place_fl
     X_G["place_start"] = X_G["place"]
     X_G["place_end"] = X_G["place"]
     times["place_start"] = 2.0
-    times["place_end"] = 1.0
+    times["place_end"] = 2.0
 
     # Go back to prepick pose
     if place_flipped:
@@ -208,7 +208,6 @@ def MakeDisplayJointPositionsTrajectory(
                 sample_times.append((sample_times[-1] if len(sample_times) != 0 else 0) + times["display_traj"])
 
             center_found = True
-            display_center = X_G["display_traj"][i]
             break
 
     if not center_found:
