@@ -540,7 +540,7 @@ class TwoGraspPlanner(LeafSystem):
             default_home=q_home,
             gripper_length=0.12,
             pregrasp_dist=0.18,
-            eef_to_gripper_length=0.15,
+            eef_to_gripper_length=0.12,
         ):
         LeafSystem.__init__(self)
 
@@ -664,9 +664,9 @@ class TwoGraspPlanner(LeafSystem):
         self.fake_plant, self.fake_plant_context = make_iiwa_plant()
         self.velocity_limits = 0.4 * np.ones(7)
         self.acceleration_limits = 0.4 * np.ones(7)
-        self.display_velocity_limits = 1.0 * np.ones(7)
-        # self.display_velocity_limits[6] = 0.05
-        self.display_acceleration_limits = 1.0 * np.ones(7)
+        self.display_velocity_limits = 0.2 * np.ones(7)
+        self.display_velocity_limits[6] = 0.05
+        self.display_acceleration_limits = 0.2 * np.ones(7)
         self.regions = [] #regions
         self.object_com = None
         self.object_dims = None
@@ -890,9 +890,101 @@ class TwoGraspPlanner(LeafSystem):
             pass
         
         mode = context.get_abstract_state(int(self._mode_index)).get_value()
-        # temporarily do not get second pcd to avoid scs failing
-        if mode == PlannerState.SCANNING1:
-            self.current_manipuland_pcd = down_sampled_pcd
+        # Use RANSAC to find transformation from original pose during second grasp
+        if mode == PlannerState.SCANNING2:
+            source = o3d.geometry.PointCloud()
+            source.points = o3d.utility.Vector3dVector(self.current_manipuland_pcd.xyzs().T)
+            target = o3d.geometry.PointCloud()
+            target.points = o3d.utility.Vector3dVector(down_sampled_pcd.xyzs().T)
+            source.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
+            target.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
+            
+            # Compute FPFH features (Fast Point Feature Histograms)
+            radius_feature = 0.15
+            source_fpfh = o3d.pipelines.registration.compute_fpfh_feature(source, o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=50))
+            target_fpfh = o3d.pipelines.registration.compute_fpfh_feature(target, o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=50))
+
+            # Apply RANSAC-based global registration
+            print("RANSACing")
+            distance_threshold = 0.02  # Maximum correspondence points-pair distance
+            ransac_result = o3d.pipelines.registration.registration_ransac_based_on_feature_matching(
+                source, target, source_fpfh, target_fpfh,
+                mutual_filter=True,  # Use mutual nearest neighbor filtering
+                max_correspondence_distance=distance_threshold,
+                estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPoint(),
+                ransac_n=3,  # Number of points to use for RANSAC
+                checkers=[
+                    o3d.pipelines.registration.CorrespondenceCheckerBasedOnDistance(distance_threshold)
+                ],
+                criteria=o3d.pipelines.registration.RANSACConvergenceCriteria(100000, 100)
+            )
+
+            # Extract and print the transformation matrix
+            transformation = ransac_result.transformation
+            print(transformation)
+
+            # Check if transformation is too large
+            translation_magnitude = np.linalg.norm(transformation[:3, 3])
+            rotation_magnitude = np.arccos((np.trace(transformation[:3, :3]) - 1) / 2)
+            print(translation_magnitude, rotation_magnitude)
+            
+            if translation_magnitude > 0.05 or rotation_magnitude > np.pi * 20.0/180.0:
+                print("Transformation is too large, realigning grasp 2")
+                self.X_WG2 = self.X_WG2.multiply(RigidTransform(transformation).inverse())
+
+                # Visualize updated grasp after transformation
+                manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(self.current_manipuland_pcd.xyzs().T))
+                manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
+
+                gripper2_xyzs = self.grasp_node.hand_collision_model.to_pcd()
+                gripper2_cloud = (
+                    o3d.geometry.PointCloud(o3d.utility.Vector3dVector(gripper2_xyzs))
+                    .voxel_down_sample(ONLINE_VOXEL_RADIUS)
+                    .transform(
+                        (self.X_WG2.multiply(
+                            RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2), [0,0,0])
+                        )).GetAsMatrix4()
+                    )
+                )
+                gripper2_cloud.paint_uniform_color([0.0, 1.0, 0.0])
+
+                viz_geoms = [manipuland_cloud, gripper2_cloud]
+                o3d.visualization.draw_plotly(viz_geoms)
+
+                # get end effector pose from grasp pose
+                X_GE = RigidTransform(RotationMatrix(RollPitchYaw(0, 0, 0)), [0, 0, -self.eef_to_gripper_length])
+
+                # pregrasp is negative z in the gripper frame
+                X_GgraspGpregrasp = RigidTransform([0, 0.0, -self.pregrasp_dist])
+                X_WPregrasp2 = (RigidTransform(self.X_WG2) @ X_GE) @ X_GgraspGpregrasp
+
+                q_goal2 = solve_global_inverse_kinematics(
+                    plant=self._iiwa_controller_plant,
+                    X_G=X_WPregrasp2,
+                    initial_guess=self.q_pregrasp2,
+                    position_tolerance=0.0,
+                    orientation_tolerance=0.0,
+                    gripper_frame_name="iiwa_link_7",
+                    joint_limits=self.joint_limits
+                )
+                attempts = 0
+                while q_goal2 is None:
+                    print("trying global inverse kinematics with new initial guess randomized around q")
+                    q_goal2 = solve_global_inverse_kinematics(
+                        plant=self._iiwa_controller_plant,
+                        X_G=X_WPregrasp2,
+                        initial_guess=self.q_pregrasp2 + np.random.normal(0, np.pi/4, 7),
+                        position_tolerance=0.0,
+                        orientation_tolerance=0.0,
+                        gripper_frame_name="iiwa_link_7",
+                        joint_limits=self.joint_limits
+                    )
+                    attempts += 1
+                self.q_pregrasp2 = q_goal2
+                self.PlanPickAndDisplay(context, state, skip_first=True)
+                
+
+        self.current_manipuland_pcd = down_sampled_pcd
         print("object pcd got in", time.time()-start, "seconds")
 
         start = time.time()
@@ -1137,7 +1229,7 @@ class TwoGraspPlanner(LeafSystem):
             self.current_manipuland_pcd,
             pcd_with_background,
             candidate_num=1,
-            num_samples=15,
+            num_samples=20,
             random_seed=np.random.randint(1000),
         )
 
@@ -1172,7 +1264,7 @@ class TwoGraspPlanner(LeafSystem):
                 joint_limits=self.joint_limits
             )
             attempts = 0
-            while q_goal1 is None and attempts < 10:
+            while q_goal1 is None and attempts < 5:
                 print("trying global inverse kinematics with new initial guess randomized around q")
                 q_goal1 = solve_global_inverse_kinematics(
                     plant=self._iiwa_controller_plant,
@@ -1203,7 +1295,7 @@ class TwoGraspPlanner(LeafSystem):
                 joint_limits=self.joint_limits
             )
             attempts = 0
-            while q_goal2 is None and attempts < 10:
+            while q_goal2 is None and attempts < 5:
                 print("trying global inverse kinematics with new initial guess randomized around q")
                 q_goal2 = solve_global_inverse_kinematics(
                     plant=self._iiwa_controller_plant,
@@ -1257,39 +1349,39 @@ class TwoGraspPlanner(LeafSystem):
         # Solve for pick and display trajectories before moving
         self.PlanPickAndDisplay(context, state)
 
-    def PlanPickAndDisplay(self, context, state):
+    def PlanPickAndDisplay(self, context, state, skip_first=False):
         # get end effector pose from grasp pose
         X_GE = RigidTransform(RotationMatrix(RollPitchYaw(0, 0, 0)), [0, 0, -self.eef_to_gripper_length])
         X_GgraspGpregrasp = RigidTransform([0, 0.0, -self.pregrasp_dist])
+        if not skip_first:
+            # First Pick
+            X_WG1 = self.X_WG1
+            X_WE1 = X_WG1.multiply(X_GE)
 
-        # First Pick
-        X_WG1 = self.X_WG1
-        X_WE1 = X_WG1.multiply(X_GE)
+            X_G1 = {
+                "pick": X_WE1,
+                "prepick": X_WE1 @ X_GgraspGpregrasp
+            }
 
-        X_G1 = {
-            "pick": X_WE1,
-            "prepick": X_WE1 @ X_GgraspGpregrasp
-        }
+            X_G1["display_traj"] = yaw_display_traj
+            place_flipped = False #lets not do this for now
+            X_G1, times1 = MakePickAndDisplayGripperFrames(X_G1, self.gripper_length, self.pregrasp_dist, place_flipped)
 
-        X_G1["display_traj"] = yaw_display_traj
-        place_flipped = False #lets not do this for now
-        X_G1, times1 = MakePickAndDisplayGripperFrames(X_G1, self.gripper_length, self.pregrasp_dist, place_flipped)
-
-        display_traj1, self.q_display_center1 = MakeDisplayJointPositionsTrajectory(
-            X_G1, 
-            times1, 
-            self._iiwa_controller_plant, 
-            self.q_pregrasp1,
-            joint_limits=self.joint_limits)
-        
-        state.get_mutable_abstract_state(int(self._times_index1)).set_value(
-            times1
-        )
-        state.get_mutable_abstract_state(int(self._gripper_pose_index1)).set_value(
-            X_G1
-        )
-        
-        state.get_mutable_abstract_state(self._display_traj_index1).set_value(display_traj1)
+            display_traj1, self.q_display_center1 = MakeDisplayJointPositionsTrajectory(
+                X_G1, 
+                times1, 
+                self._iiwa_controller_plant, 
+                self.q_pregrasp1,
+                joint_limits=self.joint_limits)
+            
+            state.get_mutable_abstract_state(int(self._times_index1)).set_value(
+                times1
+            )
+            state.get_mutable_abstract_state(int(self._gripper_pose_index1)).set_value(
+                X_G1
+            )
+            
+            state.get_mutable_abstract_state(self._display_traj_index1).set_value(display_traj1)
 
         # Second Pick
         X_WG2 = self.X_WG2

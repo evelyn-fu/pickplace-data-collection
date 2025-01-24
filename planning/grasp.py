@@ -427,12 +427,12 @@ class GraspListener():
         higher_up_cost = -min(t[2] - 0.15, 0) / 0.15
 
         cost = (
-            30 * antipodal_cost
+            50 * antipodal_cost
             + 10.0 * gripper_vertical_axis_alignment_cost[2]
             + 5.0 * gripper_vertical_axis_alignment_cost[1]
-            + 10.0 * split_ratio_cost
+            + 20.0 * split_ratio_cost
             + 20.0 * higher_up_cost
-            - 30.0 * proportion_enclosed
+            - 50.0 * proportion_enclosed
         )
         return cost
 
@@ -743,7 +743,7 @@ class GraspListener():
         yaw_max = np.pi / 2
         num_yaw_samples = 7
 
-        # np.random.seed(random_seed)
+        np.random.seed(random_seed)
 
         pcd_points = pcd.xyzs().T
 
@@ -790,6 +790,7 @@ class GraspListener():
         if not PARALLEL:
             # Local grid search around darboux frames
             candidate_lst: List[np.ndarray] = []
+            candidate_lst_by_grasp_origin_pt: List[np.ndarray] = []
             candidate_costs: List[float] = []
             for X_WP, split_ratio in zip(X_WPs, split_ratios[darboux_frame_sample_indices]):
                 color = np.random.rand(3)
@@ -828,6 +829,7 @@ class GraspListener():
                                 is_nonempty, within_box_pt_normals, proportion_enclosed = self.check_nonempty(pcd, X_WPnew)
                                 if is_nonempty:
                                     candidate_lst.append(X_WPnew.GetAsMatrix4())
+                                    candidate_lst_by_grasp_origin_pt.append(X_WP.GetAsMatrix4())
                                     viz_geoms.append(self.make_gripper_line_set(X_WPnew.GetAsMatrix4(), color))
                                     candidate_costs.append(
                                         self.compute_costs(
@@ -868,6 +870,7 @@ class GraspListener():
             pcd_W_normals = pcd.normals()[np.newaxis, :]
 
             candidate_lst: List[np.ndarray] = []
+            candidate_lst_by_grasp_origin_pt: List[np.ndarray] = []
             candidate_costs: List[float] = []
             for X_WP, split_ratio in zip(X_WPs, split_ratios[darboux_frame_sample_indices]):
                 batch_delta_transform = np.zeros((len(batch_rot), 4, 4))
@@ -892,6 +895,7 @@ class GraspListener():
 
                 # Pick valid grasps and associated costs
                 candidate_lst.append(X_WPnew_batch_nonempty)
+                candidate_lst_by_grasp_origin_pt.append(X_WP_batch)
                 candidate_costs.append(grasp_costs[cage_mask])
 
             candidate_lst = np.concatenate(candidate_lst, axis=0)
@@ -907,13 +911,15 @@ class GraspListener():
 
         # Two grasp selection
         candidate_lst = np.array(candidate_lst)
+        candidate_lst_by_grasp_origin_pt = np.array(candidate_lst_by_grasp_origin_pt)
         candidate_costs = np.array(candidate_costs)
         sorted_candidate_inds = np.argsort(candidate_costs)[:len(candidate_costs) // 2]
         candidates_filtered = candidate_lst[sorted_candidate_inds]
+        candidates_grasp_origin_filtered = candidate_lst_by_grasp_origin_pt[sorted_candidate_inds]
         candidate_costs_filtered = candidate_costs[sorted_candidate_inds]
     
-        # Extract translations (last column of each 4x4 matrix)
-        translations = candidates_filtered[:, :3, 3]
+        # Extract translations from grasp origin pts (last column of each 4x4 matrix)
+        translations = candidates_grasp_origin_filtered[:, :3, 3]
         
         # Compute pairwise translation differences
         translation_diffs = np.linalg.norm(translations[:, np.newaxis] - translations[np.newaxis, :], axis=-1)

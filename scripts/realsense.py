@@ -15,7 +15,7 @@ def isData():
     return select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], [])
 
 
-def realsense(dirstr="temp", serial="928222061590"):
+def realsense(dirstr="temp", serial="811313020078"):
     if os.path.exists(dirstr):
         shutil.rmtree(dirstr)
         
@@ -23,35 +23,29 @@ def realsense(dirstr="temp", serial="928222061590"):
     os.makedirs(dirstr+"/rgb/")
     os.makedirs(dirstr+"/depth/")
 
+    # Create context object to get all devices connected
+    ctx = rs.context()
+
+    # Query all devices
+    devices = ctx.query_devices()
+
+    print(f"Number of devices found: {len(devices)}")
+    for device in devices:
+        print(f"Device serial number: {device.get_info(rs.camera_info.serial_number)}")
+
     # Create a pipeline
     pipeline = rs.pipeline()
+    
+    # Serial number of the 4th camera (get this from the output of the previous script)
+    fourth_camera_serial = devices[0].get_info(rs.camera_info.serial_number)  # Assumes 4th camera is at index 3
 
     # Create a config and configure the pipeline to stream
     #  different resolutions of color and depth streams
     config = rs.config()
-    config.enable_device(serial)
+    config.enable_device(str(fourth_camera_serial))
 
-    # Get device product line for setting a supporting resolution
-    pipeline_wrapper = rs.pipeline_wrapper(pipeline)
-    pipeline_profile = config.resolve(pipeline_wrapper)
-    device = pipeline_profile.get_device()
-    device_product_line = str(device.get_info(rs.camera_info.product_line))
-
-    found_rgb = False
-    for s in device.sensors:
-        if s.get_info(rs.camera_info.name) == 'RGB Camera':
-            found_rgb = True
-            break
-    if not found_rgb:
-        print("The demo requires Depth camera with Color sensor")
-        exit(0)
-
-    config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 30)
- 
-    if device_product_line == 'L500':
-        config.enable_stream(rs.stream.color, 1920, 1080, rs.format.rgb8, 30)
-    else:
-        config.enable_stream(rs.stream.color, 1920, 1080, rs.format.rgb8, 30)
+    # config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 30)
+    # config.enable_stream(rs.stream.color, 1920, 1080, rs.format.rgb8, 30)
 
     # Start streaming
     profile = pipeline.start(config)
@@ -142,7 +136,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "serial",
-        default="928222061590",
+        default="811313020078",
         help="serial number of camera to save from",
         nargs='?',
     )
