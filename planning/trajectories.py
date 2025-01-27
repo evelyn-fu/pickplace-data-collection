@@ -69,8 +69,6 @@ def MakePickAndDisplayGripperFrames(X_G, gripper_length, pregrasp_dist, place_fl
         X_GgraspGpostgrasp = RigidTransform([0, 0.0, -pregrasp_dist])
         X_G["postplace"] = X_G["place"] @ X_GgraspGpostgrasp
         times["postplace"] = 2.0
-        X_G["postpostplace"] = X_G["prepick"]
-        times["postpostplace"] = 2.0
     else:
         X_G["postplace"] = X_G["prepick"]
         times["postplace"] = 2.0

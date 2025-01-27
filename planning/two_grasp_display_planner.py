@@ -658,6 +658,8 @@ class TwoGraspPlanner(LeafSystem):
         self.q_display_center1 = None
         self.q_display_center2 = None
         self.q_postgrasp = None
+        self.place_flipped1 = False
+        self.place_flipped2 = True
         self.meshcat = meshcat
         self.plant = plant
         self._iiwa_controller_plant = controller_plant
@@ -912,7 +914,7 @@ class TwoGraspPlanner(LeafSystem):
                 mutual_filter=True,  # Use mutual nearest neighbor filtering
                 max_correspondence_distance=distance_threshold,
                 estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPoint(),
-                ransac_n=3,  # Number of points to use for RANSAC
+                ransac_n=4,  # Number of points to use for RANSAC
                 checkers=[
                     o3d.pipelines.registration.CorrespondenceCheckerBasedOnDistance(distance_threshold)
                 ],
@@ -928,12 +930,12 @@ class TwoGraspPlanner(LeafSystem):
             rotation_magnitude = np.arccos((np.trace(transformation[:3, :3]) - 1) / 2)
             print(translation_magnitude, rotation_magnitude)
             
-            if translation_magnitude > 0.05 or rotation_magnitude > np.pi * 20.0/180.0:
+            if translation_magnitude > 0.05 or rotation_magnitude > np.pi * 10.0/180.0:
                 print("Transformation is too large, realigning grasp 2")
-                self.X_WG2 = self.X_WG2.multiply(RigidTransform(transformation).inverse())
+                self.X_WG2 = self.X_WG2.multiply(RigidTransform(transformation))
 
                 # Visualize updated grasp after transformation
-                manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(self.current_manipuland_pcd.xyzs().T))
+                manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(down_sampled_pcd.xyzs().T))
                 manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
 
                 gripper2_xyzs = self.grasp_node.hand_collision_model.to_pcd()
@@ -1229,7 +1231,7 @@ class TwoGraspPlanner(LeafSystem):
             self.current_manipuland_pcd,
             pcd_with_background,
             candidate_num=1,
-            num_samples=20,
+            num_samples=30,
             random_seed=np.random.randint(1000),
         )
 
@@ -1259,7 +1261,7 @@ class TwoGraspPlanner(LeafSystem):
                 X_G=X_WPregrasp1,
                 initial_guess=q,
                 position_tolerance=0.005,
-                orientation_tolerance=0.005,
+                orientation_tolerance=0.01,
                 gripper_frame_name="iiwa_link_7",
                 joint_limits=self.joint_limits
             )
@@ -1271,7 +1273,7 @@ class TwoGraspPlanner(LeafSystem):
                     X_G=X_WPregrasp1,
                     initial_guess=q + np.random.normal(0, np.pi/4, 7),
                     position_tolerance=0.005,
-                    orientation_tolerance=0.005,
+                    orientation_tolerance=0.01,
                     gripper_frame_name="iiwa_link_7",
                     joint_limits=self.joint_limits
                 )
@@ -1364,8 +1366,7 @@ class TwoGraspPlanner(LeafSystem):
             }
 
             X_G1["display_traj"] = yaw_display_traj
-            place_flipped = False #lets not do this for now
-            X_G1, times1 = MakePickAndDisplayGripperFrames(X_G1, self.gripper_length, self.pregrasp_dist, place_flipped)
+            X_G1, times1 = MakePickAndDisplayGripperFrames(X_G1, self.gripper_length, self.pregrasp_dist, self.place_flipped1)
 
             display_traj1, self.q_display_center1 = MakeDisplayJointPositionsTrajectory(
                 X_G1, 
@@ -1393,8 +1394,7 @@ class TwoGraspPlanner(LeafSystem):
         }
 
         X_G2["display_traj"] = yaw_display_traj
-        place_flipped = False #lets not do this for now
-        X_G2, times2 = MakePickAndDisplayGripperFrames(X_G2, self.gripper_length, self.pregrasp_dist, place_flipped)
+        X_G2, times2 = MakePickAndDisplayGripperFrames(X_G2, self.gripper_length, self.pregrasp_dist, self.place_flipped2)
 
         display_traj2, self.q_display_center2 = MakeDisplayJointPositionsTrajectory(
             X_G2, 
@@ -1402,6 +1402,38 @@ class TwoGraspPlanner(LeafSystem):
             self._iiwa_controller_plant, 
             self.q_pregrasp2,
             joint_limits=self.joint_limits)
+
+        if self.place_flipped2:
+            print("Solving for flipped place")
+            self.q_postgrasp = solve_global_inverse_kinematics(
+                plant=self._iiwa_controller_plant,
+                X_G=X_G2["preplace"],
+                initial_guess=self.q_display_center2,
+                position_tolerance=0.005,
+                orientation_tolerance=0.01,
+                gripper_frame_name="iiwa_link_7",
+                joint_limits=self.joint_limits
+            )
+            if self.q_postgrasp is None:
+                print("IK failed at q_postgrasp")
+                attempts = 0
+                while self.q_postgrasp is None and attempts < 10:
+                    print("trying global inverse kinematics with new initial guess randomized around q")
+                    self.q_postgrasp = solve_global_inverse_kinematics(
+                        plant=self._iiwa_controller_plant,
+                        X_G=X_G2["preplace"],
+                        initial_guess=self.q_display_center2 + np.random.normal(0, np.pi/4, 7),
+                        position_tolerance=0.005,
+                        orientation_tolerance=0.01,
+                        gripper_frame_name="iiwa_link_7",
+                        joint_limits=self.joint_limits
+                    )
+                    attempts += 1
+
+                if self.q_postgrasp is None:
+                    print("IK again at q_postgrasp2")
+                else:
+                    print("phew.")
 
         state.get_mutable_abstract_state(int(self._times_index2)).set_value(
             times2
@@ -1442,12 +1474,15 @@ class TwoGraspPlanner(LeafSystem):
     def GoToDisplay(self, context, state):
         mode = context.get_abstract_state(int(self._mode_index)).get_value()
         q = self.get_input_port(self._iiwa_position_index).Eval(context)
-        self.q_postgrasp = q
         
         if mode == PlannerState.GRASP1:
             q_goal = self.q_display_center1
+            if not self.place_flipped1:
+                self.q_postgrasp = q
         else:
             q_goal = self.q_display_center2
+            if not self.place_flipped2:
+                self.q_postgrasp = q
         
         x, y = np.meshgrid(np.arange(0.0, 1.02, 0.02), np.arange(-0.4, 0.42, 0.02))
         ceiling_vox = np.vstack((x.flatten(), y.flatten(), np.zeros_like(x.flatten())))
