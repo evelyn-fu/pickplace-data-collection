@@ -13,6 +13,8 @@ from pydrake.all import (
     HPolyhedron
 )
 
+from mmt_gcs.planning.corridor_planning_utils import CollisionCheckerBase
+from planning.analytic_ik_iiwa_7 import Analytic_IK_7DoF, iiwa_limits_lower, iiwa_limits_upper, iiwa_alpha, iiwa_d
 
 def solve_global_inverse_kinematics(
     plant: MultibodyPlant,
@@ -84,44 +86,33 @@ def solve_global_inverse_kinematics(
     q_sol = result.GetSolution(q_variables)
     return q_sol
 
-def solve_ik_problem_pete(pose, 
-                     plant,
-                     plant_context, 
-                     q0,
-                     domain:Union[HPolyhedron, None] = None,
-                     track_orientation = True,
-                     collision_free = True,
-                     tol = 0.005):
+def sample_ik_params():
+    #returns three discrete {-1,1} values and one continuous random value [0, 2*pi]
+    return int(2*(np.random.randint(2)-0.5)), int(2*(np.random.randint(2)-0.5)), int(2*(np.random.randint(2)-0.5)), np.random.rand()*2*np.pi 
 
-    ik = InverseKinematics(plant, plant_context)
-    prog = ik.get_mutable_prog()
-    q = ik.q()  
-    if domain is not None:
-        domain_restrict = HPolyhedron(domain.A(), domain.b()-0.01)
-        domain_restrict.AddPointInSetConstraints(prog, q)
-
-    ik.AddPositionConstraint(plant.GetFrameByName('iiwa_link_7'), 
-                         np.zeros(3),
-                         plant.world_frame(),
-                         pose.translation()-tol,
-                         pose.translation()+tol,
-                         )
+def solve_via_analytic_IK(pose: RigidTransform,
+                          current_config : np.ndarray,
+                          ik_domain: HPolyhedron,
+                          checker: CollisionCheckerBase):
     
-    if track_orientation:
-            ik.AddOrientationConstraint(
-                plant.GetFrameByName('iiwa_link_7'),
-                RotationMatrix(),
-                plant.world_frame(),
-                pose.rotation(),
-                tol,
-            )
-    if collision_free:
-        ik.AddMinimumDistanceLowerBoundConstraint(0.015, 0.1)
-        #ik.AddMinimumDistanceConstraint(0.01, 0.1)
-    prog.AddQuadraticErrorCost(np.identity(len(q)), q0, q)
-    prog.SetInitialGuess(q, q0)
-    result = Solve(ik.prog())
-    if result.is_success():
-            return result.GetSolution(q)
-    else:
+    analytic_ik = Analytic_IK_7DoF(iiwa_alpha, iiwa_d, iiwa_limits_lower, iiwa_limits_upper)
+    N_configs = 150
+    configs = []
+    for _ in range(N_configs):
+        GC2, GC4, GC6, psi = sample_ik_params()
+        configs.append(analytic_ik.IK(pose.GetAsMatrix4(), [GC2, GC4, GC6], psi))
+    configs =np.array(configs).T
+    res = checker.CheckConfigsCollisionFree(configs)
+    idx_col_free =np.where(res)[0]
+    if len(idx_col_free)==0:
         return None
+    print(f"[ANALYTIC IK] NUMBER OF CONFIGS {len(idx_col_free)}")
+    candidates = configs[:, idx_col_free].reshape(7, len(idx_col_free))
+    candidates = np.array([c for c in candidates.T if ik_domain.PointInSet(c)]).T
+    print(f"[ANALYTIC IK] NUMBER OF CONFIGS in IK domain {len(candidates.T)}")
+    if len(candidates)==0:
+        return None        
+    dists = np.linalg.norm(candidates - current_config.reshape(7, 1), axis=0)\
+    + 0.5*np.linalg.norm(candidates, axis=0)
+    print(f" dists : {len(dists)} {dists.shape}")
+    return candidates[:, np.argmin(dists)]

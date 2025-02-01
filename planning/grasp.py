@@ -427,12 +427,45 @@ class GraspListener():
         higher_up_cost = -min(t[2] - 0.15, 0) / 0.15
 
         cost = (
-            50 * antipodal_cost
+            60 * antipodal_cost
             + 10.0 * gripper_vertical_axis_alignment_cost[2]
             + 5.0 * gripper_vertical_axis_alignment_cost[1]
             + 20.0 * split_ratio_cost
             + 10.0 * higher_up_cost
-            - 50.0 * proportion_enclosed
+            - 60.0 * proportion_enclosed
+        )
+        return cost
+    def compute_costs_single(
+            self, 
+            X_WG: RigidTransform, 
+            within_box_pt_normals: np.ndarray, 
+            fraction_enclosed: float,
+            split_ratios: np.ndarray, 
+            major_split_axis: int,
+            minor_split_axis: int,
+            align_grasp_axis: List[float]=[0,0,1],
+            align_minor_axis: List[float]=[1,0,0],
+            ) -> float:
+        R = X_WG.GetAsMatrix4()[:3, :3]
+        t = X_WG.GetAsMatrix4()[:3, 3]
+        eff_vertical_vec = R.dot(np.array([0, 0, 1])) # vertical axis of gripper (parallel to fingers)
+        eff_horizontal_vec = R.dot(np.array([0, 1, 0])) # horizontal axis of gripper (line connecting finger tips)
+        
+        antipodal_cost = -np.sum(
+            within_box_pt_normals[1, :] ** 2
+        ) / within_box_pt_normals.shape[1]  # along the horizontal axis of the gripper, larger good (antipodal metric)
+
+        gripper_axis_alignment_cost = -np.abs(eff_vertical_vec @ align_grasp_axis)  # want vertical axis of gripper to face towards desired axis
+        gripper_minor_alignment_cost = -np.abs(eff_horizontal_vec @ align_minor_axis) # want horizontal axis of gripper to align with minor axis 
+        split_ratio_minor_axis_cost = -split_ratios[minor_split_axis]  # prefer higher split ratio
+        split_ratio_major_axis_cost = -split_ratios[major_split_axis]
+        cost = (
+            10.0 * antipodal_cost
+            + 10.0 * gripper_axis_alignment_cost
+            + 5.0 * gripper_minor_alignment_cost
+            + 5.0 * split_ratio_minor_axis_cost
+            + 5.0 * split_ratio_major_axis_cost
+            + 5.0 * fraction_enclosed
         )
         return cost
 
@@ -706,7 +739,17 @@ class GraspListener():
         return line_set
 
     def compute_candidate_grasps(
-        self, pcd: PointCloud, pcd_with_background: PointCloud, candidate_num=30, num_samples=20, random_seed=5
+        self, 
+        pcd: PointCloud, 
+        pcd_with_background: PointCloud, 
+        candidate_num=30, 
+        num_samples=20, 
+        random_seed=5,
+        pair=True,
+        align_grasp_axis = [0, 0, 1], 
+        align_minor_axis = [1, 0, 0], 
+        split_axis=2, 
+        minor_split_axis=0
     ):
         """
         Compute sorted candidate grasps.
@@ -831,15 +874,29 @@ class GraspListener():
                                     candidate_lst.append(X_WPnew.GetAsMatrix4())
                                     candidate_lst_by_grasp_origin_pt.append(X_WP.GetAsMatrix4())
                                     viz_geoms.append(self.make_gripper_line_set(X_WPnew.GetAsMatrix4(), color))
-                                    candidate_costs.append(
-                                        self.compute_costs(
-                                            X_WPnew, 
-                                            within_box_pt_normals,
-                                            proportion_enclosed, 
-                                            split_ratio,
-                                            split_axes
+                                    if pair:
+                                        candidate_costs.append(
+                                            self.compute_costs(
+                                                X_WPnew, 
+                                                within_box_pt_normals,
+                                                proportion_enclosed, 
+                                                split_ratio,
+                                                split_axes
+                                            )
                                         )
-                                    )
+                                    else:
+                                        candidate_costs.append(
+                                            self.compute_costs_single(
+                                                X_WPnew, 
+                                                within_box_pt_normals, 
+                                                proportion_enclosed,
+                                                split_ratio, 
+                                                split_axis, 
+                                                minor_split_axis, 
+                                                align_grasp_axis, 
+                                                align_minor_axis
+                                            )
+                                        )
                                     if VISUALIZE_EACH:
                                         # print(candidate_costs[-1])
                                         manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
@@ -909,86 +966,54 @@ class GraspListener():
 
         start = time.time()
 
-        # Two grasp selection
-        candidate_lst = np.array(candidate_lst)
-        candidate_lst_by_grasp_origin_pt = np.array(candidate_lst_by_grasp_origin_pt)
-        candidate_costs = np.array(candidate_costs)
-        sorted_candidate_inds = np.argsort(candidate_costs)[:len(candidate_costs) // 2]
-        candidates_filtered = candidate_lst[sorted_candidate_inds]
-        candidates_grasp_origin_filtered = candidate_lst_by_grasp_origin_pt[sorted_candidate_inds]
-        candidate_costs_filtered = candidate_costs[sorted_candidate_inds]
-    
-        # Extract translations from grasp origin pts (last column of each 4x4 matrix)
-        translations = candidates_grasp_origin_filtered[:, :3, 3]
+        if pair:
+            # Two grasp selection
+            candidate_lst = np.array(candidate_lst)
+            candidate_lst_by_grasp_origin_pt = np.array(candidate_lst_by_grasp_origin_pt)
+            candidate_costs = np.array(candidate_costs)
+            sorted_candidate_inds = np.argsort(candidate_costs)[:len(candidate_costs) // 2]
+            candidates_filtered = candidate_lst[sorted_candidate_inds]
+            candidates_grasp_origin_filtered = candidate_lst_by_grasp_origin_pt[sorted_candidate_inds]
+            candidate_costs_filtered = candidate_costs[sorted_candidate_inds]
         
-        # Compute pairwise translation differences
-        translation_diffs = np.linalg.norm(translations[:, np.newaxis] - translations[np.newaxis, :], axis=-1)
-        translation_cost = -translation_diffs / length
-        
-        # Extract rotations (top-left 3x3 part of each 4x4 matrix)
-        rotations = candidates_filtered[:, :3, :3]
-        
-        # Compute pairwise rotational differences
-        # R_relative = R2^T @ R1 (for each pair of rotations R1, R2)
-        relative_rotations = np.einsum('nij,mjk->nmik', rotations, rotations.transpose(0, 2, 1))
-        
-        # Compute the angle of rotation from the relative rotation matrices
-        # Trace(R_relative) = 1 + 2*cos(theta), where theta is the angle of rotation
-        trace_relative_rotations = np.einsum('...ii', relative_rotations)
-        rotation_diffs = np.arccos(np.clip((trace_relative_rotations - 1) / 2, -1.0, 1.0))  # Avoid precision errors
-        rotation_cost = np.abs(np.pi/2 - rotation_diffs) / (np.pi/2)
+            # Extract translations from grasp origin pts (last column of each 4x4 matrix)
+            translations = candidates_grasp_origin_filtered[:, :3, 3]
+            
+            # Compute pairwise translation differences
+            translation_diffs = np.linalg.norm(translations[:, np.newaxis] - translations[np.newaxis, :], axis=-1)
+            translation_cost = -translation_diffs / length
+            
+            # Extract rotations (top-left 3x3 part of each 4x4 matrix)
+            rotations = candidates_filtered[:, :3, :3]
+            
+            # Compute pairwise rotational differences
+            # R_relative = R2^T @ R1 (for each pair of rotations R1, R2)
+            relative_rotations = np.einsum('nij,mjk->nmik', rotations, rotations.transpose(0, 2, 1))
+            
+            # Compute the angle of rotation from the relative rotation matrices
+            # Trace(R_relative) = 1 + 2*cos(theta), where theta is the angle of rotation
+            trace_relative_rotations = np.einsum('...ii', relative_rotations)
+            rotation_diffs = np.arccos(np.clip((trace_relative_rotations - 1) / 2, -1.0, 1.0))  # Avoid precision errors
+            rotation_cost = np.abs(np.pi/2 - rotation_diffs) / (np.pi/2)
 
-        grasps_quality = candidate_costs_filtered[:, np.newaxis] + candidate_costs_filtered[np.newaxis, :]
+            grasps_quality = candidate_costs_filtered[:, np.newaxis] + candidate_costs_filtered[np.newaxis, :]
 
-        pair_costs = grasps_quality + 20 * translation_cost + 20 * rotation_cost
-        pair_costs = np.triu(pair_costs, k=1) + np.tril(np.inf * np.ones_like(pair_costs)) # make lower + diagonal infinity to avoid double counting
-        pair_costs = pair_costs.flatten()
-        pairs = [(X_WG1, X_WG2) for X_WG1 in candidates_filtered for X_WG2 in candidates_filtered]
+            pair_costs = grasps_quality + 20 * translation_cost + 20 * rotation_cost
+            pair_costs = np.triu(pair_costs, k=1) + np.tril(np.inf * np.ones_like(pair_costs)) # make lower + diagonal infinity to avoid double counting
+            pair_costs = pair_costs.flatten()
+            pairs = [(X_WG1, X_WG2) for X_WG1 in candidates_filtered for X_WG2 in candidates_filtered]
 
-        # sorted_indices = np.argsort(candidate_costs)
-        # candidate_lst_sorted = [candidate_lst[idx] for idx in sorted_indices]
-        # candidate_costs_sorted = [candidate_costs[idx] for idx in sorted_indices]
-        # pairs = []
-        # pair_costs = []
-        # for i in range(len(candidate_lst_sorted)-1):
-        #     for j in range(i+1, len(candidate_lst_sorted)):
-        #         X_WG1 = candidate_lst_sorted[i]
-        #         X_WG2 = candidate_lst_sorted[j]
-        #         cost1 = candidate_costs_sorted[i]
-        #         cost2 = candidate_costs_sorted[j]
+            sorted_pair_indices = np.argsort(pair_costs)
+            pair_lst_sorted = [pairs[idx] for idx in sorted_pair_indices]
 
-        #         R1 = X_WG1.GetAsMatrix4()[:3, :3]
-        #         t1 = X_WG1.GetAsMatrix4()[:3, 3]
-        #         R2 = X_WG2.GetAsMatrix4()[:3, :3]
-        #         t2 = X_WG2.GetAsMatrix4()[:3, 3]
+            print("pair selection time:", time.time()-start)
+            # List of grasp pairs
+            self.grasp_candidates: List[Tuple[np.ndarray]] = pair_lst_sorted
+        else:
+            sorted_indices = np.argsort(candidate_costs)
+            candidate_lst_sorted = [candidate_lst[idx] for idx in sorted_indices]
 
-        #         # normalized translational distance between grasps, higher better
-        #         dist_cost = -np.linalg.norm(t1 - t2) / length 
-                
-        #         # TODO: maybe try to avoid axis alignment? (big gripper fingers, more obstruction when grasping along long axis)
-        #         R_1_2 = np.linalg.inv(R1) @ R2
-        #         r = R.from_matrix(R_1_2)
-        #         angle_of_rotation = r.magnitude()
-
-        #         # normalized distance from 90 degree rotation, lower better
-        #         rot_cost = np.abs(np.pi/2 - angle_of_rotation) / (np.pi/2)
-
-        #         total_cost = (
-        #             cost1 + 
-        #             cost2 + 
-        #             10 * dist_cost + 
-        #             10 * rot_cost
-        #         )
-
-        #         pairs.append((X_WG1, X_WG2))
-        #         pair_costs.append(total_cost)
-
-        sorted_pair_indices = np.argsort(pair_costs)
-        pair_lst_sorted = [pairs[idx] for idx in sorted_pair_indices]
-
-        print("pair selection time:", time.time()-start)
-        # List of grasp pairs
-        self.grasp_candidates: List[Tuple[np.ndarray]] = pair_lst_sorted
+            self.grasp_candidates: List[np.ndarray] = candidate_lst_sorted
 
     def get_best_grasps(self, candidate_num=-1) -> List[Tuple[np.ndarray]]:
         """Returns a list of the `candidate_num` grasps with the lowest cost."""

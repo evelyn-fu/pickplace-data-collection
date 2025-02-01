@@ -1,95 +1,110 @@
-# Imports
 import numpy as np
-from pydrake.all import PointCloud, Rgba, RigidTransform, RotationMatrix, StartMeshcat
-from scipy.spatial import KDTree
+import open3d as o3d
+import copy
+from scipy.spatial.transform import Rotation as R
 
-def least_squares_transform(scene, model) -> RigidTransform:
-    """
-    Calculates the least-squares best-fit transform that maps corresponding
-    points scene to model.
-    Args:
-      scene: 3xN numpy array of corresponding points
-      model: 3xM numpy array of corresponding points
-    Returns:
-      X_BA: A RigidTransform object that maps point_cloud_A on to point_cloud_B
-            such that
-                        X_BA.multiply(model) ~= scene,
-    """
-
-    # Ensure that the input arrays are 3xN
-    assert scene.shape[0] == 3 and model.shape[0] == 3, "Scene and model must be 3xN arrays"
-
-    s_bar = np.mean(scene, axis=1)
-    m_bar = np.mean(model, axis=1)
+# Before RANSAC, add initial alignment
+def get_initial_alignment(source, target):
+    source_copy = copy.deepcopy(source)
+    target_copy = copy.deepcopy(target)
+    # Center both point clouds
+    source_center = np.mean(np.asarray(source_copy.points), axis=0)
+    target_center = np.mean(np.asarray(target_copy.points), axis=0)
+    source_centered = source_copy.translate(-source_center)
+    target_centered = target_copy.translate(-target_center)
     
-    # 2. Center the points by subtracting the centroids
-    s_centered = scene - s_bar[:, np.newaxis]
-    m_centered = model - m_bar[:, np.newaxis]
+    # Get principal axes
+    source_cov = np.cov(np.asarray(source_centered.points).T)
+    target_cov = np.cov(np.asarray(target_centered.points).T)
+    source_eigvals, source_eigvecs = np.linalg.eigh(source_cov)
+    target_eigvals, target_eigvecs = np.linalg.eigh(target_cov)
     
-    # 3. Compute the covariance matrix
-    W = np.dot(s_centered, m_centered.T)
+    # Sort by eigenvalues to match corresponding axes
+    source_order = source_eigvals.argsort()[::-1]
+    target_order = target_eigvals.argsort()[::-1]
+    source_eigvecs = source_eigvecs[:, source_order]
+    target_eigvecs = target_eigvecs[:, target_order]
     
-    U, S, V_T = np.linalg.svd(W)
-    D = np.array([[1, 0, 0], [0, 1, 0], [0, 0, np.linalg.det(U @ V_T)]])
-    R = U @ D @ V_T
-    p = s_bar - R @ m_bar
+    # Build rotation matrix
+    R = target_eigvecs @ source_eigvecs.T
     
-    # 7. Create the RigidTransform
-    X_BA = RigidTransform(RotationMatrix(R), p)
+    # Ensure it's a valid rotation matrix (right-handed)
+    if np.linalg.det(R) < 0:
+        source_eigvecs[:, 2] *= -1
+        R = target_eigvecs @ source_eigvecs.T
+    
+    # Build full transformation
+    T = np.eye(4)
+    T[:3, :3] = R
+    T[:3, 3] = target_center - source_center
+    
+    return T
 
-    return X_BA
-
-def nearest_neighbors(scene, model):
-    """
-    Find the nearest (Euclidean) neighbor in model for each
-    point in scene
-    Args:
-        scene: 3xN numpy array of points
-        model: 3xM numpy array of points
-    Returns:
-        distances: (N, ) numpy array of Euclidean distances from each point in
-            scene to its nearest neighbor in model.
-        indices: (N, ) numpy array of the indices in model of each
-            scene point's nearest neighbor - these are the c_i's
-    """
-    kdtree = KDTree(model.T)
-
-    distances, indices = kdtree.query(scene.T, k=1)
-
-    return distances.flatten(), indices.flatten()
-
-def icp(scene, model, max_iterations=20, tolerance=1e-3):
-    """
-    Perform ICP to return the correct relative transform between two set of points.
-    Args:
-        scene: 3xN numpy array of points
-        model: 3xM numpy array of points
-        max_iterations: max amount of iterations the algorithm can perform.
-        tolerance: tolerance before the algorithm converges.
-    Returns:
-      X_BA: A RigidTransform object that maps point_cloud_A on to point_cloud_B
-            such that
-                        X_BA.multiply(model) ~= scene,
-      mean_error: Mean of all pairwise distances.
-      num_iters: Number of iterations it took the ICP to converge.
-    """
-    X_BA = RigidTransform()
-
-    mean_error = 0
-    num_iters = 0
-    prev_error = 0
-
-    while True:
-        num_iters += 1  
-          
-        curr_model = X_BA @ model
-        distances, indices = nearest_neighbors(scene, curr_model)
-        mean_error = np.mean(distances)
+# Try multiple initial alignments
+def try_multiple_alignments(source, target, distance_threshold=0.05):
+    # Get initial alignment
+    init_transform = get_initial_alignment(source, target)
+    
+    # Try original orientation and 180° rotations around each axis
+    rotations = [
+        np.eye(4),  # Original
+        R.from_rotvec([np.pi, 0, 0]).as_matrix(),  # 180° around X
+        R.from_rotvec([0, np.pi, 0]).as_matrix(),  # 180° around Y
+        R.from_rotvec([0, 0, np.pi]).as_matrix()   # 180° around Z
+    ]
+    
+    best_transform = None
+    best_fitness = 0
+    
+    for rot in rotations:
+        # Combine initial alignment with current rotation
+        test_transform = np.copy(init_transform)
+        test_transform[:3, :3] = rot[:3, :3] @ init_transform[:3, :3]
         
-        X_BA = least_squares_transform(scene, curr_model[...,indices]) @ X_BA
-        if abs(mean_error - prev_error) < tolerance or num_iters >= max_iterations:
-            break
-
-        prev_error = mean_error
-
-    return X_BA, mean_error, num_iters
+        # Apply test transformation
+        source_transformed = copy.deepcopy(source)
+        source_transformed.transform(test_transform)
+        
+        # Compute FPFH features
+        source_transformed.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
+        target.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
+        radius_feature = 0.3
+        source_fpfh = o3d.pipelines.registration.compute_fpfh_feature(
+            source_transformed,
+            o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=100)
+        )
+        target_fpfh = o3d.pipelines.registration.compute_fpfh_feature(
+            target,
+            o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=100)
+        )
+        
+        # Run RANSAC
+        result = o3d.pipelines.registration.registration_ransac_based_on_feature_matching(
+            source_transformed, target, source_fpfh, target_fpfh,
+            mutual_filter=True,
+            max_correspondence_distance=distance_threshold,
+            estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPoint(),
+            ransac_n=30,
+            checkers=[
+                o3d.pipelines.registration.CorrespondenceCheckerBasedOnDistance(distance_threshold),
+                o3d.pipelines.registration.CorrespondenceCheckerBasedOnNormal(0.5),
+                o3d.pipelines.registration.CorrespondenceCheckerBasedOnEdgeLength(0.9)
+            ],
+            criteria=o3d.pipelines.registration.RANSACConvergenceCriteria(400000, 100)
+        )
+        
+        # Refine with ICP
+        icp_result = o3d.pipelines.registration.registration_icp(
+            source_transformed, target, distance_threshold,
+            result.transformation,
+            o3d.pipelines.registration.TransformationEstimationPointToPoint(),
+            o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=100)
+        )
+        
+        # Update best result if current result is better
+        if icp_result.fitness > best_fitness:
+            best_fitness = icp_result.fitness
+            best_result = icp_result
+            best_transform = test_transform @ icp_result.transformation
+    
+    return best_transform, best_fitness

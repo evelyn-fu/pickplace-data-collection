@@ -39,6 +39,7 @@ from pydrake.math import (
 from pydrake.solvers import MosekSolver, GurobiSolver
 
 from planning.two_grasp_display_planner import TwoGraspPlanner
+from planning.turntable_planner import TurntablePlanner
 from perception.image_saver import ImageSaver
 from perception.camera_in_world import CameraPoseInWorldSource
 from planning.trajectory_sources import TrajectoryWithTimingInformationSource, DummyTrajSource
@@ -88,29 +89,12 @@ def start_scenario(
         scenario_path="scenario_data_grasping.yml", 
         models_path="scenario_data_grasping_no_object.dmd.yaml", 
         gripper_model_path="",
-        pkl1_path="", 
-        pkl2_path="", 
         traj_dir="",
         use_hardware=False, 
         save_imgs=False,
-        load_pkl_region1=False,
-        load_pkl_region2=False,
-        use_same_pkl_regions=False,
-        static_regions=False,
-        no_obstacles=False,
-        load_trajectories=False
+        load_trajectories=False,
+        turntable=False
     ):
-    if load_pkl_region1:
-        if pkl1_path == "":
-            print("Must provide path to at pkl file to load region 1")
-            return
-    if use_same_pkl_regions:
-        pkl2_path = pkl1_path
-        print("Using regions 1 for regions 2")
-    elif load_pkl_region2:
-        if pkl2_path == "":
-            print("Must provide path to at pkl file to load region 2")
-            return
         
     if load_trajectories and traj_dir == "":
         print("Must provide path to directory with trajectories to load trajectories")
@@ -273,35 +257,31 @@ def start_scenario(
         "iiwa_controller_plant_pointer_system"
     ).get()
 
-    iris_regions1 = None
-    iris_regions2 = None
-    if static_regions:
-        iris_regions1 = get_regions_static(os.path.join(dir_path, os.path.join("scenario_datas", models_path)), dirstr)
-        iris_regions2 = iris_regions1
-    if load_pkl_region1:
-        with open(pkl1_path, 'rb') as f:
-            iris_regions1 = pickle.load(f)
-        if use_same_pkl_regions:
-            iris_regions2 = iris_regions1
-    if load_pkl_region2 and iris_regions2 is None:
-        with open(pkl2_path, 'rb') as f:
-            iris_regions2 = pickle.load(f)
-
     # Set up planner
-    planner = builder.AddSystem(TwoGraspPlanner(
-            plant=plant, 
-            controller_plant=controller_plant,
-            X_WC0=x_front_camera,
-            X_WC1=x_back_left_camera,
-            X_WC2=x_back_right_camera,
-            meshcat=meshcat,
-            dirstr=dirstr,
-            regions1=iris_regions1,
-            regions2=iris_regions2,
-            traj_dir=traj_dir,
-            models_path=os.path.join(dir_path, os.path.join("scenario_datas", models_path)),
-            no_obstacles=no_obstacles,
-            gripper_model_path=gripper_model_path))
+    if turntable:
+        planner = builder.AddSystem(TurntablePlanner(
+                plant=plant, 
+                controller_plant=controller_plant,
+                X_WC0=x_front_camera,
+                X_WC1=x_back_left_camera,
+                X_WC2=x_back_right_camera,
+                meshcat=meshcat,
+                dirstr=dirstr,
+                traj_dir=traj_dir,
+                models_path=os.path.join(dir_path, os.path.join("scenario_datas", models_path)),
+                gripper_model_path=gripper_model_path))
+    else:
+        planner = builder.AddSystem(TwoGraspPlanner(
+                plant=plant, 
+                controller_plant=controller_plant,
+                X_WC0=x_front_camera,
+                X_WC1=x_back_left_camera,
+                X_WC2=x_back_right_camera,
+                meshcat=meshcat,
+                dirstr=dirstr,
+                traj_dir=traj_dir,
+                models_path=os.path.join(dir_path, os.path.join("scenario_datas", models_path)),
+                gripper_model_path=gripper_model_path))
 
     if save_imgs:
         builder.Connect(planner.GetOutputPort("planner_state"), img_saver.GetInputPort("planner_state"))
@@ -480,18 +460,6 @@ if __name__ == "__main__":
         nargs='?',
     )
     parser.add_argument(
-        "--pkl1_path",
-        default="",
-        help="path to first regions pkl file",
-        nargs='?',
-    )
-    parser.add_argument(
-        "--pkl2_path",
-        default="",
-        help="path to first regions pkl file",
-        nargs='?',
-    )
-    parser.add_argument(
         "--traj_dir",
         default="",
         help="path to directory with saved gcs trajectories",
@@ -508,29 +476,9 @@ if __name__ == "__main__":
         help="yaml file with scenario",
     )
     parser.add_argument(
-        "--load_pkl_region1",
-        action='store_true',
-        help="whether to load regions from pkl file",
-    )
-    parser.add_argument(
-        "--load_pkl_region2",
-        action='store_true',
-        help="whether to load regions from pkl file",
-    )
-    parser.add_argument(
-        "--use_same_pkl_regions",
-        action='store_true',
-        help="whether to load regions from pkl file",
-    )
-    parser.add_argument(
-        "--static_regions",
-        action='store_true',
-        help="if false includes object from point cloud as obstacle",
-    )
-    parser.add_argument(
-        "--no_obstacles",
-        action='store_true',
-        help="if true, plans gcs without any obstacles",
+        "--turntable",
+        action="store_true",
+        help="Whether to use turntable planner.",
     )
     parser.add_argument(
         "--load_trajectories",
@@ -553,15 +501,9 @@ if __name__ == "__main__":
         scenario_path= args.scenario_path, 
         gripper_model_path=gripper_model_path,
         models_path=args.models_path, 
-        pkl1_path=args.pkl1_path,
-        pkl2_path=args.pkl2_path,
         traj_dir=args.traj_dir,
         use_hardware=args.use_hardware, 
         save_imgs=args.save_imgs,
-        load_pkl_region1=args.load_pkl_region1,
-        load_pkl_region2=args.load_pkl_region2,
-        use_same_pkl_regions=args.use_same_pkl_regions,
-        static_regions=args.static_regions,
-        no_obstacles=args.no_obstacles,
-        load_trajectories=args.load_trajectories
+        load_trajectories=args.load_trajectories,
+        turntable=args.turntable
     )

@@ -6,7 +6,7 @@ from pydrake.all import (
     RotationMatrix,
     RollPitchYaw
 )
-from planning.inverse_kinematics import solve_global_inverse_kinematics
+from planning.inverse_kinematics import solve_global_inverse_kinematics, solve_via_analytic_IK
 
 def MakePickAndDisplayGripperFrames(X_G, gripper_length, pregrasp_dist, place_flipped=False):
     """
@@ -142,9 +142,9 @@ def MakeGripperCommandTrajectory(times, predisplay=True, t0=0.0):
 def MakeDisplayJointPositionsTrajectory(
         X_G, 
         times, 
-        plant, 
         q,
-        joint_limits=None):
+        ik_domain,
+        cci_checker):
     """
     Returns a peicewise polynomial trajectory for the display along the last joint
 
@@ -163,35 +163,41 @@ def MakeDisplayJointPositionsTrajectory(
     center_found = False
     for i in range(len(X_G["display_traj"])):
         # find one display pose to act as center
-        q_display_center = solve_global_inverse_kinematics(
-            plant=plant,
-            X_G=X_G["display_traj"][i],
-            initial_guess=q,
-            position_tolerance=0.0,
-            orientation_tolerance=0.005,
-            gripper_frame_name="iiwa_link_7",
-            joint_limits=joint_limits
+        q_display_center = solve_via_analytic_IK(
+            pose=X_G["display_traj"][i],
+            current_config=q,
+            ik_domain=ik_domain,
+            checker=cci_checker
         )
-        if q_display_center is None:
-            print("IK failed at q_display_center")
-            attempts = 0
-            while q_display_center is None and attempts < 10:
-                print("trying global inverse kinematics with new initial guess randomized around q")
-                q_display_center = solve_global_inverse_kinematics(
-                    plant=plant,
-                    X_G=X_G["display_traj"][i],
-                    initial_guess=q + np.random.normal(0, np.pi/4, 7),
-                    position_tolerance=0.0,
-                    orientation_tolerance=0.005,
-                    gripper_frame_name="iiwa_link_7",
-                    joint_limits=joint_limits
-                )
-                attempts += 1
+        # q_display_center = solve_global_inverse_kinematics(
+        #     plant=plant,
+        #     X_G=X_G["display_traj"][i],
+        #     initial_guess=q,
+        #     position_tolerance=0.0,
+        #     orientation_tolerance=0.005,
+        #     gripper_frame_name="iiwa_link_7",
+        #     joint_limits=joint_limits
+        # )
+        # if q_display_center is None:
+        #     print("IK failed at q_display_center")
+        #     attempts = 0
+        #     while q_display_center is None and attempts < 10:
+        #         print("trying global inverse kinematics with new initial guess randomized around q")
+        #         q_display_center = solve_global_inverse_kinematics(
+        #             plant=plant,
+        #             X_G=X_G["display_traj"][i],
+        #             initial_guess=q + np.random.normal(0, np.pi/4, 7),
+        #             position_tolerance=0.0,
+        #             orientation_tolerance=0.005,
+        #             gripper_frame_name="iiwa_link_7",
+        #             joint_limits=joint_limits
+        #         )
+        #         attempts += 1
 
-            if q_display_center is None:
-                print("IK failed again at q_display_center")
-            else:
-                print("phew.")
+        #     if q_display_center is None:
+        #         print("IK failed again at q_display_center")
+        #     else:
+        #         print("phew.")
         if q_display_center is not None:
             # construct trajectory of rotating 7th joint
             q7s = [0.0, np.pi/4, np.pi/2, 3*np.pi/4, np.pi * 165.0 / 180.0, 
@@ -214,3 +220,102 @@ def MakeDisplayJointPositionsTrajectory(
     q_display_center[6] = 0.0
     t = PiecewisePolynomial.FirstOrderHold(sample_times, np.array(positions).T)
     return t, q_display_center
+
+def MakePushingJointPositionsTrajectory(
+        X_G_push, 
+        X_G_reset, 
+        q, 
+        ik_domain,
+        cci_checker
+    ):
+    sample_times = [0.0]
+    positions = [q]
+    q_prev = q
+    for i in range(len(X_G_push)):
+        X_G = X_G_push[i]
+        q_goal = solve_via_analytic_IK(
+            pose=X_G,
+            current_config=q,
+            ik_domain=ik_domain,
+            checker=cci_checker
+        )
+        # q_goal = solve_global_inverse_kinematics(
+        #     plant=plant,
+        #     X_G=X_G,
+        #     initial_guess=q_prev,
+        #     position_tolerance=0.005,
+        #     orientation_tolerance=0.01,
+        #     gripper_frame_name="iiwa_link_7",
+        #     joint_limits=joint_limits
+        # )
+
+        # attempts = 0
+        # while q_goal is None and attempts < 5:
+        #     print("trying global inverse kinematics with new initial guess randomized around q")
+        #     q_goal = solve_global_inverse_kinematics(
+        #         plant=plant,
+        #         X_G=X_G,
+        #         initial_guess=q + np.random.normal(0, np.pi/4, 7),
+        #         position_tolerance=0.005,
+        #         orientation_tolerance=0.01,
+        #         gripper_frame_name="iiwa_link_7",
+        #         joint_limits=joint_limits
+        #     )
+        #     attempts += 1
+        # if q_goal is None:
+        #     print("Cannot solve IK for", X_G, f"index {i} of push traj")
+        q_prev = q_goal
+        positions.append(q_goal)
+
+        if i == 0:
+            sample_times.append(0.01 + sample_times[-1])
+        else:
+            sample_times.append(0.04 + sample_times[-1])
+
+    for i in range(len(X_G_reset)):
+        X_G = X_G_reset[i]
+        q_goal = solve_via_analytic_IK(
+            pose=X_G,
+            current_config=q_prev,
+            ik_domain=ik_domain,
+            checker=cci_checker
+        )
+        # q_goal = solve_global_inverse_kinematics(
+        #     plant=plant,
+        #     X_G=X_G,
+        #     initial_guess=q_prev,
+        #     position_tolerance=0.005,
+        #     orientation_tolerance=0.01,
+        #     gripper_frame_name="iiwa_link_7",
+        #     joint_limits=joint_limits
+        # )
+        # while q_goal is None and attempts < 5:
+        #     print("trying global inverse kinematics with new initial guess randomized around q")
+        #     q_goal = solve_global_inverse_kinematics(
+        #         plant=plant,
+        #         X_G=X_G,
+        #         initial_guess=q + np.random.normal(0, np.pi/4, 7),
+        #         position_tolerance=0.005,
+        #         orientation_tolerance=0.01,
+        #         gripper_frame_name="iiwa_link_7",
+        #         joint_limits=joint_limits
+        #     )
+        #     attempts += 1
+        if q_goal is None:
+            print("Cannot solve IK for", X_G, f"index {i} of reset traj")
+        q_prev = q_goal
+        positions.append(q_goal)
+
+        if i == 0:
+            sample_times.append(0.01 + sample_times[-1])
+        else:
+            sample_times.append(0.001 + sample_times[-1])
+    
+    positions += positions[1:] * 7
+    cycle_time = sample_times[-1]
+    for i in range(1, 8):
+        timings = np.array([0.01] + [0.01 + 0.04*j for j in range(1, 8)] + [0.01 + 0.29] + [0.3 + 0.001*j for j in range(1,8)]) + cycle_time * i
+        sample_times += timings.tolist()
+
+    t = PiecewisePolynomial.FirstOrderHold(sample_times, np.array(positions).T)
+    return t

@@ -44,8 +44,8 @@ def realsense(dirstr="temp", serial="811313020078"):
     config = rs.config()
     config.enable_device(str(fourth_camera_serial))
 
-    # config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 30)
-    # config.enable_stream(rs.stream.color, 1920, 1080, rs.format.rgb8, 30)
+    config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 30)
+    config.enable_stream(rs.stream.color, 1920, 1080, rs.format.rgb8, 30)
 
     # Start streaming
     profile = pipeline.start(config)
