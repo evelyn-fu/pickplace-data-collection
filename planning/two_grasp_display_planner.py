@@ -470,6 +470,40 @@ def check_configuration_has_collisions(models_path, com, rot, dims, q):
     query_object = scene_graph.GetOutputPort("query").Eval(scene_graph_context)
     return query_object.HasCollisions()
 
+def apply_centered_rotation_and_translation(pose: np.ndarray, rotation: np.ndarray, translation: np.ndarray, center: np.ndarray) -> np.ndarray:
+    """
+    Apply a rotation and translation to a pose matrix, centered around a specific point.
+    
+    Args:
+        pose: 4x4 homogeneous transformation matrix
+        rotation: 3x3 rotation matrix
+        translation: 3x1 translation vector
+        center: (3,) array specifying the center of rotation
+    
+    Returns:
+        4x4 transformed pose matrix
+    """
+    # Create translation matrices
+    to_center = np.eye(4)
+    to_center[:3, 3] = -center
+    
+    from_center = np.eye(4)
+    from_center[:3, 3] = center
+    
+    # Create rotation matrix in homogeneous coordinates
+    rotation_h = np.eye(4)
+    rotation_h[:3, :3] = rotation
+    
+    # Apply transformations in sequence:
+    # 1. Translate to center
+    # 2. Apply rotation
+    # 3. Translate back from center
+    # 4. Apply to original pose
+    transform = from_center @ rotation_h @ to_center
+    transform = transform @ pose
+    transform[:3, 3] = transform[:3, 3] + translation
+    return transform
+
 class PlannerState(Enum):
     WAIT_FOR_OBJECTS_TO_SETTLE = 1
     START = 2
@@ -861,35 +895,36 @@ class TwoGraspPlanner(LeafSystem):
         mode = context.get_abstract_state(int(self._mode_index)).get_value()
         # Use RANSAC to find transformation from original pose during second grasp
         if mode == PlannerState.SCANNING2:
-            import copy
-            # source = o3d.geometry.PointCloud()
-            # source.points = o3d.utility.Vector3dVector(self.current_manipuland_pcd.xyzs().T)
-            # target = o3d.geometry.PointCloud()
-            # target.points = o3d.utility.Vector3dVector(down_sampled_pcd.xyzs().T)
-            
-            # transformation, fitness = try_multiple_alignments(source, target)
-
-            # # Extract and print the transformation matrix
-            # print(transformation, fitness)
-
             transformation = icp(self.current_manipuland_pcd.xyzs(), down_sampled_pcd.xyzs(), ONLINE_VOXEL_RADIUS)
             print("Received transformation:", transformation)
+            print("Inverted transformation:", np.linalg.inv(transformation))
 
             # visualize old manipuland cloud
             old_manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(self.current_manipuland_pcd.xyzs().T))
-            old_manipuland_cloud.paint_uniform_color([0.0, 1.0, 1.0])
+            old_manipuland_cloud.paint_uniform_color([0.0, 1.0, 1.0]) # Cyan
             print("Initial manipuland center:", old_manipuland_cloud.get_center())
 
             # Visualize transformed old manipuland cloud
             transformed_manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(self.current_manipuland_pcd.xyzs().T))
             transformed_manipuland_cloud.transform(transformation)
-            transformed_manipuland_cloud.paint_uniform_color([0.0, 1.0, 0.0])
+            transformed_manipuland_cloud.paint_uniform_color([1.0, 0.0, 0.0]) # Red
             print("Transformed manipuland center:", transformed_manipuland_cloud.get_center())
 
             # Visualize updated manipuland cloud
             manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(down_sampled_pcd.xyzs().T))
-            manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
+            manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0]) # Blue
             print("Updated manipuland center:", manipuland_cloud.get_center())
+
+            # Roundabout transformation
+            numpy_transformed_manipuland_points = self.current_manipuland_pcd.xyzs().T
+            numpy_transformed_manipuland_points = numpy_transformed_manipuland_points - old_manipuland_cloud.get_center()
+            numpy_transformed_manipuland_points = numpy_transformed_manipuland_points @ transformation[:3, :3].T
+            numpy_transformed_manipuland_points = numpy_transformed_manipuland_points + old_manipuland_cloud.get_center()
+            numpy_transformed_manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(numpy_transformed_manipuland_points))
+            translation_diff = transformed_manipuland_cloud.get_center() - numpy_transformed_manipuland_cloud.get_center()
+            numpy_transformed_manipuland_points = numpy_transformed_manipuland_points + translation_diff
+            numpy_transformed_manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(numpy_transformed_manipuland_points))
+            numpy_transformed_manipuland_cloud.paint_uniform_color([1.0, 0.0, 1.0]) # Magenta
             
             # Check if transformation is too large
             translation_magnitude = np.linalg.norm(transformation[:3, 3])
@@ -908,7 +943,13 @@ class TwoGraspPlanner(LeafSystem):
             )
             old_gripper2_cloud.paint_uniform_color([1.0, 1.0, 0.0])
 
-            temp_X_WG2 = self.X_WG2.multiply(RigidTransform(transformation))
+            temp_X_WG2 = apply_centered_rotation_and_translation(
+                self.X_WG2.GetAsMatrix4(), 
+                transformation[:3, :3], 
+                translation_diff, 
+                old_manipuland_cloud.get_center()
+            )
+            temp_X_WG2 = RigidTransform(temp_X_WG2)
             gripper2_xyzs = self.grasp_node.hand_collision_model.to_pcd()
             gripper2_cloud = (
                 o3d.geometry.PointCloud(o3d.utility.Vector3dVector(gripper2_xyzs))
@@ -923,15 +964,15 @@ class TwoGraspPlanner(LeafSystem):
 
             viz_geoms = [old_manipuland_cloud, old_gripper2_cloud, manipuland_cloud, gripper2_cloud]
             o3d.visualization.draw_plotly(viz_geoms)
-            viz_geoms = [old_manipuland_cloud, transformed_manipuland_cloud, manipuland_cloud]
+            viz_geoms = [old_manipuland_cloud, transformed_manipuland_cloud, manipuland_cloud, numpy_transformed_manipuland_cloud]
             o3d.visualization.draw_plotly(viz_geoms)
 
             input()
 
-            if translation_magnitude > 0.03 or rotation_magnitude > np.pi * 10.0/180.0:
+            if translation_magnitude > 0.01 or rotation_magnitude > np.pi * 5.0/180.0:
                 print("Transformation is too large, realigning grasp 2")
 
-                self.X_WG2 = self.X_WG2.multiply(RigidTransform(transformation))
+                self.X_WG2 = temp_X_WG2
                 
                 # get end effector pose from grasp pose
                 X_GE = RigidTransform(RotationMatrix(RollPitchYaw(0, 0, 0)), [0, 0, -self.eef_to_gripper_length])
@@ -951,6 +992,9 @@ class TwoGraspPlanner(LeafSystem):
                     ik_domain=self.ik_domain,
                     checker=cci_checker
                 )
+                if q_goal2 is None:
+                    print("Failed to solve IK for grasp 2")
+
                 self.q_pregrasp2 = q_goal2
                 self.PlanPickAndDisplay(context, state, skip_first=True)
                 

@@ -151,6 +151,7 @@ def icp(model: np.ndarray, scene: np.ndarray, voxel_size=0.005):
             model_transformed, scene_pcd, NOISE_BOUND, T_teaser,
             o3d.pipelines.registration.TransformationEstimationPointToPoint(),
             o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=100))
+        print("ICP solution:", icp_sol.transformation)
 
         # Update best result if current result is better
         if icp_sol.fitness > best_fitness:
