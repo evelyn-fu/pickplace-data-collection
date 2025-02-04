@@ -962,12 +962,10 @@ class TwoGraspPlanner(LeafSystem):
             )
             gripper2_cloud.paint_uniform_color([0.0, 1.0, 0.0])
 
-            viz_geoms = [old_manipuland_cloud, old_gripper2_cloud, manipuland_cloud, gripper2_cloud]
-            o3d.visualization.draw_plotly(viz_geoms)
-            viz_geoms = [old_manipuland_cloud, transformed_manipuland_cloud, manipuland_cloud, numpy_transformed_manipuland_cloud]
-            o3d.visualization.draw_plotly(viz_geoms)
-
-            input()
+            # viz_geoms = [old_manipuland_cloud, old_gripper2_cloud, manipuland_cloud, gripper2_cloud]
+            # o3d.visualization.draw_plotly(viz_geoms)
+            # viz_geoms = [old_manipuland_cloud, transformed_manipuland_cloud, manipuland_cloud, numpy_transformed_manipuland_cloud]
+            # o3d.visualization.draw_plotly(viz_geoms)
 
             if translation_magnitude > 0.01 or rotation_magnitude > np.pi * 5.0/180.0:
                 print("Transformation is too large, realigning grasp 2")
