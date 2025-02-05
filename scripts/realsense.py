@@ -15,7 +15,7 @@ def isData():
     return select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], [])
 
 
-def realsense(dirstr="temp", serial="811313020078"):
+def realsense(dirstr="temp", serial="810512062206"):
     if os.path.exists(dirstr):
         shutil.rmtree(dirstr)
         
@@ -36,8 +36,8 @@ def realsense(dirstr="temp", serial="811313020078"):
     # Create a pipeline
     pipeline = rs.pipeline()
     
-    # Serial number of the 4th camera (get this from the output of the previous script)
-    fourth_camera_serial = devices[0].get_info(rs.camera_info.serial_number)  # Assumes 4th camera is at index 3
+    # Serial number of the 5th camera (get this from the output of the previous script)
+    fourth_camera_serial = devices[1].get_info(rs.camera_info.serial_number)  # Assumes 5th camera is at index 3
 
     # Create a config and configure the pipeline to stream
     #  different resolutions of color and depth streams
@@ -136,7 +136,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "serial",
-        default="811313020078",
+        default="810512062206",
         help="serial number of camera to save from",
         nargs='?',
     )

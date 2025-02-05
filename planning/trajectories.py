@@ -8,7 +8,7 @@ from pydrake.all import (
 )
 from planning.inverse_kinematics import solve_global_inverse_kinematics, solve_via_analytic_IK
 
-def MakePickAndDisplayGripperFrames(X_G, gripper_length, pregrasp_dist, place_flipped=False):
+def MakePickAndDisplayGripperFrames(X_G, gripper_length, pregrasp_dist, place_flipped=False, X_GE=None):
     """
     Takes a partial specification with X_G["pick"], X_G["prepick"], and
     X_G["display_traj"] (a tuple of two list of poses of any length that begin with the same pose,
@@ -16,20 +16,34 @@ def MakePickAndDisplayGripperFrames(X_G, gripper_length, pregrasp_dist, place_fl
     and returns a X_G and times with all of the pick and display
     frames populated.
     """
-    # put down where it was picked up, rotated 180 to show other side
-    rot_180 = RigidTransform(RotationMatrix(RollPitchYaw(0, 0, np.pi)))
+    # put down where it was picked up, if place_flipped is true, rotate 180 to show other side
     X_G["place"] = X_G["pick"]
     if place_flipped:
-        R = X_G["pick"].GetAsMatrix4()[:3, :3]
-        t = X_G["pick"].GetAsMatrix4()[:3, 3]
-        X_G["place"] = rot_180 @ RigidTransform(RotationMatrix(R))
+        t_gripper_center = X_G["pick_gripper_frame"] @ [0, 0, gripper_length/2]
+        
+        # Calculate rotation matrix for 180 degrees around z-axis
+        R_z180 = np.array([
+            [-1, 0, 0],
+            [0, -1, 0], 
+            [0, 0, 1]
+        ])
+        
+        # Get current rotation and translation
+        R_current = X_G["pick_gripper_frame"].rotation().matrix()
+        t_current = X_G["pick_gripper_frame"].translation()
+        
+        # Apply rotation around z-axis centered at t_gripper_center
+        t_centered = t_current - t_gripper_center
+        t_rotated = R_z180 @ t_centered
+        t_final = t_rotated + t_gripper_center
+        
+        # Create new rotation matrix combining current rotation with z-axis rotation
+        R_final = R_z180 @ R_current
+        
+        # Set X_G["place"] to the rotated pose
+        X_G["place_gripper_frame"] = RigidTransform(RotationMatrix(R_final), t_final)
+        X_G["place"] = X_G["place_gripper_frame"].multiply(X_GE)
 
-        # calculate translation difference of bottom of gripper given rotation (t is top of gripper, want to place object back in same place)
-        t_gripper_angle = X_G["place"] @ [0, 0, gripper_length] # 12 cm is roughly the length of the gripper?
-        t_gripper_angle[2] = 0
-        t_gripper_angle *= 2
-        print(t_gripper_angle)
-        X_G["place"].set_translation(t - t_gripper_angle)
         print("X_pick", X_G["pick"])
         print("X_place", X_G["place"])
 
@@ -41,12 +55,12 @@ def MakePickAndDisplayGripperFrames(X_G, gripper_length, pregrasp_dist, place_fl
     # Allow some time for the gripper to close.
     X_G["pick_start"] = X_G["pick"]
     X_G["pick_end"] = X_G["pick"]
-    times["pick_start"] = 2.0
+    times["pick_start"] = 4.0
     times["pick_end"] = 2.0
 
     # raise object off surface
     X_G["postpick"] = RigidTransform(X_G["pick"].rotation(), X_G["pick"].translation() + [0, 0, 0.2])
-    times["postpick"] = 2.0
+    times["postpick"] = 6.0
 
     # time to consecutive frames
     times["display_traj"] = 0.1
@@ -61,17 +75,20 @@ def MakePickAndDisplayGripperFrames(X_G, gripper_length, pregrasp_dist, place_fl
     # Place back down and allow some time for gripper to open
     X_G["place_start"] = X_G["place"]
     X_G["place_end"] = X_G["place"]
-    times["place_start"] = 2.0
+    if place_flipped:
+        times["place_start"] = 10.0
+    else:
+        times["place_start"] = 6.0
     times["place_end"] = 2.0
 
     # Go back to prepick pose
     if place_flipped:
         X_GgraspGpostgrasp = RigidTransform([0, 0.0, -pregrasp_dist])
         X_G["postplace"] = X_G["place"] @ X_GgraspGpostgrasp
-        times["postplace"] = 2.0
+        times["postplace"] = 4.0
     else:
         X_G["postplace"] = X_G["prepick"]
-        times["postplace"] = 2.0
+        times["postplace"] = 4.0
 
     return X_G, times
 

@@ -96,7 +96,7 @@ def solve_via_analytic_IK(pose: RigidTransform,
                           checker: CollisionCheckerBase):
     
     analytic_ik = Analytic_IK_7DoF(iiwa_alpha, iiwa_d, iiwa_limits_lower, iiwa_limits_upper)
-    N_configs = 150
+    N_configs = 1000
     configs = []
     for _ in range(N_configs):
         GC2, GC4, GC6, psi = sample_ik_params()

@@ -427,12 +427,12 @@ class GraspListener():
         higher_up_cost = -min(t[2] - 0.15, 0) / 0.15
 
         cost = (
-            60 * antipodal_cost
+            100 * antipodal_cost
             + 10.0 * gripper_vertical_axis_alignment_cost[2]
             + 5.0 * gripper_vertical_axis_alignment_cost[1]
             + 20.0 * split_ratio_cost
             + 10.0 * higher_up_cost
-            - 60.0 * proportion_enclosed
+            - 100.0 * proportion_enclosed
         )
         return cost
     def compute_costs_single(
@@ -971,7 +971,7 @@ class GraspListener():
             candidate_lst = np.array(candidate_lst)
             candidate_lst_by_grasp_origin_pt = np.array(candidate_lst_by_grasp_origin_pt)
             candidate_costs = np.array(candidate_costs)
-            sorted_candidate_inds = np.argsort(candidate_costs)[:len(candidate_costs) // 2]
+            sorted_candidate_inds = np.argsort(candidate_costs)[:len(candidate_costs) // 10]
             candidates_filtered = candidate_lst[sorted_candidate_inds]
             candidates_grasp_origin_filtered = candidate_lst_by_grasp_origin_pt[sorted_candidate_inds]
             candidate_costs_filtered = candidate_costs[sorted_candidate_inds]
@@ -998,7 +998,7 @@ class GraspListener():
 
             grasps_quality = candidate_costs_filtered[:, np.newaxis] + candidate_costs_filtered[np.newaxis, :]
 
-            pair_costs = grasps_quality + 20 * translation_cost + 20 * rotation_cost
+            pair_costs = grasps_quality + 20 * translation_cost + 30 * rotation_cost
             pair_costs = np.triu(pair_costs, k=1) + np.tril(np.inf * np.ones_like(pair_costs)) # make lower + diagonal infinity to avoid double counting
             pair_costs = pair_costs.flatten()
             pairs = [(X_WG1, X_WG2) for X_WG1 in candidates_filtered for X_WG2 in candidates_filtered]

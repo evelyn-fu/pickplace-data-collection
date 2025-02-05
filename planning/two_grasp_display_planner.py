@@ -679,9 +679,10 @@ class TwoGraspPlanner(LeafSystem):
         self.fake_plant, self.fake_plant_context = make_iiwa_plant()
         self.velocity_limits = 0.4 * np.ones(7)
         self.acceleration_limits = 0.4 * np.ones(7)
-        self.display_velocity_limits = 0.2 * np.ones(7)
-        self.display_velocity_limits[6] = 1.0
-        self.display_acceleration_limits = 0.2 * np.ones(7)
+        self.display_velocity_limits = 0.1 * np.ones(7)
+        self.rotate_velocity_limits = 0.1 * np.ones(7)
+        self.rotate_velocity_limits[6] = 0.075
+        self.display_acceleration_limits = 0.1 * np.ones(7)
         self.regions = [] #regions
         self.traj_dir = traj_dir
         self.gripper_length = gripper_length
@@ -732,7 +733,7 @@ class TwoGraspPlanner(LeafSystem):
             return
         if mode == PlannerState.SCANNING1:
             self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP1)
-            # input("Next: Pregrasp 1 (scs)") # pause for debugging
+            input("Next: Pregrasp 1 (scs)") # pause for debugging
             return
         if mode == PlannerState.GO_TO_PREGRASP1:
             traj_q = context.get_abstract_state(
@@ -927,7 +928,7 @@ class TwoGraspPlanner(LeafSystem):
             numpy_transformed_manipuland_cloud.paint_uniform_color([1.0, 0.0, 1.0]) # Magenta
             
             # Check if transformation is too large
-            translation_magnitude = np.linalg.norm(transformation[:3, 3])
+            translation_magnitude = np.linalg.norm(translation_diff)
             rotation_magnitude = np.arccos((np.trace(transformation[:3, :3]) - 1) / 2)
             print(translation_magnitude, rotation_magnitude)
             
@@ -962,12 +963,12 @@ class TwoGraspPlanner(LeafSystem):
             )
             gripper2_cloud.paint_uniform_color([0.0, 1.0, 0.0])
 
-            # viz_geoms = [old_manipuland_cloud, old_gripper2_cloud, manipuland_cloud, gripper2_cloud]
-            # o3d.visualization.draw_plotly(viz_geoms)
-            # viz_geoms = [old_manipuland_cloud, transformed_manipuland_cloud, manipuland_cloud, numpy_transformed_manipuland_cloud]
-            # o3d.visualization.draw_plotly(viz_geoms)
+            viz_geoms = [old_manipuland_cloud, old_gripper2_cloud, manipuland_cloud, gripper2_cloud]
+            o3d.visualization.draw_plotly(viz_geoms)
+            viz_geoms = [old_manipuland_cloud, transformed_manipuland_cloud, manipuland_cloud, numpy_transformed_manipuland_cloud]
+            o3d.visualization.draw_plotly(viz_geoms)
 
-            if translation_magnitude > 0.01 or rotation_magnitude > np.pi * 5.0/180.0:
+            if translation_magnitude > 0.01 or rotation_magnitude > np.pi * 10.0/180.0:
                 print("Transformation is too large, realigning grasp 2")
 
                 self.X_WG2 = temp_X_WG2
@@ -984,12 +985,18 @@ class TwoGraspPlanner(LeafSystem):
                                                 self.cci_objects['cci_plant'].getRobotGeometryIds(), 
                                                 cci.Voxels(down_sampled_pcd.xyzs()), 
                                                 ONLINE_VOXEL_RADIUS)
-                q_goal2 = solve_via_analytic_IK(
-                    pose=X_WPregrasp2,
-                    current_config=self.q_pregrasp2,
-                    ik_domain=self.ik_domain,
-                    checker=cci_checker
-                )
+                attempts = 0
+                while attempts < 50:
+                    q_goal2 = solve_via_analytic_IK(
+                        pose=X_WPregrasp2,
+                        current_config=self.q_pregrasp2,
+                        ik_domain=self.ik_domain,
+                        checker=cci_checker
+                    )
+                    if q_goal2 is not None:
+                        break
+                    attempts += 1
+
                 if q_goal2 is None:
                     print("Failed to solve IK for grasp 2")
 
@@ -1336,7 +1343,7 @@ class TwoGraspPlanner(LeafSystem):
             }
 
             X_G1["display_traj"] = yaw_display_traj
-            X_G1, times1 = MakePickAndDisplayGripperFrames(X_G1, self.gripper_length, self.pregrasp_dist, self.place_flipped1)
+            X_G1, times1 = MakePickAndDisplayGripperFrames(X_G1, self.gripper_length, self.pregrasp_dist, self.place_flipped1, X_GE)
 
             display_traj1, self.q_display_center1 = MakeDisplayJointPositionsTrajectory(
                 X_G1, 
@@ -1358,40 +1365,86 @@ class TwoGraspPlanner(LeafSystem):
         # Second Pick
         X_WG2 = self.X_WG2
         X_WE2 = X_WG2.multiply(X_GE)
-
-        X_G2 = {
-            "pick": X_WE2,
-            "prepick": X_WE2 @ X_GgraspGpregrasp
-        }
-
-        X_G2["display_traj"] = yaw_display_traj
-        X_G2, times2 = MakePickAndDisplayGripperFrames(X_G2, self.gripper_length, self.pregrasp_dist, self.place_flipped2)
-
-        display_traj2, self.q_display_center2 = MakeDisplayJointPositionsTrajectory(
-            X_G2, 
-            times2, 
-            self.q_pregrasp2,
-            self.ik_domain,
-            cci_checker)
-
-        if self.place_flipped2:
-            print("Solving for flipped place")
+        if self.q_postgrasp is not None:
+            print("only updating pick and prepick")
+            X_G2 = context.get_abstract_state(int(self._gripper_pose_index2)).get_value()
+            X_G2["pick"] = X_WE2
+            X_G2["prepick"] = X_WE2 @ X_GgraspGpregrasp
+            X_G2["pick_start"] = X_G2["pick"]
+            X_G2["pick_end"] = X_G2["pick"]
+            X_G2["postpick"] = RigidTransform(X_G2["pick"].rotation(), X_G2["pick"].translation() + [0, 0, 0.2])
             
-            self.q_postgrasp = solve_via_analytic_IK(
-                pose=X_G2["preplace"],
-                current_config=self.q_display_center2,
-                ik_domain=self.ik_domain,
-                checker=cci_checker
+            print(X_G2["preplace"])
+            print("Place Start:", X_G2["place_start"])
+            print(X_G2["place_end"])
+            print(X_G2["postplace"])
+            state.get_mutable_abstract_state(int(self._gripper_pose_index2)).set_value(
+                X_G2
             )
+        else:
+            X_G2 = {
+                "pick_gripper_frame": X_WG2,
+                "pick": X_WE2,
+                "prepick": X_WE2 @ X_GgraspGpregrasp
+            }
+            X_G2["display_traj"] = yaw_display_traj
+            X_G2, times2 = MakePickAndDisplayGripperFrames(X_G2, self.gripper_length, self.pregrasp_dist, self.place_flipped2, X_GE)
 
-        state.get_mutable_abstract_state(int(self._times_index2)).set_value(
-            times2
-        )
-        state.get_mutable_abstract_state(int(self._gripper_pose_index2)).set_value(
-            X_G2
-        )
-        
-        state.get_mutable_abstract_state(self._display_traj_index2).set_value(display_traj2)
+            display_traj2, self.q_display_center2 = MakeDisplayJointPositionsTrajectory(
+                X_G2, 
+                times2, 
+                self.q_pregrasp2,
+                self.ik_domain,
+                cci_checker)
+
+            if self.place_flipped2:
+                print("Solving for flipped place")
+                
+                self.q_postgrasp = solve_via_analytic_IK(
+                    pose=X_G2["preplace"],
+                    current_config=self.q_display_center2,
+                    ik_domain=self.ik_domain,
+                    checker=cci_checker
+                )
+
+                pick_gripper_xyzs = self.grasp_node.hand_collision_model.to_pcd()
+                pick_gripper_cloud = (
+                    o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pick_gripper_xyzs))
+                    .voxel_down_sample(ONLINE_VOXEL_RADIUS)
+                    .transform(
+                        (X_G2["pick_gripper_frame"].multiply(
+                            RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2), [0,0,0])
+                        )).GetAsMatrix4()
+                    )
+                )
+                pick_gripper_cloud.paint_uniform_color([0.0, 1.0, 0.0])
+
+                place_gripper_xyzs = self.grasp_node.hand_collision_model.to_pcd()
+                place_gripper_cloud = (
+                    o3d.geometry.PointCloud(o3d.utility.Vector3dVector(place_gripper_xyzs))
+                    .voxel_down_sample(ONLINE_VOXEL_RADIUS)
+                    .transform(
+                        (X_G2["place_gripper_frame"].multiply(
+                            RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2), [0,0,0])
+                        )).GetAsMatrix4()
+                    )
+                )
+                place_gripper_cloud.paint_uniform_color([1.0, 0.0, 1.0])
+
+                manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(self.current_manipuland_pcd.xyzs().T))
+                manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
+
+                viz_geoms = [manipuland_cloud, pick_gripper_cloud, place_gripper_cloud]
+                o3d.visualization.draw_plotly(viz_geoms)
+
+            state.get_mutable_abstract_state(int(self._times_index2)).set_value(
+                times2
+            )
+            state.get_mutable_abstract_state(int(self._gripper_pose_index2)).set_value(
+                X_G2
+            )
+            
+            state.get_mutable_abstract_state(self._display_traj_index2).set_value(display_traj2)
 
     def DoPoseTraj(self, context, state):
         mode = context.get_abstract_state(int(self._mode_index)).get_value()
@@ -1450,8 +1503,8 @@ class TwoGraspPlanner(LeafSystem):
             self.cci_objects, 
             self.edge_inflator, 
             obstacles_vox, 
-            self.velocity_limits, 
-            self.acceleration_limits
+            self.display_velocity_limits, 
+            self.display_acceleration_limits
         )
         
         breaks = np.linspace(0, traj.end_time(), int(1e3), endpoint=False)
@@ -1460,8 +1513,8 @@ class TwoGraspPlanner(LeafSystem):
         toppra_traj = reparameterize_with_toppra(
             trajectory=knots.T,
             plant=self._iiwa_controller_plant,
-            velocity_limits=self.velocity_limits,
-            acceleration_limits=self.acceleration_limits,
+            velocity_limits=self.display_velocity_limits,
+            acceleration_limits=self.display_acceleration_limits,
             num_grid_points=100,
         )
 
@@ -1485,7 +1538,7 @@ class TwoGraspPlanner(LeafSystem):
         toppra_traj = reparameterize_with_toppra(
             trajectory=display_traj,
             plant=self._iiwa_controller_plant,
-            velocity_limits=self.display_velocity_limits,
+            velocity_limits=self.rotate_velocity_limits,
             acceleration_limits=self.display_acceleration_limits,
             num_grid_points=100,
             is_pl=True,
@@ -1518,8 +1571,8 @@ class TwoGraspPlanner(LeafSystem):
             self.cci_objects, 
             self.edge_inflator, 
             obstacles_vox, 
-            self.velocity_limits, 
-            self.acceleration_limits
+            self.display_velocity_limits, 
+            self.display_acceleration_limits
         )
         
         breaks = np.linspace(0, traj.end_time(), int(1e3), endpoint=False)
@@ -1528,8 +1581,8 @@ class TwoGraspPlanner(LeafSystem):
         toppra_traj = reparameterize_with_toppra(
             trajectory=knots.T,
             plant=self._iiwa_controller_plant,
-            velocity_limits=self.velocity_limits,
-            acceleration_limits=self.acceleration_limits,
+            velocity_limits=self.display_velocity_limits,
+            acceleration_limits=self.display_acceleration_limits,
             num_grid_points=100,
         )
 
