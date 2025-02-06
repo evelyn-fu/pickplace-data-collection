@@ -23,27 +23,27 @@ directives:
         translation: [0, 0, 0.09]
         rotation: !Rpy { deg: [90, 0, 90]}
 
-- add_frame:
-    name: table_origin
-    X_PF:
-        base_frame: world
-        rotation: !Rpy { deg: [0.0, 0.0, 90.0 ]}
-        translation: [0, 0, 0]
+# - add_frame:
+#     name: table_origin
+#     X_PF:
+#         base_frame: world
+#         rotation: !Rpy { deg: [0.0, 0.0, 90.0 ]}
+#         translation: [0, 0, 0]
 
-- add_model:
-    name: table
-    file: file://./home/real2sim/src/Real2SimObjectManipulation/models/table_wide.sdf
+# - add_model:
+#     name: table
+#     file: file://./home/real2sim/src/Real2SimObjectManipulation/models/table_wide.sdf
 
-- add_weld:
-    parent: table_origin
-    child: table::table_body
+# - add_weld:
+#     parent: table_origin
+#     child: table::table_body
 
-- add_frame:
-    name: box_origin
-    X_PF:
-        base_frame: world
-        rotation: !Rpy { deg: [0.0, 0.0, 0.0]}
-        translation: [0.4, 0.0, 0]
+# - add_frame:
+#     name: box_origin
+#     X_PF:
+#         base_frame: world
+#         rotation: !Rpy { deg: [0.0, 0.0, 0.0]}
+#         translation: [0.4, 0.0, 0]
 
 # - add_model:
 #     name: box
@@ -72,6 +72,12 @@ directives:
         rotation: !Rpy { deg: [0, 0, 0.0]}
 
 - add_frame:
+    name: camera_bin_staging
+    X_PF:
+        base_frame: world
+        rotation: !Rpy { deg: [0, 0, 0.0]}
+
+- add_frame:
     name: camera0_origin
     X_PF:
         base_frame: camera0_staging
@@ -92,6 +98,13 @@ directives:
         rotation: !Rpy { deg: [-102.739428,   -3.69469624, -149.1420755]}
         translation: [-0.0533544,  1.00955,  0.449207]
 
+- add_frame:
+    name: camera_bin_origin
+    X_PF:
+        base_frame: camera_bin_staging
+        rotation: !Rpy { deg: [-165.04723828404602, 1.3368903317932492, -87.72725370947829]}
+        translation: [-0.0338161,  0.62563,    0.360087]
+
 - add_model:
     name: camera_front
     file: package://manipulation/camera_box.sdf
@@ -102,6 +115,10 @@ directives:
 
 - add_model:
     name: camera_left
+    file: package://manipulation/camera_box.sdf
+
+- add_model:
+    name: camera_bin
     file: package://manipulation/camera_box.sdf
 
 - add_weld:
@@ -115,6 +132,10 @@ directives:
 - add_weld:
     parent: camera2_origin
     child: camera_left::base
+
+- add_weld:
+    parent: camera_bin_origin
+    child: camera_bin::base
 
 cameras:
     camera_front:
@@ -144,11 +165,21 @@ cameras:
         lcm_bus: driver_traffic
         X_PB:
             base_frame: camera_left::base
+    camera_bin:
+        name: camera_bin
+        depth: True
+        width: 1920
+        height: 1440
+        focal: !FovDegrees {x: 69, y: 42}
+        lcm_bus: driver_traffic
+        X_PB:
+            base_frame: camera_bin::base
 
 camera_ids:
     camera_front: "DRAKE_RGBD_CAMERA_IMAGES_843512061674"
     camera_right: "DRAKE_RGBD_CAMERA_IMAGES_802212061325"
     camera_left: "DRAKE_RGBD_CAMERA_IMAGES_928222061590"
+    camera_bin: "DRAKE_RGBD_CAMERA_IMAGES_819612072303"
 
 plant_config:
     time_step: 0.001

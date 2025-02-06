@@ -25,10 +25,17 @@ import time
 import multiprocessing
 from multiprocessing.pool import ThreadPool as Pool
 import torch
+from enum import Enum
 
 lock = threading.Lock()
 
 PROCESSES = multiprocessing.cpu_count()
+
+class GraspType(Enum):
+    PAIR = 1
+    SIDE = 2
+    TOP = 3
+    STABLE = 4
 
 class GraspListener():
     """The class responsible for computing and evaluation grasp candidates."""
@@ -435,6 +442,7 @@ class GraspListener():
             - 100.0 * proportion_enclosed
         )
         return cost
+    
     def compute_costs_single(
             self, 
             X_WG: RigidTransform, 
@@ -466,6 +474,78 @@ class GraspListener():
             + 5.0 * split_ratio_minor_axis_cost
             + 5.0 * split_ratio_major_axis_cost
             + 5.0 * fraction_enclosed
+        )
+        return cost
+    
+    def compute_costs_top(
+            self, 
+            X_WG: RigidTransform, 
+            within_box_pt_normals: np.ndarray, 
+            split_ratios: float,
+            proportion_enclosed: float
+        ) -> float:
+        """
+        Computes a grasp candidate cost based on a weighted sum of:
+        - Antipodal (grasp normal) cost (prefer more antipodal)
+        - Gripper vertical alignment cost (prefer more aligned with world z-axis)
+        - Vertical position cost (prefer higher grasps)
+        :param X_WG: The grasp candidate to compute the cost for.
+        :param within_box_pt_normals: Point cloud normals within the gripper closing region of shape (3, N).
+        :param split_ratios: Array of [minor axis split ratio, secondary axis split ratio, major axis split ratio]. Values are in range [0,1] where
+            higher indicates a more equal split along the principal object axis.
+        """
+        R = X_WG.GetAsMatrix4()[:3, :3]
+        t = X_WG.GetAsMatrix4()[:3, 3]
+        eff_vertical_vec = R.dot(np.array([0, 0, 1]))
+
+        antipodal_cost = -np.sum(
+            within_box_pt_normals[1, :] ** 2
+        ) / within_box_pt_normals.shape[1]  # along the y axis of the gripper, larger good (antipodal metric)
+        gripper_vertical_alignment_cost = eff_vertical_vec[2]  # want z axis of gripper to face down, larger worse
+        grasp_height_cost = -t[2]  # prefer higher position
+        split_ratio_minor_axis_cost = -split_ratios[0]  # prefer higher split ratio
+        split_ratio_major_axis_cost = -split_ratios[2]
+        cost = (
+            100 * antipodal_cost
+            + 100.0 * gripper_vertical_alignment_cost
+            + 10.0 * grasp_height_cost
+            + 1.0 * split_ratio_minor_axis_cost
+            + 50.0 * split_ratio_major_axis_cost
+            - 100.0 * proportion_enclosed
+        )
+        return cost
+    
+    def compute_costs_stable(
+            self, 
+            X_WG: RigidTransform, 
+            within_box_pt_normals: np.ndarray, 
+            split_ratios: float,
+            proportion_enclosed: float
+        ) -> float:
+        """
+        Computes a grasp candidate cost based on a weighted sum of:
+        - Antipodal (grasp normal) cost (prefer more antipodal)
+        - Vertical position cost (prefer higher grasps)
+        :param X_WG: The grasp candidate to compute the cost for.
+        :param within_box_pt_normals: Point cloud normals within the gripper closing region of shape (3, N).
+        :param split_ratios: Array of [minor axis split ratio, secondary axis split ratio, major axis split ratio]. Values are in range [0,1] where
+            higher indicates a more equal split along the principal object axis.
+        """
+        R = X_WG.GetAsMatrix4()[:3, :3]
+        t = X_WG.GetAsMatrix4()[:3, 3]
+
+        antipodal_cost = -np.sum(
+            within_box_pt_normals[1, :] ** 2
+        ) / within_box_pt_normals.shape[1]  # along the y axis of the gripper, larger good (antipodal metric)
+        grasp_height_cost = -t[2]  # prefer higher position
+        split_ratio_minor_axis_cost = -split_ratios[0]  # prefer higher split ratio
+        split_ratio_major_axis_cost = -split_ratios[2]
+        cost = (
+            100 * antipodal_cost
+            + 10.0 * grasp_height_cost
+            + 1.0 * split_ratio_minor_axis_cost
+            + 50.0 * split_ratio_major_axis_cost
+            - 100.0 * proportion_enclosed
         )
         return cost
 
@@ -745,7 +825,7 @@ class GraspListener():
         candidate_num=30, 
         num_samples=20, 
         random_seed=5,
-        pair=True,
+        grasp_type: GraspType = GraspType.PAIR,
         align_grasp_axis = [0, 0, 1], 
         align_minor_axis = [1, 0, 0], 
         split_axis=2, 
@@ -874,7 +954,7 @@ class GraspListener():
                                     candidate_lst.append(X_WPnew.GetAsMatrix4())
                                     candidate_lst_by_grasp_origin_pt.append(X_WP.GetAsMatrix4())
                                     viz_geoms.append(self.make_gripper_line_set(X_WPnew.GetAsMatrix4(), color))
-                                    if pair:
+                                    if grasp_type == GraspType.PAIR:
                                         candidate_costs.append(
                                             self.compute_costs(
                                                 X_WPnew, 
@@ -884,7 +964,7 @@ class GraspListener():
                                                 split_axes
                                             )
                                         )
-                                    else:
+                                    elif grasp_type == GraspType.SIDE:
                                         candidate_costs.append(
                                             self.compute_costs_single(
                                                 X_WPnew, 
@@ -895,6 +975,24 @@ class GraspListener():
                                                 minor_split_axis, 
                                                 align_grasp_axis, 
                                                 align_minor_axis
+                                            )
+                                        )
+                                    elif grasp_type == GraspType.TOP:
+                                        candidate_costs.append(
+                                            self.compute_costs_top(
+                                                X_WPnew, 
+                                                within_box_pt_normals, 
+                                                split_ratio,
+                                                proportion_enclosed
+                                            )
+                                        )
+                                    elif grasp_type == GraspType.STABLE:
+                                        candidate_costs.append(
+                                            self.compute_costs_stable(
+                                                X_WPnew, 
+                                                within_box_pt_normals, 
+                                                split_ratio,
+                                                proportion_enclosed
                                             )
                                         )
                                     if VISUALIZE_EACH:
@@ -966,7 +1064,7 @@ class GraspListener():
 
         start = time.time()
 
-        if pair:
+        if grasp_type == GraspType.PAIR:
             # Two grasp selection
             candidate_lst = np.array(candidate_lst)
             candidate_lst_by_grasp_origin_pt = np.array(candidate_lst_by_grasp_origin_pt)

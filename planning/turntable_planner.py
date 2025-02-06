@@ -7,7 +7,7 @@ import open3d as o3d
 import os
 from scipy.spatial.transform import Rotation as R
 from perception.teaser import icp
-from planning.grasp import GraspListener
+from planning.grasp import GraspListener, GraspType
 from planning.toppra import reparameterize_with_toppra
 from planning.trajectories import (
     MakePickAndDisplayGripperFrames,
@@ -531,7 +531,6 @@ class TurntablePlanner(LeafSystem):
             X_WC2,
             meshcat, 
             dirstr,
-            traj_dir=None,
             models_path=None,
             gripper_model_path=None,
             default_home=q_home,
@@ -653,7 +652,6 @@ class TurntablePlanner(LeafSystem):
         self.display_velocity_limits[6] = 0.05
         self.display_acceleration_limits = 0.2 * np.ones(7)
         self.regions = [] #regions
-        self.traj_dir = traj_dir
         self.gripper_length = gripper_length
         self.pregrasp_dist = pregrasp_dist
         self.eef_to_gripper_length = eef_to_gripper_length
@@ -916,35 +914,25 @@ class TurntablePlanner(LeafSystem):
         q = self.get_input_port(self._iiwa_position_index).Eval(context)
         q_goal = context.get_discrete_state(self._q0_index).get_value().copy() # initial pose
 
-        loaded_traj = False
-        if mode != PlannerState.WAIT_FOR_OBJECTS_TO_SETTLE and self.traj_dir is not None:
-            if mode == PlannerState.GRASP1 and os.path.exists(os.path.join(self.traj_dir, "grasp1_gohome_traj")):
-                traj = CompositeBezierCurveTrajectoryAttributes.load(self.traj_dir + "/grasp1_gohome_traj/").to_composite_bezier_curve_trajectory()
-                loaded_traj = True
-            if mode == PlannerState.GRASP2 and os.path.exists(os.path.join(self.traj_dir, "grasp2_gohome_traj")):
-                traj = CompositeBezierCurveTrajectoryAttributes.load(self.traj_dir + "/grasp2_gohome_traj/").to_composite_bezier_curve_trajectory()
-                loaded_traj = True
+        try:
+            traj = scs_trajopt(
+                q, 
+                q_goal, 
+                self.drm_planner,
+                self.cci_objects, 
+                self.edge_inflator, 
+                self.current_manipuland_pcd.xyzs(), 
+                self.velocity_limits, 
+                self.acceleration_limits
+            )
+        except:
+            traj = plan_unconstrained_gcs_path_start_to_goal(
+                plant=self._iiwa_controller_plant, q_start=q, q_goal=q_goal, regions=None, no_obstacles=True
+            )
 
-        if not loaded_traj:
-            try:
-                traj = scs_trajopt(
-                    q, 
-                    q_goal, 
-                    self.drm_planner,
-                    self.cci_objects, 
-                    self.edge_inflator, 
-                    self.current_manipuland_pcd.xyzs(), 
-                    self.velocity_limits, 
-                    self.acceleration_limits
-                )
-            except:
-                traj = plan_unconstrained_gcs_path_start_to_goal(
-                    plant=self._iiwa_controller_plant, q_start=q, q_goal=q_goal, regions=None, no_obstacles=True
-                )
-
-            if traj is None:
-                logging.error("Failed to find a path to the home positions.")
-                exit(1)
+        if traj is None:
+            logging.error("Failed to find a path to the home positions.")
+            exit(1)
         
         if mode == PlannerState.GRASP:
             make_trajectory_save_dirs(self.savedir, "grasp1_gohome_traj")
@@ -980,26 +968,19 @@ class TurntablePlanner(LeafSystem):
         q = self.get_input_port(self._iiwa_position_index).Eval(context)
         q_goal = self.q_pregrasp
 
-        loaded_traj = False
-        if self.traj_dir is not None:
-            if mode == PlannerState.SCANNING and os.path.exists(os.path.join(self.traj_dir, "grasp1_pregrasp_traj")):
-                traj = CompositeBezierCurveTrajectoryAttributes.load(self.traj_dir + "/grasp1_pregrasp_traj/").to_composite_bezier_curve_trajectory()
-                loaded_traj = True
-
-        if not loaded_traj:
-            traj = scs_trajopt(
-                q, 
-                q_goal, 
-                self.drm_planner,
-                self.cci_objects, 
-                self.edge_inflator, 
-                self.current_manipuland_pcd.xyzs(), 
-                self.velocity_limits, 
-                self.acceleration_limits
-            )
-            if traj is None:
-                logging.error("Failed to find a path to the grasping start positions.")
-                exit(1)
+        traj = scs_trajopt(
+            q, 
+            q_goal, 
+            self.drm_planner,
+            self.cci_objects, 
+            self.edge_inflator, 
+            self.current_manipuland_pcd.xyzs(), 
+            self.velocity_limits, 
+            self.acceleration_limits
+        )
+        if traj is None:
+            logging.error("Failed to find a path to the grasping start positions.")
+            exit(1)
 
         if mode == PlannerState.SCANNING:
             make_trajectory_save_dirs(self.savedir, "grasp1_pregrasp_traj")
@@ -1080,7 +1061,7 @@ class TurntablePlanner(LeafSystem):
             candidate_num=1,
             num_samples=15,
             random_seed=np.random.randint(1000),
-            pair = False,
+            grasp_type=GraspType.SIDE,
             align_grasp_axis=secondary_component,
             align_minor_axis=minor_component, 
             split_axis=2, 

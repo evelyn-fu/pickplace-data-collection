@@ -4,9 +4,46 @@ from pydrake.all import (
     PiecewisePose,
     RigidTransform,
     RotationMatrix,
-    RollPitchYaw
 )
-from planning.inverse_kinematics import solve_global_inverse_kinematics, solve_via_analytic_IK
+from planning.inverse_kinematics import solve_via_analytic_IK
+from enum import Enum
+
+class TrajType(Enum):
+    PREDISPLAY: 1
+    POSTDISPLAY: 2
+    BIN: 3
+
+def MakePickGripperFrames(X_G):
+    """
+    Takes a partial specification with X_G["pick"], X_G["prepick"], X_G["place"], X_G["postplace"]
+    and returns a X_G and times with all of the pick frames populated.
+    """
+
+    # Amount of time it takes to GET TO each frame
+    times = {"prepick": 0.0}
+    
+    # Allow some time for the gripper to close.
+    X_G["pick_start"] = X_G["pick"]
+    X_G["pick_end"] = X_G["pick"]
+    times["pick_start"] = 2.0
+    times["pick_end"] = 2.0
+
+    # raise object off surface
+    X_G["postpick"] = RigidTransform(X_G["pick"].rotation(), X_G["pick"].translation() + [0, 0, 0.2])
+    times["postpick"] = 2.0
+
+    X_G["preplace"] = RigidTransform(X_G["place"].rotation(), X_G["place"].translation() + [0, 0, 0.2])
+    times["preplace"] = 6.0
+
+    # Place back down and allow some time for gripper to open
+    X_G["place_start"] = X_G["place"]
+    X_G["place_end"] = X_G["place"]
+    times["place_start"] = 2.0
+    times["place_end"] = 2.0
+
+    times["postplace"] = 2.0
+
+    return X_G, times
 
 def MakePickAndDisplayGripperFrames(X_G, gripper_length, pregrasp_dist, place_flipped=False, X_GE=None):
     """
@@ -92,16 +129,27 @@ def MakePickAndDisplayGripperFrames(X_G, gripper_length, pregrasp_dist, place_fl
 
     return X_G, times
 
-def MakeGripperPoseTrajectory(X_G, times, predisplay=True, t0=0.0):
+def MakeGripperPoseTrajectory(X_G, times, traj_type=TrajType.PREDISPLAY, t0=0.0):
     """Constructs a gripper position trajectory from the plan "sketch"."""
-    if predisplay:
+    if traj_type == TrajType.BIN:
+        names = [
+        "prepick",
+        "pick_start",
+        "pick_end",
+        "postpick",
+        "preplace", 
+        "place_start",
+        "place_end",
+        "postplace",
+        ]
+    elif traj_type == TrajType.PREDISPLAY:
         names = [
         "prepick",
         "pick_start",
         "pick_end",
         "postpick",
         ]
-    else:
+    elif traj_type == TrajType.POSTDISPLAY:
         names = [
         "preplace", 
         "place_start",
@@ -120,19 +168,30 @@ def MakeGripperPoseTrajectory(X_G, times, predisplay=True, t0=0.0):
 
     return PiecewisePose.MakeLinear(sample_times, poses)
 
-def MakeGripperCommandTrajectory(times, predisplay=True, t0=0.0):
+def MakeGripperCommandTrajectory(times, traj_type=TrajType.PREDISPLAY, t0=0.0):
     """Constructs a WSG command trajectory from the plan "sketch"."""
     opened = np.array([0.107])
     closed = np.array([0.0])
 
-    if predisplay:
+    if traj_type == TrajType.BIN:
+        names = [
+        "prepick",
+        "pick_start",
+        "pick_end",
+        "postpick",
+        "preplace", 
+        "place_start",
+        "place_end",
+        "postplace",
+        ]
+    elif traj_type == TrajType.PREDISPLAY:
         names = [
         "prepick",
         "pick_start",
         "pick_end",
         "postpick",
         ]
-    else:
+    elif traj_type == TrajType.POSTDISPLAY:
         names = [
         "preplace", 
         "place_start",

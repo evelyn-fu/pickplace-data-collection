@@ -89,18 +89,10 @@ def start_scenario(
         scenario_path="scenario_data_grasping.yml", 
         models_path="scenario_data_grasping_no_object.dmd.yaml", 
         gripper_model_path="",
-        traj_dir="",
         use_hardware=False, 
         save_imgs=False,
-        load_trajectories=False,
         turntable=False
     ):
-        
-    if load_trajectories and traj_dir == "":
-        print("Must provide path to directory with trajectories to load trajectories")
-        return
-    if not load_trajectories:
-        traj_dir = None
 
     meshcat.ResetRenderMode()
 
@@ -170,6 +162,7 @@ def start_scenario(
         camera0 = station.GetSubsystemByName("rgbd_sensor_camera0")
         camera1 = station.GetSubsystemByName("rgbd_sensor_camera1")
         camera2 = station.GetSubsystemByName("rgbd_sensor_camera2")
+        camera_bin = station.GetSubsystemByName("rgbd_sensor_camera_bin")
         K = camera0.default_color_render_camera().core().intrinsics().intrinsic_matrix()
         if save_imgs:
             np.savetxt(dirstr+"/cam_K.txt", K)
@@ -177,18 +170,22 @@ def start_scenario(
         camera0_pcd = builder.AddSystem(DepthImageToPointCloud(camera0.default_depth_render_camera().core().intrinsics()))
         camera1_pcd = builder.AddSystem(DepthImageToPointCloud(camera1.default_depth_render_camera().core().intrinsics()))
         camera2_pcd = builder.AddSystem(DepthImageToPointCloud(camera2.default_depth_render_camera().core().intrinsics()))
+        camera_bin_pcd = builder.AddSystem(DepthImageToPointCloud(camera_bin.default_depth_render_camera().core().intrinsics()))
         builder.Connect(station.GetOutputPort("camera0.depth_image"), camera0_pcd.GetInputPort("depth_image"))
         builder.Connect(station.GetOutputPort("camera1.depth_image"), camera1_pcd.GetInputPort("depth_image"))
         builder.Connect(station.GetOutputPort("camera2.depth_image"), camera2_pcd.GetInputPort("depth_image"))
+        builder.Connect(station.GetOutputPort("camera_bin.depth_image"), camera_bin_pcd.GetInputPort("depth_image"))
 
     else:
         camera0_pcd = builder.AddSystem(DepthImageToPointCloud(CameraInfo(848, 480, 600.165, 600.165, 429.152, 232.822)))
         camera1_pcd = builder.AddSystem(DepthImageToPointCloud(CameraInfo(848, 480, 626.633, 626.633, 432.041, 245.465)))
         camera2_pcd = builder.AddSystem(DepthImageToPointCloud(CameraInfo(848, 480, 596.492, 596.492, 416.694, 240.225)))
+        camera_bin_pcd = builder.AddSystem(DepthImageToPointCloud(CameraInfo(640, 480, 385.218, 385.218, 321.295, 244.071)))
 
         builder.Connect(external_station.GetOutputPort("camera0.depth_image"), camera0_pcd.GetInputPort("depth_image"))
         builder.Connect(external_station.GetOutputPort("camera1.depth_image"), camera1_pcd.GetInputPort("depth_image"))
         builder.Connect(external_station.GetOutputPort("camera2.depth_image"), camera2_pcd.GetInputPort("depth_image"))
+        builder.Connect(external_station.GetOutputPort("camera_bin.depth_image"), camera_bin_pcd.GetInputPort("depth_image"))
 
     
     if use_hardware:
@@ -201,6 +198,9 @@ def start_scenario(
 
         # Back Left camera
         x_back_left_rgb = RigidTransform(np.loadtxt("/home/real2sim/calibrations/12_6_calibrations/back_left_calibration_12_5_daniilidis.txt"))
+        
+        # Bin camera
+        x_bin_rgb = RigidTransform(np.loadtxt("/home/real2sim/calibrations/bin_calibration_2_5_daniilidis.txt"))
 
         # rgb calibration to depth calibration (from realsense specs)
         # Front camera
@@ -223,6 +223,13 @@ def start_scenario(
                                                 [0.00215765,   -0.0104046,     0.999944, -0.000317806],
                                                 [          0,            0,            0,            1]])
         x_back_left_camera = x_back_left_rgb @ x_depth_rgb_back_left
+
+        # Bin camera
+        x_depth_rgb_bin = RigidTransform([[0.999968,    0.00149319,  0.00783427,    0.0147784],
+                                          [-0.00146555,   0.999993, -0.00353279, -4.93721e-05],
+                                          [-0.00783949, 0.00352119,    0.999963,  0.000204544],
+                                          [          0,          0,           0,            1]])
+        x_bin_camera = x_bin_rgb @ x_depth_rgb_bin
     else:
         # Front camera
         x_front_camera = RigidTransform(np.loadtxt("/home/real2sim/calibrations/12_6_calibrations/front_calibration_12_6_daniilidis.txt"))
@@ -233,10 +240,14 @@ def start_scenario(
         # Back Left camera
         x_back_left_camera = RigidTransform(np.loadtxt("/home/real2sim/calibrations/12_6_calibrations/back_left_calibration_12_5_daniilidis.txt"))
 
+        # Bin camera
+        x_bin_camera = RigidTransform(np.loadtxt("/home/real2sim/calibrations/bin_calibration_2_5_daniilidis.txt"))
+
     # connect stationary camera pcd source
     camera0_pose_source = builder.AddSystem(CameraPoseInWorldSource(x_front_camera, handeye=False))
     camera1_pose_source = builder.AddSystem(CameraPoseInWorldSource(x_back_right_camera, handeye=False))
     camera2_pose_source = builder.AddSystem(CameraPoseInWorldSource(x_back_left_camera, handeye=False))
+    bin_cam_pose_source = builder.AddSystem(CameraPoseInWorldSource(x_bin_camera, handeye=False))
 
     builder.Connect(
         camera0_pose_source.GetOutputPort("X_WC"),
@@ -253,6 +264,11 @@ def start_scenario(
         camera2_pcd.GetInputPort("camera_pose"),
     )
 
+    builder.Connect(
+        bin_cam_pose_source.GetOutputPort("X_WC"),
+        camera_bin_pcd.GetInputPort("camera_pose"),
+    )
+
     controller_plant = station.GetSubsystemByName(
         "iiwa_controller_plant_pointer_system"
     ).get()
@@ -265,9 +281,9 @@ def start_scenario(
                 X_WC0=x_front_camera,
                 X_WC1=x_back_left_camera,
                 X_WC2=x_back_right_camera,
+                X_WC_bin=x_bin_camera,
                 meshcat=meshcat,
                 dirstr=dirstr,
-                traj_dir=traj_dir,
                 models_path=os.path.join(dir_path, os.path.join("scenario_datas", models_path)),
                 gripper_model_path=gripper_model_path))
     else:
@@ -277,9 +293,9 @@ def start_scenario(
                 X_WC0=x_front_camera,
                 X_WC1=x_back_left_camera,
                 X_WC2=x_back_right_camera,
+                X_WC_bin=x_bin_camera,
                 meshcat=meshcat,
                 dirstr=dirstr,
-                traj_dir=traj_dir,
                 models_path=os.path.join(dir_path, os.path.join("scenario_datas", models_path)),
                 gripper_model_path=gripper_model_path))
 
@@ -396,6 +412,10 @@ def start_scenario(
         planner.GetInputPort("cloud_back_right"),
     )
     builder.Connect(
+        camera_bin_pcd.GetOutputPort("point_cloud"),
+        planner.GetInputPort("cloud_bin"),
+    )
+    builder.Connect(
         station.GetOutputPort("body_poses"),
         planner.GetInputPort("body_poses"),
     )
@@ -460,12 +480,6 @@ if __name__ == "__main__":
         nargs='?',
     )
     parser.add_argument(
-        "--traj_dir",
-        default="",
-        help="path to directory with saved gcs trajectories",
-        nargs='?',
-    )
-    parser.add_argument(
         "--use_hardware",
         action="store_true",
         help="Whether to use real world hardware.",
@@ -479,11 +493,6 @@ if __name__ == "__main__":
         "--turntable",
         action="store_true",
         help="Whether to use turntable planner.",
-    )
-    parser.add_argument(
-        "--load_trajectories",
-        action='store_true',
-        help="whether to load gcs trajectories from traj_dir",
     )
     args = parser.parse_args()
 
@@ -501,9 +510,7 @@ if __name__ == "__main__":
         scenario_path= args.scenario_path, 
         gripper_model_path=gripper_model_path,
         models_path=args.models_path, 
-        traj_dir=args.traj_dir,
         use_hardware=args.use_hardware, 
         save_imgs=args.save_imgs,
-        load_trajectories=args.load_trajectories,
         turntable=args.turntable
     )
