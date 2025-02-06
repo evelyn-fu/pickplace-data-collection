@@ -535,14 +535,6 @@ class PickState(Enum):
     TO_PLACE = 5
     PLACE = 6
 
-class SysIDState(Enum):
-    IDLE = 1
-    PICK = 2
-    TO_SYS_ID = 3
-    SYS_ID = 4
-    TO_PLACE = 5
-    PLACE = 6
-
 yaw_display_traj = []
 
 yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0)), [0.4, 0.0, 0.6]))
@@ -617,9 +609,6 @@ class TwoGraspPlanner(LeafSystem):
         )
         self._pick_mode_index = self.DeclareAbstractState(
             AbstractValue.Make(PickState.IDLE)
-        )
-        self._sys_id_mode_index = self.DeclareAbstractState(
-            AbstractValue.Make(SysIDState.IDLE)
         )
 
         # Store calculated grasp pose
@@ -903,18 +892,10 @@ class TwoGraspPlanner(LeafSystem):
                 state.get_mutable_abstract_state(
                     int(self._mode_index)
                 ).set_value(PlannerState.SYS_ID_GRASP)
-                # Plan pick grasp
-                self.PlanBinPickPoseTraj(context, state)
+                self.DoPoseTraj(context, state)
             return
         if mode == PlannerState.SYS_ID_GRASP:
-            traj_pose = context.get_abstract_state(
-                int(self._traj_X_G_index)
-            ).get_value()
-            if traj_pose.get_number_of_segments() > 0 and context.get_time() > traj_pose.end_time():
-                state.get_mutable_abstract_state(
-                    int(self._mode_index)
-                ).set_value(PlannerState.GO_HOME3)
-                self.GoHome(context, state)
+            self.UpdateInGrasp(context, state, PlannerState.GO_HOME3)
             return
         if mode == PlannerState.GO_HOME3:
             traj_q = context.get_abstract_state(
@@ -931,6 +912,10 @@ class TwoGraspPlanner(LeafSystem):
             return
         
     def UpdateInGrasp(self, context, state, after_grasp_state):
+        mode = context.get_abstract_state(int(self._mode_index)).get_value()
+        sys_id = False
+        if mode == PlannerState.SYS_ID_GRASP:
+            sys_id = True
         pick_mode = context.get_abstract_state(int(self._pick_mode_index)).get_value()
         traj_q = context.get_abstract_state(
             int(self._current_joint_traj_idx)
@@ -947,14 +932,20 @@ class TwoGraspPlanner(LeafSystem):
                 state.get_mutable_abstract_state(
                     int(self._pick_mode_index)
                 ).set_value(PickState.TO_DISPLAY)
-                self.GoToDisplay(context, state)
+                if sys_id:
+                    self.GoToSysID(context, state)
+                else:
+                    self.GoToDisplay(context, state)
                 # input("Next: GoToDisplay (scs)") # pause for debugging
         if pick_mode == PickState.TO_DISPLAY:
             if context.get_time() > traj_q.end_time() + start_time:
                 state.get_mutable_abstract_state(
                     int(self._pick_mode_index)
                 ).set_value(PickState.DISPLAY)
-                self.DoDisplay(context, state)
+                if sys_id:
+                    self.DoSysID(context, state)
+                else:
+                    self.DoDisplay(context, state)
                 # input("Next: DoDisplay (IK + Toppra)") # pause for debugging
         if pick_mode == PickState.DISPLAY:
             if context.get_time() > traj_q.end_time() + start_time:
@@ -1204,6 +1195,13 @@ class TwoGraspPlanner(LeafSystem):
         )
         state.get_mutable_abstract_state(int(self._gripper_pose_index_single_grasp)).set_value(
             X_G
+        )
+
+        self.q_postgrasp = solve_via_analytic_IK(
+            pose=X_G["preplace"],
+            current_config=self.q_display_center2,
+            ik_domain=self.ik_domain,
+            checker=cci_checker
         )
 
         state.get_mutable_abstract_state(
@@ -1854,6 +1852,64 @@ class TwoGraspPlanner(LeafSystem):
         
         toppra_traj = reparameterize_with_toppra(
             trajectory=display_traj,
+            plant=self._iiwa_controller_plant,
+            velocity_limits=self.rotate_velocity_limits,
+            acceleration_limits=self.display_acceleration_limits,
+            num_grid_points=100,
+            is_pl=True,
+        )
+
+        state.get_mutable_abstract_state(self._current_joint_traj_idx).set_value(
+            TrajectoryWithTimingInformation(
+                trajectory=toppra_traj,
+                start_time_s=current_time,
+            )
+        )
+
+    def GoToSysID(self, context, state):
+        q = self.get_input_port(self._iiwa_position_index).Eval(context)
+        
+        q_goal = np.array() # TODO: fill this in w/ sysid start q
+        
+        obstacles_vox = np.hstack([ceiling_vox, camera_vox, bin_cam_vox])
+
+        traj = scs_trajopt(
+            q, 
+            q_goal, 
+            self.drm_planner,
+            self.cci_objects, 
+            self.edge_inflator, 
+            obstacles_vox, 
+            self.display_velocity_limits, 
+            self.display_acceleration_limits
+        )
+        
+        breaks = np.linspace(0, traj.end_time(), int(1e3), endpoint=False)
+        knots = traj.vector_values(breaks)
+
+        toppra_traj = reparameterize_with_toppra(
+            trajectory=knots.T,
+            plant=self._iiwa_controller_plant,
+            velocity_limits=self.display_velocity_limits,
+            acceleration_limits=self.display_acceleration_limits,
+            num_grid_points=100,
+        )
+
+        current_time = context.get_time()
+        state.get_mutable_abstract_state(self._current_joint_traj_idx).set_value(
+            TrajectoryWithTimingInformation(
+                trajectory=toppra_traj,
+                start_time_s=current_time,
+            )
+        )
+
+    def DoSysID(self, context, state):
+        current_time = context.get_time()
+
+        sys_id_traj = None # TODO: fill this in with sys id traj
+
+        toppra_traj = reparameterize_with_toppra(
+            trajectory=sys_id_traj,
             plant=self._iiwa_controller_plant,
             velocity_limits=self.rotate_velocity_limits,
             acceleration_limits=self.display_acceleration_limits,
