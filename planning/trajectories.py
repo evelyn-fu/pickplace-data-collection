@@ -9,9 +9,9 @@ from planning.inverse_kinematics import solve_via_analytic_IK
 from enum import Enum
 
 class TrajType(Enum):
-    PREDISPLAY: 1
-    POSTDISPLAY: 2
-    BIN: 3
+    PREDISPLAY = 1
+    POSTDISPLAY = 2
+    BIN = 3
 
 def MakePickGripperFrames(X_G):
     """
@@ -33,7 +33,7 @@ def MakePickGripperFrames(X_G):
     times["postpick"] = 2.0
 
     X_G["preplace"] = RigidTransform(X_G["place"].rotation(), X_G["place"].translation() + [0, 0, 0.2])
-    times["preplace"] = 6.0
+    times["preplace"] = 10.0
 
     # Place back down and allow some time for gripper to open
     X_G["place_start"] = X_G["place"]

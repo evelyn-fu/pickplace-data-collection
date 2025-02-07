@@ -19,7 +19,7 @@ from planning.trajectories import (
 )
 from planning.gcs import plan_unconstrained_gcs_path_start_to_goal
 from planning.inverse_kinematics import solve_via_analytic_IK
-from iiwa_setup_dataclasses.trajectories import TrajectoryWithTimingInformation
+from iiwa_setup_dataclasses.trajectories import TrajectoryWithTimingInformation, Trajectory
 from iiwa_setup_dataclasses.bspline_trajectory import CompositeBezierCurveTrajectoryAttributes
 from pydrake.systems.framework import LeafSystem
 from pydrake.perception import (
@@ -37,6 +37,13 @@ from pydrake.common.value import (
 from pydrake.trajectories import (
     PiecewisePose,
     PiecewisePolynomial,
+)
+from pydrake.all import BsplineTrajectory, BsplineBasis
+from robot_payload_id.control.trajectory import FourierSeriesTrajectory
+
+from robot_payload_id.utils import (
+    BsplineTrajectoryAttributes,
+    FourierSeriesTrajectoryAttributes,
 )
 
 import pydrake.planning as mut
@@ -57,6 +64,7 @@ from pydrake.geometry import Rgba
 
 from manipulation.meshcat_utils import AddMeshcatTriad
 from enum import Enum
+from pathlib import Path
 
 import sys
 # append path to pycuci to system path
@@ -67,6 +75,7 @@ sys.path.append(PYCUCI_ROOT+'/bazel-bin/cuci/src/pybind/pycuci')
 import pycuci as cci
 PETE_ASSETS =  os.path.dirname(__file__)+"/../pete_assets/"
 SAFE_DIRECTIVES = PETE_ASSETS+'assets/directives/iiwa7_on_table_with_ceiling.yaml'
+SYS_ID_TRAJ_PARAMETER_PATH = Path(os.path.abspath(os.path.join(__file__ ,"../../../robot_payload_id/logs/corner_setup_payload_box/iiwa_eoptimality_10s_5Fterm_1000timesteps_20_40000/al_19")))
 
 from mmt_gcs.planning.mintime_scs import MintimeSCSWithPathFixing
 from mmt_gcs.planning.corridor_planning_utils import CCICollisionChecker, CollisionCheckerBase
@@ -563,7 +572,7 @@ stage_center = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/2)),
 bin_depth = 0.031
 platform_height = 0.068
 
-end_bin = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)), [0.05, -0.55, 0.2])
+end_bin = RigidTransform(RotationMatrix(RollPitchYaw(0.0, np.pi/2, 0.0)), [0.05, -0.55, 0.2])
 
 class TwoGraspPlanner(LeafSystem):
     def __init__(
@@ -576,6 +585,7 @@ class TwoGraspPlanner(LeafSystem):
             X_WC_bin,
             meshcat, 
             dirstr,
+            time_horizon,
             models_path=None,
             gripper_model_path=None,
             default_home=q_home,
@@ -614,7 +624,6 @@ class TwoGraspPlanner(LeafSystem):
         # Store calculated grasp pose
         self.X_WG1 = None
         self.X_WG2 = None
-        self.X_WG_bin = None
 
         # Store the path parameterized display trajectories
         self._display_traj_index1 = self.DeclareAbstractState(
@@ -632,6 +641,9 @@ class TwoGraspPlanner(LeafSystem):
             AbstractValue.Make(PiecewisePolynomial())
         )
         self._times_index_single_grasp = self.DeclareAbstractState(
+            AbstractValue.Make({"initial": 0.0})
+        )
+        self._times_index1 = self.DeclareAbstractState(
             AbstractValue.Make({"initial": 0.0})
         )
         self._times_index2 = self.DeclareAbstractState(
@@ -705,6 +717,7 @@ class TwoGraspPlanner(LeafSystem):
         self.q_bin_pregrasp = None
         self.q_display_center1 = None
         self.q_display_center2 = None
+        self.q_sys_id_pregrasp = None
         self.q_postgrasp = None
         self.place_flipped1 = False
         self.place_flipped2 = True
@@ -741,6 +754,24 @@ class TwoGraspPlanner(LeafSystem):
         self.pcd2 = None
         self.pcd3 = None
 
+        # Load trajectory parameters
+        is_fourier_series = os.path.exists(SYS_ID_TRAJ_PARAMETER_PATH / "a_value.npy")
+        if is_fourier_series:
+            traj_attrs = FourierSeriesTrajectoryAttributes.load(SYS_ID_TRAJ_PARAMETER_PATH)
+            excitation_traj = FourierSeriesTrajectory(
+                traj_attrs=traj_attrs,
+                time_horizon=time_horizon,
+            )
+        else:
+            traj_attrs = BsplineTrajectoryAttributes.load(SYS_ID_TRAJ_PARAMETER_PATH)
+            excitation_traj = BsplineTrajectory(
+                basis=BsplineBasis(order=traj_attrs.spline_order, knots=traj_attrs.knots),
+                control_points=traj_attrs.control_points,
+            )
+        self.excitation_traj = excitation_traj
+        self.excitation_traj_start_q = excitation_traj.value(0)
+
+
     def Update(self, context, state):
         mode = context.get_abstract_state(int(self._mode_index)).get_value()
 
@@ -763,7 +794,7 @@ class TwoGraspPlanner(LeafSystem):
             if context.get_time() > traj_q.end_time() + start_time:
                 state.get_mutable_abstract_state(
                     int(self._mode_index)
-                ).set_value(PlannerState.PLAN_PICK)
+                ).set_value(PlannerState.PLAN_SYS_ID)
             return
         if mode == PlannerState.PLAN_PICK:
             self.PlanBinPick(context, state, PlannerState.GO_TO_PICK_PREGRASP)
@@ -791,6 +822,7 @@ class TwoGraspPlanner(LeafSystem):
                     int(self._mode_index)
                 ).set_value(PlannerState.GO_HOME0)
                 self.GoHome(context, state)
+                print("going home")
             return
         if mode == PlannerState.GO_HOME0:
             traj_q = context.get_abstract_state(
@@ -892,6 +924,10 @@ class TwoGraspPlanner(LeafSystem):
                 state.get_mutable_abstract_state(
                     int(self._mode_index)
                 ).set_value(PlannerState.SYS_ID_GRASP)
+                # Update pick + display state
+                state.get_mutable_abstract_state(
+                    int(self._pick_mode_index)
+                ).set_value(PickState.PICK)
                 self.DoPoseTraj(context, state)
             return
         if mode == PlannerState.SYS_ID_GRASP:
@@ -943,6 +979,7 @@ class TwoGraspPlanner(LeafSystem):
                     int(self._pick_mode_index)
                 ).set_value(PickState.DISPLAY)
                 if sys_id:
+                    print("Doing sysid")
                     self.DoSysID(context, state)
                 else:
                     self.DoDisplay(context, state)
@@ -955,10 +992,14 @@ class TwoGraspPlanner(LeafSystem):
                 self.GoToPlace(context, state)
                 # input("Next: GoToPreplace (scs)") # pause for debugging
         if pick_mode == PickState.TO_PLACE:
-            if context.get_time() > traj_q.end_time() + start_time:
+            traj_pose = context.get_abstract_state(
+                int(self._traj_X_G_index)
+            ).get_value()
+            if traj_pose.get_number_of_segments() > 0 and context.get_time() > traj_pose.end_time():
                 state.get_mutable_abstract_state(
                     int(self._pick_mode_index)
                 ).set_value(PickState.PLACE)
+                print("placing")
                 self.DoPoseTraj(context, state)
                 # input("Next: Place (DiffIK)") # pause for debugging
         if pick_mode == PickState.PLACE:
@@ -1039,7 +1080,7 @@ class TwoGraspPlanner(LeafSystem):
                 continue
             
             self.q_bin_pregrasp = q_goal
-            self.X_WG_bin = RigidTransform(X_WG)
+            X_WG_bin = RigidTransform(X_WG)
             break
 
         manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(bin_pcd.xyzs().T))
@@ -1053,7 +1094,7 @@ class TwoGraspPlanner(LeafSystem):
         o3d.visualization.draw_plotly(viz_geoms)
 
         # Solve for pick trajectory before moving
-        X_WE = self.X_WG_bin.multiply(X_GE)
+        X_WE = X_WG_bin.multiply(X_GE)
         pick_height = X_WE.translation()[2]
         
         place_t = np.copy(stage_center.translation())
@@ -1081,46 +1122,7 @@ class TwoGraspPlanner(LeafSystem):
         self.PlanToPregrasp(context, state)
     
     def PlanSysIdPick(self, context, state, after_scan_state):
-        # Get manipuland pcd 
-        cloud = self.GetInputPort("cloud_bin").Eval(context)
-        manipuland_pcd = cloud.Crop(lower_xyz=[0.23, -0.17, platform_height], upper_xyz=[0.7, 0.17, 0.27])
-        manipuland_pcd.EstimateNormals(radius=0.1, num_closest=30)
-        manipuland_pcd.FlipNormalsTowardPoint(self._X_WC_bin.translation())
-        manipuland_pcd = manipuland_pcd.VoxelizedDownSample(voxel_size=ONLINE_VOXEL_RADIUS)
-
-        # remove outliers
-        o3d_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(manipuland_pcd.xyzs().T))
-        try:
-            cl, ind = o3d_cloud.remove_statistical_outlier(
-                nb_neighbors=int(manipuland_pcd.xyzs().shape[1] // 20), 
-                std_ratio=0.8)
-            filtered_pts = np.asarray(o3d_cloud.points)[ind]
-            manipuland_pcd.resize(filtered_pts.shape[0])
-            manipuland_pcd.mutable_xyzs()[:] = filtered_pts.T
-        except:
-            pass
-
-        # Get floor pcd 
-        cloud = self.GetInputPort("cloud_bin").Eval(context)
-        scene_pcd = cloud.Crop(lower_xyz=[0.1, -0.3, 0.0], upper_xyz=[0.85, 0.3, 0.07]).VoxelizedDownSample(voxel_size=0.01)
-        scene_pcd.EstimateNormals(radius=0.1, num_closest=30)
-        scene_pcd.FlipNormalsTowardPoint(self._X_WC_bin.translation())
-        scene_pcd = scene_pcd.VoxelizedDownSample(voxel_size=ONLINE_VOXEL_RADIUS)
-
-        # remove outliers
-        o3d_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(scene_pcd.xyzs().T))
-        try:
-            cl, ind = o3d_cloud.remove_statistical_outlier(
-                nb_neighbors=int(scene_pcd.xyzs().shape[1] // 20), 
-                std_ratio=0.8)
-            filtered_pts = np.asarray(o3d_cloud.points)[ind]
-            scene_pcd.resize(filtered_pts.shape[0])
-            scene_pcd.mutable_xyzs()[:] = filtered_pts.T
-        except:
-            pass
-        
-        self.meshcat.SetObject("cloud", manipuland_pcd, point_size=0.001, rgba=Rgba(1,0,1,1))
-        self.meshcat.SetObject("floor", scene_pcd, point_size=0.001, rgba=Rgba(1,0,1,1))
+        self.GetPointCloud(context, state, after_scan_state)
 
         # get end effector pose from grasp pose
         X_GE = RigidTransform(RotationMatrix(RollPitchYaw(0, 0, 0)), [0, 0, -self.eef_to_gripper_length])
@@ -1129,17 +1131,17 @@ class TwoGraspPlanner(LeafSystem):
         X_GgraspGpregrasp = RigidTransform([0, 0.0, -self.pregrasp_dist])
 
         # Initialize DRM with current pcd
-        self.drm_planner = drm_planner(self.cci_objects, manipuland_pcd.xyzs().T)
+        self.drm_planner = drm_planner(self.cci_objects, self.current_manipuland_pcd.xyzs().T)
 
         cci_checker = CCICollisionChecker(self.cci_objects['cci_mplant'], 
                                         self.cci_objects['cci_plant'].getRobotGeometryIds(), 
-                                        cci.Voxels(manipuland_pcd.xyzs()), 
+                                        cci.Voxels(self.current_manipuland_pcd.xyzs()), 
                                         ONLINE_VOXEL_RADIUS)
         
         # Planning first grasping trajectory
         self.grasp_node.compute_candidate_grasps(
-            manipuland_pcd,
-            scene_pcd,
+            self.current_manipuland_pcd,
+            self.current_scene_pcd,
             candidate_num=1,
             num_samples=10,
             random_seed=np.random.randint(1000),
@@ -1165,11 +1167,11 @@ class TwoGraspPlanner(LeafSystem):
             if q_goal is None:
                 continue
             
-            self.q_bin_pregrasp = q_goal
-            self.X_WG_bin = RigidTransform(X_WG)
+            self.q_sys_id_pregrasp = q_goal
+            X_WG_sys_id = RigidTransform(X_WG)
             break
 
-        manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(manipuland_pcd.xyzs().T))
+        manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(self.current_manipuland_pcd.xyzs().T))
         manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
 
         gripper_xyzs = self.grasp_node.hand_collision_model.to_pcd()
@@ -1180,7 +1182,7 @@ class TwoGraspPlanner(LeafSystem):
         o3d.visualization.draw_plotly(viz_geoms)
 
         # Solve for pick trajectory before moving
-        X_WE = self.X_WG_bin.multiply(X_GE)
+        X_WE = X_WG_sys_id.multiply(X_GE)
         X_G = {
             "pick": X_WE,
             "prepick": X_WE @ X_GgraspGpregrasp,
@@ -1197,9 +1199,10 @@ class TwoGraspPlanner(LeafSystem):
             X_G
         )
 
+        q_home = context.get_discrete_state(self._q0_index).get_value().copy()
         self.q_postgrasp = solve_via_analytic_IK(
             pose=X_G["preplace"],
-            current_config=self.q_display_center2,
+            current_config=q_home,
             ik_domain=self.ik_domain,
             checker=cci_checker
         )
@@ -1403,10 +1406,11 @@ class TwoGraspPlanner(LeafSystem):
         self.current_scene_pcd = merged_pcd
         print("table pcd got in", time.time()-start, "seconds")
 
-        mode = context.get_abstract_state(int(self._mode_index)).get_value()
         # Find grasp candidates
         if mode == PlannerState.SCANNING1:
             self.PlanGrasp(context, state)
+        if mode == PlannerState.PLAN_SYS_ID:
+            return
         
         state.get_mutable_abstract_state(
             int(self._mode_index)
@@ -1420,7 +1424,6 @@ class TwoGraspPlanner(LeafSystem):
         Reset to default home position to move arm out of the way of the camera
         '''
 
-        mode = context.get_abstract_state(int(self._mode_index)).get_value()
         q = self.get_input_port(self._iiwa_position_index).Eval(context)
         q_goal = context.get_discrete_state(self._q0_index).get_value().copy() # initial pose
 
@@ -1441,20 +1444,6 @@ class TwoGraspPlanner(LeafSystem):
             traj = plan_unconstrained_gcs_path_start_to_goal(
                 plant=self._iiwa_controller_plant, q_start=q, q_goal=q_goal, regions=None, no_obstacles=True
             )
-
-        if traj is None:
-            logging.error("Failed to find a path to the home positions.")
-            exit(1)
-        
-        if mode == PlannerState.GRASP1:
-            make_trajectory_save_dirs(self.savedir, "grasp1_gohome_traj")
-            traj_attr = CompositeBezierCurveTrajectoryAttributes.from_composite_bezier_curve_trajectory(traj)
-            traj_attr.log(self.savedir + "/grasp1_gohome_traj/")
-        elif mode == PlannerState.GRASP2:
-            make_trajectory_save_dirs(self.savedir, "grasp2_gohome_traj")
-            traj_attr = CompositeBezierCurveTrajectoryAttributes.from_composite_bezier_curve_trajectory(traj)
-            traj_attr.log(self.savedir + "/grasp2_gohome_traj/")
-
 
         breaks = np.linspace(0, traj.end_time(), int(1e3), endpoint=False)
         knots = traj.vector_values(breaks)
@@ -1488,6 +1477,8 @@ class TwoGraspPlanner(LeafSystem):
             q_goal = self.q_pregrasp2
         if mode == PlannerState.PLAN_PICK:
             q_goal = self.q_bin_pregrasp
+        if mode == PlannerState.PLAN_SYS_ID:
+            q_goal = self.q_sys_id_pregrasp
 
         obstacles_vox = np.hstack([ceiling_vox, camera_vox, bin_cam_vox, self.current_manipuland_pcd.xyzs()])
     
@@ -1777,9 +1768,12 @@ class TwoGraspPlanner(LeafSystem):
         if mode == PlannerState.GO_TO_PREGRASP1 or mode == PlannerState.GRASP1:
             X_G = context.get_abstract_state(int(self._gripper_pose_index1)).get_value()
             times = context.get_abstract_state(int(self._times_index1)).get_value()
-        else:
+        elif mode == PlannerState.GO_TO_PREGRASP2 or mode == PlannerState.GRASP2:
             X_G = context.get_abstract_state(int(self._gripper_pose_index2)).get_value()
             times = context.get_abstract_state(int(self._times_index2)).get_value()
+        elif mode == PlannerState.GO_TO_SYS_ID_PREGRASP or mode == PlannerState.SYS_ID_GRASP:
+            X_G = context.get_abstract_state(int(self._gripper_pose_index_single_grasp)).get_value()
+            times = context.get_abstract_state(int(self._times_index_single_grasp)).get_value()
         
         traj_type = TrajType.POSTDISPLAY
         if pick_mode == PickState.IDLE:
@@ -1869,20 +1863,21 @@ class TwoGraspPlanner(LeafSystem):
     def GoToSysID(self, context, state):
         q = self.get_input_port(self._iiwa_position_index).Eval(context)
         
-        q_goal = np.array() # TODO: fill this in w/ sysid start q
+        q_goal = self.excitation_traj_start_q
         
-        obstacles_vox = np.hstack([ceiling_vox, camera_vox, bin_cam_vox])
+        traj = PiecewisePolynomial.FirstOrderHold([0.0, 4.0], np.array([q, q_goal]).T)
+        # obstacles_vox = np.hstack([camera_vox, bin_cam_vox])
 
-        traj = scs_trajopt(
-            q, 
-            q_goal, 
-            self.drm_planner,
-            self.cci_objects, 
-            self.edge_inflator, 
-            obstacles_vox, 
-            self.display_velocity_limits, 
-            self.display_acceleration_limits
-        )
+        # traj = scs_trajopt(
+        #     q, 
+        #     q_goal, 
+        #     self.drm_planner,
+        #     self.cci_objects, 
+        #     self.edge_inflator, 
+        #     obstacles_vox, 
+        #     self.display_velocity_limits, 
+        #     self.display_acceleration_limits
+        # )
         
         breaks = np.linspace(0, traj.end_time(), int(1e3), endpoint=False)
         knots = traj.vector_values(breaks)
@@ -1890,8 +1885,8 @@ class TwoGraspPlanner(LeafSystem):
         toppra_traj = reparameterize_with_toppra(
             trajectory=knots.T,
             plant=self._iiwa_controller_plant,
-            velocity_limits=self.display_velocity_limits,
-            acceleration_limits=self.display_acceleration_limits,
+            velocity_limits=1.0 * np.ones(7),
+            acceleration_limits=1.0 * np.ones(7),
             num_grid_points=100,
         )
 
@@ -1906,14 +1901,12 @@ class TwoGraspPlanner(LeafSystem):
     def DoSysID(self, context, state):
         current_time = context.get_time()
 
-        sys_id_traj = None # TODO: fill this in with sys id traj
-
         toppra_traj = reparameterize_with_toppra(
-            trajectory=sys_id_traj,
+            trajectory=self.excitation_traj,
             plant=self._iiwa_controller_plant,
-            velocity_limits=self.rotate_velocity_limits,
-            acceleration_limits=self.display_acceleration_limits,
-            num_grid_points=100,
+            velocity_limits=3.0 * np.ones(7),
+            acceleration_limits=3.0 * np.ones(7),
+            num_grid_points=500,
             is_pl=True,
         )
 
@@ -1924,22 +1917,41 @@ class TwoGraspPlanner(LeafSystem):
             )
         )
     
+    def GoToSysIDPlace(self, context, state):
+        print("going to bin place")
+        current_time = context.get_time()
+        sample_times = [current_time+4.0, current_time + 8.0]
+        current_pose = self.GetInputPort("body_poses").Eval(context)[int(self._ee_index)]
+        X_G = context.get_abstract_state(int(self._gripper_pose_index_single_grasp)).get_value()
+        poses = [current_pose, X_G["preplace"]]
+
+        traj_gripper_pose = PiecewisePose.MakeLinear(sample_times, poses)
+
+        state.get_mutable_abstract_state(int(self._traj_X_G_index)).set_value(
+            traj_gripper_pose
+        )
+    
     def GoToPlace(self, context, state):
+        mode = context.get_abstract_state(int(self._mode_index)).get_value()
         q = self.get_input_port(self._iiwa_position_index).Eval(context)
         q_goal = self.q_postgrasp
         
-        obstacles_vox = np.hstack([ceiling_vox, camera_vox, bin_cam_vox])
-
-        traj = scs_trajopt(
-            q, 
-            q_goal, 
-            self.drm_planner,
-            self.cci_objects, 
-            self.edge_inflator, 
-            obstacles_vox, 
-            self.display_velocity_limits, 
-            self.display_acceleration_limits
-        )
+        if mode == PlannerState.SYS_ID_GRASP:
+            traj = plan_unconstrained_gcs_path_start_to_goal(
+                plant=self._iiwa_controller_plant, q_start=q, q_goal=q_goal, regions=None, no_obstacles=True
+            )
+        else:
+            obstacles_vox = np.hstack([ceiling_vox, camera_vox, bin_cam_vox])
+            traj = scs_trajopt(
+                q, 
+                q_goal, 
+                self.drm_planner,
+                self.cci_objects, 
+                self.edge_inflator, 
+                obstacles_vox, 
+                self.display_velocity_limits, 
+                self.display_acceleration_limits
+            )
         
         breaks = np.linspace(0, traj.end_time(), int(1e3), endpoint=False)
         knots = traj.vector_values(breaks)
@@ -2035,8 +2047,10 @@ class TwoGraspPlanner(LeafSystem):
         mode = context.get_abstract_state(int(self._mode_index)).get_value()
         pick_mode = context.get_abstract_state(int(self._pick_mode_index)).get_value()
 
-        if (mode == PlannerState.GRASP1 or mode == PlannerState.GRASP2) \
+        if (mode == PlannerState.GRASP1 or mode == PlannerState.GRASP2 or mode == PlannerState.SYS_ID_GRASP) \
             and (pick_mode == PickState.PICK or pick_mode == PickState.PLACE):
+            output.set_value(InputPortIndex(1))  # Diff IK
+        elif mode == PlannerState.SYS_ID_GRASP and pick_mode == PickState.TO_PLACE:
             output.set_value(InputPortIndex(1))  # Diff IK
         elif mode == PlannerState.PICK_GRASP:
             output.set_value(InputPortIndex(1))  # Diff IK
@@ -2047,8 +2061,10 @@ class TwoGraspPlanner(LeafSystem):
         mode = context.get_abstract_state(int(self._mode_index)).get_value()
         pick_mode = context.get_abstract_state(int(self._pick_mode_index)).get_value()
 
-        if (mode == PlannerState.GRASP1 or mode == PlannerState.GRASP2) \
+        if (mode == PlannerState.GRASP1 or mode == PlannerState.GRASP2 or mode == PlannerState.SYS_ID_GRASP) \
             and (pick_mode == PickState.PICK or pick_mode == PickState.PLACE):
+            output.set_value(False)
+        elif mode == PlannerState.SYS_ID_GRASP and pick_mode == PickState.TO_PLACE:
             output.set_value(False)
         elif mode == PlannerState.PICK_GRASP:
             output.set_value(False)

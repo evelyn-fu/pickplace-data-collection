@@ -509,8 +509,8 @@ class GraspListener():
             100 * antipodal_cost
             + 100.0 * gripper_vertical_alignment_cost
             + 10.0 * grasp_height_cost
-            + 1.0 * split_ratio_minor_axis_cost
-            + 50.0 * split_ratio_major_axis_cost
+            + 50.0 * split_ratio_minor_axis_cost
+            + 100.0 * split_ratio_major_axis_cost
             - 100.0 * proportion_enclosed
         )
         return cost

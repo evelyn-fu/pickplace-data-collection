@@ -91,7 +91,8 @@ def start_scenario(
         gripper_model_path="",
         use_hardware=False, 
         save_imgs=False,
-        turntable=False
+        turntable=False,
+        time_horizon=10.0
     ):
 
     meshcat.ResetRenderMode()
@@ -296,6 +297,7 @@ def start_scenario(
                 X_WC_bin=x_bin_camera,
                 meshcat=meshcat,
                 dirstr=dirstr,
+                time_horizon=time_horizon,
                 models_path=os.path.join(dir_path, os.path.join("scenario_datas", models_path)),
                 gripper_model_path=gripper_model_path))
 
@@ -494,6 +496,13 @@ if __name__ == "__main__":
         action="store_true",
         help="Whether to use turntable planner.",
     )
+    parser.add_argument(
+        "--time_horizon",
+        type=float,
+        default=10.0,
+        help="The time horizon/ duration of the trajectory. Only used for Fourier "
+        + "series trajectories.",
+    )
     args = parser.parse_args()
 
     gripper_model_path = "file://./home/real2sim/src/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_buffer.sdf"
@@ -512,5 +521,6 @@ if __name__ == "__main__":
         models_path=args.models_path, 
         use_hardware=args.use_hardware, 
         save_imgs=args.save_imgs,
-        turntable=args.turntable
+        turntable=args.turntable,
+        time_horizon=args.time_horizon
     )
