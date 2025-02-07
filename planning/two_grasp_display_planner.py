@@ -7,6 +7,7 @@ import open3d as o3d
 import os
 from scipy.spatial.transform import Rotation as R
 from perception.teaser import icp  
+from perception.pcd_util import compute_principal_minor_components, crop_connected_points
 from planning.grasp import GraspListener, GraspType
 from planning.toppra import reparameterize_with_toppra
 from planning.trajectories import (
@@ -435,17 +436,6 @@ def make_trajectory_save_dirs(dirstr, traj_name):
     if not os.path.exists(dirstr+f"/{traj_name}" + "/end_times"):
         os.makedirs(dirstr+f"/{traj_name}" + "/end_times")
 
-def compute_principal_minor_components(pcd):
-    cov = np.cov(pcd.T)
-    eigval, eigvec = np.linalg.eig(cov)
-
-    order = eigval.argsort()
-    principal_component = eigvec[:, order[-1]]
-    secondary_component = eigvec[:, order[1]]
-    minor_component = eigvec[:, order[0]]
-
-    return principal_component, secondary_component, minor_component
-
 def check_configuration_has_collisions(models_path, com, rot, dims, q):
     # Get bounding box of object
     rpy = rot.ToRollPitchYaw().vector()
@@ -568,7 +558,7 @@ x, y = np.meshgrid(np.arange(-0.2, 0.075, 0.02), np.arange(0.02, -0.075, -0.36))
 bin_cam_vox = np.vstack((x.flatten(), y.flatten(), np.zeros_like(x.flatten())))
 bin_cam_vox += np.array([-0.0338161, 0.62563, 0.360087])[:, np.newaxis]
 
-stage_center = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0.0)), [0.4, 0.0, 0.0])
+stage_center0 = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0.0)), [0.4, 0.0, 0.0])
 stage_center90 = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/2)), [0.4, 0.0, 0.0])
 bin_depth = 0.031
 platform_height = 0.068
@@ -1080,6 +1070,29 @@ class TwoGraspPlanner(LeafSystem):
             X_WG_bin = RigidTransform(X_WG)
             break
 
+        # Crop point cloud around grasp point
+        grasp_center = X_WG_bin @ RigidTransform([0, 0.0, -self.eef_to_gripper_length/2])
+        cropped_cloud = crop_connected_points(
+            bin_pcd,
+            grasp_center.translation(),
+            radius=0.1,  # 10cm radius
+            voxel_radius=ONLINE_VOXEL_RADIUS
+        )
+
+        flattened_cloud = np.copy(cropped_cloud.xyzs())
+        flattened_cloud[:,2] = np.mean(flattened_cloud[:,2])
+        principal_component, _, _ = compute_principal_minor_components(cropped_cloud.xyzs().T)
+        R = X_WG_bin.GetAsMatrix4()[:3,:3]
+        eff_perpendicular_vec = R.dot(np.array([1, 0, 0]))
+        eff_parallel_vec = R.dot(np.array([0, 1, 0]))
+        perpendicular_score = np.abs(eff_perpendicular_vec @ principal_component)
+        parallel_score = np.abs(eff_parallel_vec @ principal_component)
+        
+        if perpendicular_score > parallel_score:
+            stage_center = stage_center90
+        else:
+            stage_center = stage_center0
+
         manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(bin_pcd.xyzs().T))
         manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
 
@@ -1104,7 +1117,7 @@ class TwoGraspPlanner(LeafSystem):
             "postplace": place @ RigidTransform([0, 0.0, -0.2]),
         }
 
-        X_G, times = MakePickGripperFrames(X_G, 10.0)
+        X_G, times = MakePickGripperFrames(X_G, 8.0)
         
         state.get_mutable_abstract_state(int(self._times_index_single_grasp)).set_value(
             times
