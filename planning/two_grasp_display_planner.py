@@ -1133,6 +1133,7 @@ class TwoGraspPlanner(LeafSystem):
     
     def PlanSysIdPick(self, context, state, after_scan_state):
         self.GetPointCloud(context, state, after_scan_state)
+        self.meshcat.SetObject("cloud", self.current_manipuland_pcd, point_size=0.001, rgba=Rgba(0,0,1,1))
 
         # get end effector pose from grasp pose
         X_GE = RigidTransform(RotationMatrix(RollPitchYaw(0, 0, 0)), [0, 0, -self.eef_to_gripper_length])
