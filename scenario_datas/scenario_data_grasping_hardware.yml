@@ -117,9 +117,9 @@ directives:
     name: camera_left
     file: package://manipulation/camera_box.sdf
 
-- add_model:
-    name: camera_bin
-    file: package://manipulation/camera_box.sdf
+# - add_model:
+#     name: camera_bin
+#     file: package://manipulation/camera_box.sdf
 
 - add_weld:
     parent: camera0_origin
@@ -133,9 +133,9 @@ directives:
     parent: camera2_origin
     child: camera_left::base
 
-- add_weld:
-    parent: camera_bin_origin
-    child: camera_bin::base
+# - add_weld:
+#     parent: camera_bin_origin
+#     child: camera_bin::base
 
 cameras:
     camera_front:
@@ -173,7 +173,7 @@ cameras:
         focal: !FovDegrees {x: 69, y: 42}
         lcm_bus: driver_traffic
         X_PB:
-            base_frame: camera_bin::base
+            base_frame: camera_bin_origin
 
 camera_ids:
     camera_front: "DRAKE_RGBD_CAMERA_IMAGES_843512061674"

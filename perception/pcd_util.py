@@ -49,7 +49,7 @@ def crop_connected_points(cloud: PointCloud, center: np.ndarray, radius: float, 
         current = to_check.pop()
         
         # Find neighbors within voxel_radius * 1.1
-        neighbors = tree.query_ball_point(xyz.T[current], voxel_radius * 1.1)
+        neighbors = tree.query_ball_point(xyz.T[current], voxel_radius * 5)
         
         # Add unvisited neighbors that are within radius
         for n in neighbors:

@@ -558,9 +558,34 @@ x, y = np.meshgrid(np.arange(-0.2, 0.075, 0.02), np.arange(0.02, -0.075, -0.36))
 bin_cam_vox = np.vstack((x.flatten(), y.flatten(), np.zeros_like(x.flatten())))
 bin_cam_vox += np.array([-0.0338161, 0.62563, 0.360087])[:, np.newaxis]
 
+def generate_rectangle_points(corner1, corner2, corner3, corner4, separation, z_offset=0):
+    # Function to generate points along an edge
+    def edge_points(start, end, z_offset):
+        return np.column_stack((
+            np.linspace(start[0], end[0], int(np.linalg.norm(np.subtract(end, start)) / separation) + 1),
+            np.linspace(start[1], end[1], int(np.linalg.norm(np.subtract(end, start)) / separation) + 1),
+            np.linspace(start[2] + z_offset, end[2] + z_offset, int(np.linalg.norm(np.subtract(end, start)) / separation) + 1)
+        ))
+    
+    # Generate points along each edge and concatenate
+    rectangle_points = np.concatenate([
+        edge_points(corner1, corner2, z_offset), 
+        edge_points(corner2, corner3, z_offset)[1:], 
+        edge_points(corner3, corner4, z_offset)[1:], 
+        edge_points(corner4, corner1, z_offset)[1:]
+    ], axis=0)
+    
+    return rectangle_points
+
+corner1, corner2, corner3, corner4 = (-0.05, 0.42, 0.13), (-0.05, 0.77, 0.13), (0.165, 0.77, 0.13), (0.165, 0.42, 0.13)
+bin_sides_components = []
+for z_offset in np.linspace(0, -0.1, int(0.1/0.005)):
+    bin_sides_components.append(generate_rectangle_points(corner1, corner2, corner3, corner4, 0.005, z_offset))
+bin_sides_vox = np.concatenate(bin_sides_components, axis=0).T
+
 stage_center0 = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0.0)), [0.4, 0.0, 0.0])
 stage_center90 = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/2)), [0.4, 0.0, 0.0])
-bin_depth = 0.031
+bin_depth = 0.02
 platform_height = 0.068
 
 end_bin = RigidTransform(RotationMatrix(RollPitchYaw(0.0, np.pi/2, np.pi)), [0.05, -0.55, 0.2])
@@ -744,6 +769,7 @@ class TwoGraspPlanner(LeafSystem):
         self.pcd1 = None
         self.pcd2 = None
         self.pcd3 = None
+        self.bin_points = None
 
         # Load trajectory parameters
         is_fourier_series = os.path.exists(SYS_ID_TRAJ_PARAMETER_PATH / "a_value.npy")
@@ -969,8 +995,12 @@ class TwoGraspPlanner(LeafSystem):
                     int(self._pick_mode_index)
                 ).set_value(PickState.DISPLAY)
                 if sys_id:
-                    print("Doing sysid")
-                    self.DoSysID(context, state)
+                    # print("Doing sysid")
+                    # self.DoSysID(context, state)
+                    state.get_mutable_abstract_state(
+                        int(self._pick_mode_index)
+                    ).set_value(PickState.TO_PLACE)
+                    self.GoToPlace(context, state)
                 else:
                     self.DoDisplay(context, state)
                 # input("Next: DoDisplay (IK + Toppra)") # pause for debugging
@@ -1004,10 +1034,20 @@ class TwoGraspPlanner(LeafSystem):
     def PlanBinPick(self, context, state, after_scan_state):
         # Get pcd 
         cloud = self.GetInputPort("cloud_bin").Eval(context)
-        bin_pcd = cloud.Crop(lower_xyz=[-0.04, 0.41, -bin_depth], upper_xyz=[0.165, 0.725, 0.16])
+        bin_pcd = cloud.Crop(lower_xyz=[-0.03, 0.44, -bin_depth], upper_xyz=[0.155, 0.75, 0.16])
         bin_pcd.EstimateNormals(radius=0.1, num_closest=30)
         bin_pcd.FlipNormalsTowardPoint(self._X_WC_bin.translation())
         bin_pcd = bin_pcd.VoxelizedDownSample(voxel_size=ONLINE_VOXEL_RADIUS)
+
+        # Get background pcd 
+        cloud = self.GetInputPort("cloud_bin").Eval(context)
+        scene_pcd = cloud.Crop(lower_xyz=[-0.05, 0.42, -bin_depth-0.1], upper_xyz=[0.175, 0.77, 0.16])
+        scene_pcd.EstimateNormals(radius=0.1, num_closest=30)
+        scene_pcd.FlipNormalsTowardPoint(self._X_WC_bin.translation())
+        scene_pcd = bin_pcd.VoxelizedDownSample(voxel_size=ONLINE_VOXEL_RADIUS)
+        new_scene_pts = np.concatenate([scene_pcd.xyzs(), bin_sides_vox], axis=1)
+        scene_pcd.resize(new_scene_pts.shape[1])
+        scene_pcd.mutable_xyzs()[:] = new_scene_pts
 
         # remove outliers
         o3d_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(bin_pcd.xyzs().T))
@@ -1021,7 +1061,9 @@ class TwoGraspPlanner(LeafSystem):
         except:
             pass
         
-        self.meshcat.SetObject("bin_cloud", bin_pcd, point_size=0.001, rgba=Rgba(1,0,1,1))
+        self.meshcat.SetObject("bin_cloud", scene_pcd, point_size=0.001, rgba=Rgba(0,1,0,1))
+        self.meshcat.SetObject("bin_contents_cloud", bin_pcd, point_size=0.001, rgba=Rgba(1,0,1,1))
+        self.bin_points = scene_pcd.xyzs()
 
         # get end effector pose from grasp pose
         X_GE = RigidTransform(RotationMatrix(RollPitchYaw(0, 0, 0)), [0, 0, -self.eef_to_gripper_length])
@@ -1040,7 +1082,7 @@ class TwoGraspPlanner(LeafSystem):
         # Planning first grasping trajectory
         self.grasp_node.compute_candidate_grasps(
             bin_pcd,
-            bin_pcd,
+            scene_pcd,
             candidate_num=1,
             num_samples=10,
             random_seed=np.random.randint(1000),
@@ -1072,12 +1114,14 @@ class TwoGraspPlanner(LeafSystem):
 
         # Crop point cloud around grasp point
         grasp_center = X_WG_bin @ RigidTransform([0, 0.0, -self.eef_to_gripper_length/2])
+        closest_idx = np.argmin(np.linalg.norm(bin_pcd.xyzs() - grasp_center.translation()[:, np.newaxis], axis=0))
         cropped_cloud = crop_connected_points(
             bin_pcd,
-            grasp_center.translation(),
+            bin_pcd.xyzs()[:, closest_idx],
             radius=0.1,  # 10cm radius
             voxel_radius=ONLINE_VOXEL_RADIUS
         )
+        self.meshcat.SetObject("cropped_cloud", cropped_cloud, point_size=0.001, rgba=Rgba(0,0,1,1))
 
         flattened_cloud = np.copy(cropped_cloud.xyzs())
         flattened_cloud[:,2] = np.mean(flattened_cloud[:,2])
@@ -1101,7 +1145,7 @@ class TwoGraspPlanner(LeafSystem):
         gripper_cloud.paint_uniform_color([1.0, 0.0, 0.0])
 
         viz_geoms = [manipuland_cloud, gripper_cloud]
-        # o3d.visualization.draw_plotly(viz_geoms)
+        o3d.visualization.draw_plotly(viz_geoms)
 
         # Solve for pick trajectory before moving
         X_WE = X_WG_bin.multiply(X_GE)
@@ -1117,7 +1161,7 @@ class TwoGraspPlanner(LeafSystem):
             "postplace": place @ RigidTransform([0, 0.0, -0.2]),
         }
 
-        X_G, times = MakePickGripperFrames(X_G, 8.0)
+        X_G, times = MakePickGripperFrames(X_G, 8.0, 0.35)
         
         state.get_mutable_abstract_state(int(self._times_index_single_grasp)).set_value(
             times
@@ -1484,14 +1528,16 @@ class TwoGraspPlanner(LeafSystem):
         q = self.get_input_port(self._iiwa_position_index).Eval(context)
         if mode == PlannerState.SCANNING1:
             q_goal = self.q_pregrasp1
+            obstacles_vox = np.hstack([ceiling_vox, camera_vox, bin_cam_vox, self.current_manipuland_pcd.xyzs()])
         if mode == PlannerState.SCANNING2:
             q_goal = self.q_pregrasp2
+            obstacles_vox = np.hstack([ceiling_vox, camera_vox, bin_cam_vox, self.current_manipuland_pcd.xyzs()])
         if mode == PlannerState.PLAN_PICK:
             q_goal = self.q_bin_pregrasp
+            obstacles_vox = np.hstack([ceiling_vox, camera_vox, bin_cam_vox, self.current_manipuland_pcd.xyzs(), self.bin_points])
         if mode == PlannerState.PLAN_SYS_ID:
             q_goal = self.q_sys_id_pregrasp
-
-        obstacles_vox = np.hstack([ceiling_vox, camera_vox, bin_cam_vox, self.current_manipuland_pcd.xyzs()])
+            obstacles_vox = np.hstack([ceiling_vox, camera_vox, bin_cam_vox, self.current_manipuland_pcd.xyzs()])
     
         traj = scs_trajopt(
             q, 

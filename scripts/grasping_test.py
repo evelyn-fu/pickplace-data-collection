@@ -201,7 +201,7 @@ def start_scenario(
         x_back_left_rgb = RigidTransform(np.loadtxt("/home/real2sim/calibrations/12_6_calibrations/back_left_calibration_12_5_daniilidis.txt"))
         
         # Bin camera
-        x_bin_rgb = RigidTransform(np.loadtxt("/home/real2sim/calibrations/bin_calibration_2_5_daniilidis.txt"))
+        x_bin_rgb = RigidTransform(np.loadtxt("/home/real2sim/calibrations/bin_calibration_2_7_daniilidis.txt"))
 
         # rgb calibration to depth calibration (from realsense specs)
         # Front camera
@@ -242,7 +242,7 @@ def start_scenario(
         x_back_left_camera = RigidTransform(np.loadtxt("/home/real2sim/calibrations/12_6_calibrations/back_left_calibration_12_5_daniilidis.txt"))
 
         # Bin camera
-        x_bin_camera = RigidTransform(np.loadtxt("/home/real2sim/calibrations/bin_calibration_2_5_daniilidis.txt"))
+        x_bin_camera = RigidTransform(np.loadtxt("/home/real2sim/calibrations/bin_calibration_2_7_daniilidis.txt"))
 
     # connect stationary camera pcd source
     camera0_pose_source = builder.AddSystem(CameraPoseInWorldSource(x_front_camera, handeye=False))

@@ -13,7 +13,7 @@ class TrajType(Enum):
     POSTDISPLAY = 2
     BIN = 3
 
-def MakePickGripperFrames(X_G, preplace_time=0.0):
+def MakePickGripperFrames(X_G, preplace_time=0.0, postpick_height=0.2):
     """
     Takes a partial specification with X_G["pick"], X_G["prepick"], X_G["place"], X_G["postplace"]
     and returns a X_G and times with all of the pick frames populated.
@@ -29,7 +29,7 @@ def MakePickGripperFrames(X_G, preplace_time=0.0):
     times["pick_end"] = 2.0
 
     # raise object off surface
-    X_G["postpick"] = RigidTransform(X_G["pick"].rotation(), X_G["pick"].translation() + [0, 0, 0.2])
+    X_G["postpick"] = RigidTransform(X_G["pick"].rotation(), X_G["pick"].translation() + [0, 0, postpick_height])
     times["postpick"] = 2.0
 
     X_G["preplace"] = RigidTransform(X_G["place"].rotation(), X_G["place"].translation() + [0, 0, 0.2])
