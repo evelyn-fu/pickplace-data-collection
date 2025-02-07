@@ -568,7 +568,8 @@ x, y = np.meshgrid(np.arange(-0.2, 0.075, 0.02), np.arange(0.02, -0.075, -0.36))
 bin_cam_vox = np.vstack((x.flatten(), y.flatten(), np.zeros_like(x.flatten())))
 bin_cam_vox += np.array([-0.0338161, 0.62563, 0.360087])[:, np.newaxis]
 
-stage_center = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/2)), [0.4, 0.0, 0.0])
+stage_center = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0.0)), [0.4, 0.0, 0.0])
+stage_center90 = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/2)), [0.4, 0.0, 0.0])
 bin_depth = 0.031
 platform_height = 0.068
 
@@ -720,7 +721,7 @@ class TwoGraspPlanner(LeafSystem):
         self.q_sys_id_pregrasp = None
         self.q_postgrasp = None
         self.place_flipped1 = False
-        self.place_flipped2 = True
+        self.place_flipped2 = False
         self.meshcat = meshcat
         self.plant = plant
         self._iiwa_controller_plant = controller_plant
@@ -822,7 +823,6 @@ class TwoGraspPlanner(LeafSystem):
                     int(self._mode_index)
                 ).set_value(PlannerState.GO_HOME0)
                 self.GoHome(context, state)
-                print("going home")
             return
         if mode == PlannerState.GO_HOME0:
             traj_q = context.get_abstract_state(
@@ -1088,7 +1088,7 @@ class TwoGraspPlanner(LeafSystem):
         gripper_cloud.paint_uniform_color([1.0, 0.0, 0.0])
 
         viz_geoms = [manipuland_cloud, gripper_cloud]
-        o3d.visualization.draw_plotly(viz_geoms)
+        # o3d.visualization.draw_plotly(viz_geoms)
 
         # Solve for pick trajectory before moving
         X_WE = X_WG_bin.multiply(X_GE)
