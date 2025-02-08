@@ -1221,7 +1221,22 @@ class GraspListener():
 
             grasps_quality = candidate_costs_filtered[:, np.newaxis] + candidate_costs_filtered[np.newaxis, :]
 
-            pair_costs = grasps_quality + 20 * translation_cost + 30 * rotation_cost
+            pair_cost_dicts = []
+            N = len(candidates_filtered)
+            for i in range(N):
+                for j in range(N):
+                    pair_cost_dicts.append({
+                        "grasps_quality": grasps_quality[i, j],
+                        "translation_cost": 20 * translation_cost[i, j],
+                        "rotation_cost": 30 * rotation_cost[i, j]
+                    })
+
+            pair_costs = np.array([
+                d["grasps_quality"] + d["translation_cost"] + d["rotation_cost"]
+                for d in pair_cost_dicts
+            ]) # Shape (NxN,)
+
+            pair_costs = pair_costs.reshape(N, N)
             pair_costs = np.triu(pair_costs, k=1) + np.tril(np.inf * np.ones_like(pair_costs)) # make lower + diagonal infinity to avoid double counting
             pair_costs = pair_costs.flatten()
             pairs = [(X_WG1, X_WG2) for X_WG1 in candidates_filtered for X_WG2 in candidates_filtered]
@@ -1232,6 +1247,38 @@ class GraspListener():
             print("pair selection time:", time.time()-start)
             # List of grasp pairs
             self.grasp_candidates: List[Tuple[np.ndarray]] = pair_lst_sorted
+
+            if VISUALIZE_SORTED_WITH_COSTS:
+                sorted_costs = [pair_costs[i] for i in sorted_pair_indices]
+                sorted_cost_dicts = [pair_cost_dicts[i] for i in sorted_pair_indices]
+
+                manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
+                manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
+
+                for X_WGs, cost, cost_dict in zip(pair_lst_sorted, sorted_costs, sorted_cost_dicts):
+                    print("Cost:", cost)
+                    print("Cost dict:\n", cost_dict)
+
+                    X_WG1, X_WG2 = X_WGs[0], X_WGs[1]
+
+                    gripper1_xyzs = self.hand_collision_model.to_pcd()
+                    gripper1_cloud = o3d.geometry.PointCloud(
+                        o3d.utility.Vector3dVector(gripper1_xyzs)).voxel_down_sample(0.005).transform(
+                            (X_WG1 @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0]).GetAsMatrix4()))
+                    gripper1_cloud.paint_uniform_color([1.0, 0.0, 0.0])
+
+                    gripper2_xyzs = self.hand_collision_model.to_pcd()
+                    gripper2_cloud = o3d.geometry.PointCloud(
+                        o3d.utility.Vector3dVector(gripper2_xyzs)).voxel_down_sample(0.005).transform(
+                            (X_WG2 @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0]).GetAsMatrix4()))
+                    gripper2_cloud.paint_uniform_color([0.0, 1.0, 0.0])
+
+                    mean_gripper_point = np.mean(np.concatenate([gripper1_cloud.points, gripper2_cloud.points]), axis=0)
+                    world_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(
+                        size=0.05, origin=[mean_gripper_point[0], mean_gripper_point[1], 0])
+
+                    viz_geoms = [manipuland_cloud, gripper1_cloud, gripper2_cloud, world_frame]
+                    o3d.visualization.draw_geometries(viz_geoms)
         else:
             sorted_indices = np.argsort(candidate_costs)
             candidate_lst_sorted = [candidate_lst[idx] for idx in sorted_indices]

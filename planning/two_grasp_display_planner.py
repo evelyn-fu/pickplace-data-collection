@@ -1658,7 +1658,7 @@ class TwoGraspPlanner(LeafSystem):
         print("grasp pairs:", len(grasp_pairs))
         q = self.get_input_port(self._iiwa_position_index).Eval(context)
         for i in range(len(grasp_pairs)):
-            print("Grasp Pair:", grasp_pairs[i])
+            print("Trying to solve ik for grasp Pair:", grasp_pairs[i])
 
             X_WG1 = grasp_pairs[i][0]
             X_WG2 = grasp_pairs[i][1]
@@ -1673,6 +1673,7 @@ class TwoGraspPlanner(LeafSystem):
             )
 
             if q_goal1 is None:
+                print("Failed to find ik for first grasp, trying next pair")
                 continue
                 
             # check if configuration is in collision with scene
@@ -1688,6 +1689,7 @@ class TwoGraspPlanner(LeafSystem):
             )
 
             if q_goal2 is None:
+                print("Failed to find ik for second grasp, trying next pair")
                 continue
 
             # check if configuration is in collision with scene
