@@ -76,7 +76,8 @@ sys.path.append(PYCUCI_ROOT+'/bazel-bin/cuci/src/pybind/pycuci')
 import pycuci as cci
 PETE_ASSETS =  os.path.dirname(__file__)+"/../pete_assets/"
 SAFE_DIRECTIVES = PETE_ASSETS+'assets/directives/iiwa7_on_table_with_ceiling.yaml'
-SYS_ID_TRAJ_PARAMETER_PATH = Path(os.path.abspath(os.path.join(__file__ ,"../../../robot_payload_id/logs/corner_setup_payload_box/iiwa_eoptimality_10s_5Fterm_1000timesteps_20_100000/al_19")))
+SYS_ID_TRAJ_PARAMETER_PATH = Path(os.path.abspath(os.path.join(__file__ ,"../../traj_feb7")))
+# SYS_ID_TRAJ_PARAMETER_PATH = Path(os.path.abspath(os.path.join(__file__ ,"../../../robot_payload_id/logs/corner_setup_payload_box/iiwa_eoptimality_10s_5Fterm_1000timesteps_20_100000/al_19")))
 
 from mmt_gcs.planning.mintime_scs import MintimeSCSWithPathFixing
 from mmt_gcs.planning.corridor_planning_utils import CCICollisionChecker, CollisionCheckerBase
@@ -577,18 +578,18 @@ def generate_rectangle_points(corner1, corner2, corner3, corner4, separation, z_
     
     return rectangle_points
 
-corner1, corner2, corner3, corner4 = (-0.05, 0.42, 0.13), (-0.05, 0.77, 0.13), (0.165, 0.77, 0.13), (0.165, 0.42, 0.13)
+corner1, corner2, corner3, corner4 = (-0.06, 0.42, 0.13), (-0.06, 0.77, 0.13), (0.155, 0.77, 0.13), (0.155, 0.42, 0.13)
 bin_sides_components = []
 for z_offset in np.linspace(0, -0.1, int(0.1/0.005)):
     bin_sides_components.append(generate_rectangle_points(corner1, corner2, corner3, corner4, 0.005, z_offset))
 bin_sides_vox = np.concatenate(bin_sides_components, axis=0).T
 
-stage_center0 = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0.0)), [0.4, 0.0, 0.0])
-stage_center90 = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/2)), [0.4, 0.0, 0.0])
+stage_center0 = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0.0)), [0.5, 0.0, 0.0])
+stage_center90 = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/2)), [0.5, 0.0, 0.0])
 bin_depth = 0.02
 platform_height = 0.068
 
-end_bin = RigidTransform(RotationMatrix(RollPitchYaw(0.0, np.pi/2, np.pi)), [0.05, -0.55, 0.2])
+end_bin = RigidTransform(RotationMatrix(RollPitchYaw(0.0, np.pi/2, np.pi)), [0.20, -0.55, 0.2])
 
 class TwoGraspPlanner(LeafSystem):
     def __init__(
@@ -745,7 +746,8 @@ class TwoGraspPlanner(LeafSystem):
         self.acceleration_limits = 0.4 * np.ones(7)
         self.display_velocity_limits = 0.1 * np.ones(7)
         self.rotate_velocity_limits = 0.1 * np.ones(7)
-        self.rotate_velocity_limits[6] = 0.075
+        # self.rotate_velocity_limits[6] = 0.075
+        self.rotate_velocity_limits[6] = 1.0
         self.display_acceleration_limits = 0.1 * np.ones(7)
         self.regions = [] #regions
         self.gripper_length = gripper_length
@@ -995,12 +997,8 @@ class TwoGraspPlanner(LeafSystem):
                     int(self._pick_mode_index)
                 ).set_value(PickState.DISPLAY)
                 if sys_id:
-                    # print("Doing sysid")
-                    # self.DoSysID(context, state)
-                    state.get_mutable_abstract_state(
-                        int(self._pick_mode_index)
-                    ).set_value(PickState.TO_PLACE)
-                    self.GoToPlace(context, state)
+                    print("Doing sysid")
+                    self.DoSysID(context, state)
                 else:
                     self.DoDisplay(context, state)
                 # input("Next: DoDisplay (IK + Toppra)") # pause for debugging
@@ -1034,20 +1032,24 @@ class TwoGraspPlanner(LeafSystem):
     def PlanBinPick(self, context, state, after_scan_state):
         # Get pcd 
         cloud = self.GetInputPort("cloud_bin").Eval(context)
-        bin_pcd = cloud.Crop(lower_xyz=[-0.03, 0.44, -bin_depth], upper_xyz=[0.155, 0.75, 0.16])
+        bin_pcd = cloud.Crop(lower_xyz=[-0.03, 0.44, -bin_depth], upper_xyz=[0.145, 0.75, 0.16])
         bin_pcd.EstimateNormals(radius=0.1, num_closest=30)
         bin_pcd.FlipNormalsTowardPoint(self._X_WC_bin.translation())
         bin_pcd = bin_pcd.VoxelizedDownSample(voxel_size=ONLINE_VOXEL_RADIUS)
 
         # Get background pcd 
         cloud = self.GetInputPort("cloud_bin").Eval(context)
-        scene_pcd = cloud.Crop(lower_xyz=[-0.05, 0.42, -bin_depth-0.1], upper_xyz=[0.175, 0.77, 0.16])
+        scene_pcd = cloud.Crop(lower_xyz=[-0.05, 0.42, -bin_depth-0.1], upper_xyz=[0.165, 0.77, 0.16])
         scene_pcd.EstimateNormals(radius=0.1, num_closest=30)
         scene_pcd.FlipNormalsTowardPoint(self._X_WC_bin.translation())
         scene_pcd = bin_pcd.VoxelizedDownSample(voxel_size=ONLINE_VOXEL_RADIUS)
         new_scene_pts = np.concatenate([scene_pcd.xyzs(), bin_sides_vox], axis=1)
         scene_pcd.resize(new_scene_pts.shape[1])
         scene_pcd.mutable_xyzs()[:] = new_scene_pts
+        
+        np.save(os.path.abspath(os.path.join(__file__ ,"../../bin_background.npy")), scene_pcd.xyzs())
+        np.save(os.path.abspath(os.path.join(__file__ ,"../../bin_contents.npy")), bin_pcd.xyzs())
+        print("saved bin pcds")
 
         # remove outliers
         o3d_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(bin_pcd.xyzs().T))
@@ -1084,19 +1086,30 @@ class TwoGraspPlanner(LeafSystem):
             bin_pcd,
             scene_pcd,
             candidate_num=1,
-            num_samples=10,
+            num_samples=50,
             random_seed=np.random.randint(1000),
-            grasp_type=GraspType.TOP
+            grasp_type=GraspType.TOP,
+            roll_min = 0.0,
+            roll_max = 0.0,
+            num_roll_samples=1,
+            pitch_min = 0.0,
+            pitch_max = 0.0,
+            num_pitch_samples=1,
+            num_yaw_samples=20,
+            point_up=True
         )
 
         grasps = self.grasp_node.get_best_grasps()
         print("bin grasps:", len(grasps))
         q = self.get_input_port(self._iiwa_position_index).Eval(context)
         for i in range(len(grasps)):
-            print("Grasp:", grasps[i])
+            # import IPython; IPython.embed()
+
+            print("Solving IK for grasp:", grasps[i])
 
             X_WG = grasps[i]
-            X_WPregrasp = (RigidTransform(X_WG) @ X_GE) @ X_GgraspGpregrasp
+            X_WG_eef = (RigidTransform(X_WG) @ X_GE)
+            X_WPregrasp = RigidTransform(X_WG_eef.rotation(), X_WG_eef.translation() + [0, 0, 0.18])
 
             q_goal = solve_via_analytic_IK(
                 pose=X_WPregrasp,
@@ -1106,6 +1119,7 @@ class TwoGraspPlanner(LeafSystem):
             )
 
             if q_goal is None:
+                print("Failed to find IK, trying next best grasp.")
                 continue
             
             self.q_bin_pregrasp = q_goal
@@ -1141,11 +1155,18 @@ class TwoGraspPlanner(LeafSystem):
         manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
 
         gripper_xyzs = self.grasp_node.hand_collision_model.to_pcd()
-        gripper_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(gripper_xyzs)).voxel_down_sample(ONLINE_VOXEL_RADIUS).transform((X_WG @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0]).GetAsMatrix4()))
+        gripper_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(gripper_xyzs)).voxel_down_sample(ONLINE_VOXEL_RADIUS).transform(
+            (X_WG @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0]).GetAsMatrix4())
+        )
         gripper_cloud.paint_uniform_color([1.0, 0.0, 0.0])
 
-        viz_geoms = [manipuland_cloud, gripper_cloud]
+        frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1).transform(X_WG)
+
+        viz_geoms = [manipuland_cloud, gripper_cloud, frame]
         o3d.visualization.draw_plotly(viz_geoms)
+
+        # TODO: debug only
+        input("Press enter to execute grasp")
 
         # Solve for pick trajectory before moving
         X_WE = X_WG_bin.multiply(X_GE)
@@ -1230,7 +1251,10 @@ class TwoGraspPlanner(LeafSystem):
         manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
 
         gripper_xyzs = self.grasp_node.hand_collision_model.to_pcd()
-        gripper_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(gripper_xyzs)).voxel_down_sample(ONLINE_VOXEL_RADIUS).transform((X_WG @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0]).GetAsMatrix4()))
+        gripper_cloud = o3d.geometry.PointCloud(
+            o3d.utility.Vector3dVector(gripper_xyzs)
+        ).voxel_down_sample(ONLINE_VOXEL_RADIUS).transform(
+            (X_WG @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0]).GetAsMatrix4()))
         gripper_cloud.paint_uniform_color([1.0, 0.0, 0.0])
 
         viz_geoms = [manipuland_cloud, gripper_cloud]
@@ -1681,11 +1705,15 @@ class TwoGraspPlanner(LeafSystem):
         manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
 
         gripper1_xyzs = self.grasp_node.hand_collision_model.to_pcd()
-        gripper1_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(gripper1_xyzs)).voxel_down_sample(ONLINE_VOXEL_RADIUS).transform((X_WG1 @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0]).GetAsMatrix4()))
+        gripper1_cloud = o3d.geometry.PointCloud(
+            o3d.utility.Vector3dVector(gripper1_xyzs)).voxel_down_sample(ONLINE_VOXEL_RADIUS).transform(
+                (X_WG1 @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0]).GetAsMatrix4()))
         gripper1_cloud.paint_uniform_color([1.0, 0.0, 0.0])
 
         gripper2_xyzs = self.grasp_node.hand_collision_model.to_pcd()
-        gripper2_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(gripper2_xyzs)).voxel_down_sample(ONLINE_VOXEL_RADIUS).transform((X_WG2 @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0]).GetAsMatrix4()))
+        gripper2_cloud = o3d.geometry.PointCloud(
+            o3d.utility.Vector3dVector(gripper2_xyzs)).voxel_down_sample(ONLINE_VOXEL_RADIUS).transform(
+                (X_WG2 @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0]).GetAsMatrix4()))
         gripper2_cloud.paint_uniform_color([0.0, 1.0, 0.0])
 
         viz_geoms = [manipuland_cloud, gripper1_cloud, gripper2_cloud]

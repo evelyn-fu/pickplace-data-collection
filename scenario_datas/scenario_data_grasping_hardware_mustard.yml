@@ -28,8 +28,8 @@ directives:
     file: file://./home/real2sim/src/Real2SimObjectManipulation/models/006_mustard_bottle.sdf
     default_free_body_pose:
         base_link_mustard:
-            # translation: [0.4, 0.01, 0.15]
-            translation: [0.05, 0.55, -0.03]
+            translation: [0.4, 0.01, 0.15]
+            # translation: [0.05, 0.55, -0.03]
             rotation: !Rpy { deg: [0, 0, 110] }
 - add_frame:
     name: table_origin
@@ -110,8 +110,8 @@ directives:
     name: camera_bin_origin
     X_PF:
         base_frame: camera_bin_staging
-        rotation: !Rpy { deg: [-165.04723828404602, 1.3368903317932492, -87.72725370947829]}
-        translation: [-0.0338161,  0.62563,    0.360087]
+        rotation: !Rpy { deg: [-164.69831287,  -35.83297034,  -99.44115857]}
+        translation: [-0.0574518,  0.874365 ,  0.332985]
 
 - add_model:
     name: camera_front
