@@ -606,9 +606,9 @@ class TwoGraspPlanner(LeafSystem):
             models_path=None,
             gripper_model_path=None,
             default_home=q_home,
-            gripper_length=0.125,
-            pregrasp_dist=0.18,
-            eef_to_gripper_length=0.12,
+            gripper_length=0.145,
+            pregrasp_dist=0.17,
+            eef_to_gripper_length=0.16, # 0.16 for the real value
         ):
         LeafSystem.__init__(self)
 
