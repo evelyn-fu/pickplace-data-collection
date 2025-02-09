@@ -27,6 +27,8 @@ from multiprocessing.pool import ThreadPool as Pool
 import torch
 from enum import Enum
 import math
+import random
+from perception.pcd_util import crop_connected_points
 
 lock = threading.Lock()
 
@@ -44,7 +46,7 @@ class GraspListener():
     def __init__(self, hand_finger_path=None, gripper_model_path=None):
         if hand_finger_path == None:
             hand_finger_path = os.path.abspath(
-                os.path.join(os.path.dirname( __file__ ), '..', 'scenario_datas', 'gripper_sdf_new.pkl'))
+                os.path.join(os.path.dirname( __file__ ), '..', 'scenario_datas', 'gripper_sdf.pkl'))
         print("Loading hand collision model from ", hand_finger_path)
         self.hand_collision_model = SignedDensityField.from_pkl(hand_finger_path)
         # self.hand_collision_model.visualize()
@@ -479,7 +481,7 @@ class GraspListener():
         split_ratio_costs = -split_ratios
         split_ratio_costs_sorted = np.sort(split_ratio_costs)
         split_ratio_cost = split_ratio_costs_sorted[0] + split_ratio_costs_sorted[1]
-        higher_up_cost = -min(t[2] - 0.15, 0) / 0.15
+        higher_up_cost = -min(t[2] - 0.15, 0) / 0.15 # TODO: evelyn - change constant to adjust for obj size
 
         proportion_enclosed_cost = - proportion_enclosed
         cost_dict = {
@@ -692,7 +694,12 @@ class GraspListener():
         return cost
 
     @staticmethod
-    def compute_pcd_split_ratio_xy(pcd_points: np.ndarray) -> np.ndarray:
+    def compute_pcd_split_ratio_xy(
+        pcd_points: np.ndarray,
+        radius: float = 0.1,
+        voxel_radius: float = 0.005,
+        viz=False
+    ) -> np.ndarray:
         """
         Computes the x and y split ratios for each point.
         
@@ -721,24 +728,53 @@ class GraspListener():
         :param pcd_points: Point cloud points of shape (N,3), where N is the number of points.
         :return: X and Y split ratios for each point, returned as an array of shape (N,2).
         """
-        # Min/max bounds for split ratio (only for x and y)
-        min_vals = np.min(pcd_points[:, :2], axis=0)  # (2,)
-        max_vals = np.max(pcd_points[:, :2], axis=0)  # (2,)
+        num_points = pcd_points.shape[0]
+        accounted_for = np.zeros(num_points, dtype=bool)  # Track accounted points
+        split_ratios = np.full((num_points, 2), np.nan)  # Store split ratios per point
         
-        # Compute center and half-range
-        center = (max_vals + min_vals) / 2
-        half_range = (max_vals - min_vals) / 2
+        pcd =  o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd_points))
+        pcd.paint_uniform_color([0.0, 0.0, 1.0]) # Gray
+        o3d.visualization.draw_geometries([pcd])
+        
+        while not np.all(accounted_for):
+            # Select an unaccounted point as center
+            unaccounted_indices = np.where(~accounted_for)[0]
+            center_idx = random.choice(unaccounted_indices)
+            center = pcd_points[center_idx, :3]  # Assuming XYZ format
+            
+            # Crop clustered subset around the center and get mask
+            subset, subset_mask = crop_connected_points(pcd_points, center, radius, voxel_radius)
+            if viz:
+                subset_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(subset))
+                subset_pcd.paint_uniform_color([0.7, 0.7, 0.7]) # Gray
+                center_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector([center]))
+                center_pcd.paint_uniform_color([1.0, 0.0, 0.0]) # Red
+                o3d.visualization.draw_geometries([subset_pcd, center_pcd])
+            
+            # Mark these points as accounted for
+            accounted_for[subset_mask] = True
+            
+            # Min/max bounds for split ratio (only for x and y)
+            min_vals = np.min(subset[:, :2], axis=0)  # (2,)
+            max_vals = np.max(subset[:, :2], axis=0)  # (2,)
+            
+            # Compute center and half-range
+            center_xy = (max_vals + min_vals) / 2
+            half_range = (max_vals - min_vals) / 2
 
-        # Compute split ratio (normalized distance from center)
-        split_ratio = 1 - np.abs((pcd_points[:, :2] - center) / half_range)
+            # Compute split ratio (normalized distance from center)
+            split_ratio = 1 - np.abs((pcd_points[:, :2] - center_xy) / half_range)
 
-        # Handle edge case: if max == min (avoid division by zero)
-        split_ratio = np.where(half_range > 0, split_ratio, 1.0)
+            # Handle edge case: if max == min (avoid division by zero)
+            split_ratio = np.where(half_range > 0, split_ratio, 1.0)
 
-        # Ensure values are within [0,1] (handle floating point issues)
-        split_ratio = np.clip(split_ratio, 0, 1)
-
-        return split_ratio
+            # Ensure values are within [0,1] (handle floating point issues)
+            split_ratio = np.clip(split_ratio, 0, 1)
+            
+            # Store split ratios in the correct positions
+            split_ratios[subset_mask] = split_ratio[subset_mask]
+        
+        return split_ratios
 
     @staticmethod
     def compute_pcd_split_ratio(pcd_points: np.ndarray, viz_split_ratio_axes: bool = False) -> np.ndarray:
@@ -958,6 +994,7 @@ class GraspListener():
         split_ratio_threshold = 0.5,
         point_up=False,
         is_manual=False,
+        voxel_radius=0.005,
     ):
         """
         Compute sorted candidate grasps.
@@ -1150,6 +1187,7 @@ class GraspListener():
         # num_yaw_samples = 7
 
         PARALLEL = False # There are bugs in the parallel implementation => Don't use!
+        VISUALIZE_CLUSTERS = True
         VISUALIZE_FILTERED_CLOUDS = True
         VISUALIZE = False
         VISUALIZE_EACH = False
@@ -1163,7 +1201,7 @@ class GraspListener():
 
         # Filter pcd based on split ratio
         if grasp_type == GraspType.TOP:
-            split_ratios = self.compute_pcd_split_ratio_xy(pcd_points)
+            split_ratios = self.compute_pcd_split_ratio_xy(pcd_points, 0.1, voxel_radius, VISUALIZE_CLUSTERS)
             split_axes = np.array([[1,0,0], [0,1,0]])
             length = None
         else:

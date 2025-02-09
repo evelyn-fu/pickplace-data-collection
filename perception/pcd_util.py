@@ -1,8 +1,9 @@
 import numpy as np
 from pydrake.perception import PointCloud
 from scipy.spatial import cKDTree
+from typing import Union
 
-def compute_principal_minor_components(pcd):
+def compute_principal_minor_components(pcd: np.ndarray):
     cov = np.cov(pcd.T)
     eigval, eigvec = np.linalg.eig(cov)
 
@@ -13,7 +14,11 @@ def compute_principal_minor_components(pcd):
 
     return principal_component, secondary_component, minor_component
 
-def crop_connected_points(cloud: PointCloud, center: np.ndarray, radius: float, voxel_radius: float = 0.01) -> PointCloud:
+def crop_connected_points(
+        cloud: Union[PointCloud, np.ndarray], 
+        center: np.ndarray, 
+        radius: float, 
+        voxel_radius: float = 0.01) -> PointCloud:
     """Crops a pointcloud to only include points that are continuously connected to the center point.
     
     Args:
@@ -25,13 +30,18 @@ def crop_connected_points(cloud: PointCloud, center: np.ndarray, radius: float, 
     Returns:
         Cropped PointCloud containing only connected points
     """
-    # Convert to numpy array for processing
-    xyz = np.asarray(cloud.xyzs())
+    return_cloud = False
+    if type(cloud) == PointCloud:
+        # Convert to numpy array for processing
+        xyz = np.asarray(cloud.xyzs())
+        return_cloud = True
+    else:
+        xyz = np.copy(cloud).T
     
     # Get points within initial radius
     dists = np.linalg.norm(xyz.T - center, axis=1)
     initial_mask = dists < radius
-    
+    crop_connected_points
     if not np.any(initial_mask):
         # Return empty cloud if no points in radius
         return PointCloud(0)
@@ -61,8 +71,11 @@ def crop_connected_points(cloud: PointCloud, center: np.ndarray, radius: float, 
     connected_mask = np.zeros(len(xyz.T), dtype=bool)
     connected_mask[list(connected)] = True
     
+    if not return_cloud:
+        return xyz[:, connected_mask].T, connected_mask.T
+
     # Create new pointcloud with only connected points
     new_cloud = PointCloud(np.sum(connected_mask))
     new_cloud.mutable_xyzs()[:] = xyz[:, connected_mask]
         
-    return new_cloud
+    return new_cloud, connected_mask

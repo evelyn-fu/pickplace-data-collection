@@ -1047,9 +1047,9 @@ class TwoGraspPlanner(LeafSystem):
         scene_pcd.resize(new_scene_pts.shape[1])
         scene_pcd.mutable_xyzs()[:] = new_scene_pts
         
-        np.save(os.path.abspath(os.path.join(__file__ ,"../../bin_background.npy")), scene_pcd.xyzs())
-        np.save(os.path.abspath(os.path.join(__file__ ,"../../bin_contents.npy")), bin_pcd.xyzs())
-        print("saved bin pcds")
+        # np.save(os.path.abspath(os.path.join(__file__ ,"../../bin_background.npy")), scene_pcd.xyzs())
+        # np.save(os.path.abspath(os.path.join(__file__ ,"../../bin_contents.npy")), bin_pcd.xyzs())
+        # print("saved bin pcds")
 
         # remove outliers
         o3d_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(bin_pcd.xyzs().T))
@@ -1097,7 +1097,8 @@ class TwoGraspPlanner(LeafSystem):
             num_pitch_samples=1,
             num_yaw_samples=20,
             point_up=True,
-            split_ratio_threshold=0, # split ratio doesn't make sense for multi-item
+            split_ratio_threshold=0.65,
+            voxel_radius=ONLINE_VOXEL_RADIUS
         )
 
         grasps = self.grasp_node.get_best_grasps()
@@ -1130,7 +1131,7 @@ class TwoGraspPlanner(LeafSystem):
         # Crop point cloud around grasp point
         grasp_center = X_WG_bin @ RigidTransform([0, 0.0, -self.eef_to_gripper_length/2])
         closest_idx = np.argmin(np.linalg.norm(bin_pcd.xyzs() - grasp_center.translation()[:, np.newaxis], axis=0))
-        cropped_cloud = crop_connected_points(
+        cropped_cloud, _ = crop_connected_points(
             bin_pcd,
             bin_pcd.xyzs()[:, closest_idx],
             radius=0.1,  # 10cm radius
@@ -1225,7 +1226,7 @@ class TwoGraspPlanner(LeafSystem):
             num_samples=30,
             random_seed=np.random.randint(1000),
             grasp_type=GraspType.STABLE,
-            split_ratio_threshold=0.65,
+            split_ratio_threshold=0.65
         )
 
         grasps = self.grasp_node.get_best_grasps()
