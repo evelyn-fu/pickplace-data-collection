@@ -957,6 +957,7 @@ class GraspListener():
         num_yaw_samples = 7,
         split_ratio_threshold = 0.5,
         point_up=False,
+        is_manual=False,
     ):
         """
         Compute sorted candidate grasps.
@@ -975,6 +976,162 @@ class GraspListener():
             - candidate_lst (list of drake RigidTransforms): candidate list of
               grasps, sorted based on cost.
         """
+
+        
+        # TODO: factor out
+        def ask_user_to_select_points(pcd: o3d.geometry.PointCloud) -> np.ndarray:
+            """
+            Opens an Open3D visualizer and allows the user to select points in the point cloud.
+
+            Args:
+                pcd (o3d.geometry.PointCloud): The input point cloud.
+
+            Returns:
+                np.ndarray: The selected points as an (N, 3) NumPy array.
+            """
+            # Print instructions.
+            print("")
+            print(
+                "1) Please pick at least three correspondences using [shift + left click]"
+            )
+            print("   Press [shift + right click] to undo point picking")
+            print("2) After picking points, press 'Q' to close the window")
+            vis = o3d.visualization.VisualizerWithEditing()
+            vis.create_window(window_name="Manual grasp selector")
+            vis.add_geometry(pcd)
+            vis.run()  # user picks points
+            vis.destroy_window()
+            print("")
+            point_indices = np.asarray(vis.get_picked_points())
+            points = np.asarray(pcd.points)[point_indices]
+            return points
+        
+        def compute_coordinate_frame_for_point_pair(p1, p2, pcd, k_neighbors=30):
+            """
+            Computes a coordinate frame for a pair of points.
+            
+            The frame is defined as:
+            - Origin: the midpoint of p1 and p2.
+            - y axis: unit vector from p1 to p2.
+            - z axis: computed from the average (smoothed) normal of the point cloud at the midpoint,
+                        then reversed and made orthogonal to y.
+            - x axis: chosen such that (x, y, z) form a right-handed coordinate system.
+            
+            The smooth normal is estimated by finding the k nearest neighbors to the midpoint
+            in the point cloud and averaging their normals.
+            
+            Args:
+                p1, p2 (array-like): The two 3D points.
+                pcd (o3d.geometry.PointCloud): The full point cloud (its normals must be computed).
+                k_neighbors (int): Number of nearest neighbors to use for smoothing.
+            
+            Returns:
+                np.ndarray: A 4x4 homogeneous transformation matrix representing the coordinate frame.
+            """
+            p1 = np.asarray(p1)
+            p2 = np.asarray(p2)
+            midpoint = (p1 + p2) / 2.0
+
+            # Compute y-axis: direction from p1 to p2 (normalized)
+            y_axis = p2 - p1
+            norm_y = np.linalg.norm(y_axis)
+            if norm_y < 1e-6:
+                raise ValueError("The two points are too close together.")
+            y_axis = y_axis / norm_y
+
+            # Build a KDTree for the point cloud to find nearest neighbors to the midpoint.
+            pcd_tree = o3d.geometry.KDTreeFlann(pcd)
+            [k, idx, _] = pcd_tree.search_knn_vector_3d(midpoint, k_neighbors)
+            if k == 0:
+                raise ValueError("No neighbors found near the midpoint.")
+            
+            normals = np.asarray(pcd.normals)
+            # Average the normals of the k neighbors to obtain a smooth normal estimate.
+            avg_normal = np.mean(normals[idx, :], axis=0)
+            norm_avg = np.linalg.norm(avg_normal)
+            if norm_avg < 1e-6:
+                raise ValueError("Computed average normal is too small.")
+            avg_normal = avg_normal / norm_avg
+
+            # Define the z axis to be opposite to the averaged normal.
+            z_raw = -avg_normal
+            # Project z_raw onto the plane orthogonal to y_axis:
+            z_axis = z_raw - np.dot(z_raw, y_axis) * y_axis
+            norm_z = np.linalg.norm(z_axis)
+            if norm_z < 1e-6:
+                raise ValueError("Degenerate z-axis after orthogonalization.")
+            z_axis = z_axis / norm_z
+
+            # Compute x-axis such that the frame is right handed: x = y cross z.
+            x_axis = np.cross(y_axis, z_axis)
+            norm_x = np.linalg.norm(x_axis)
+            if norm_x < 1e-6:
+                raise ValueError("Degenerate x-axis computed.")
+            x_axis = x_axis / norm_x
+
+            # Assemble the rotation matrix using x, y, and z as its columns.
+            R = np.column_stack((x_axis, y_axis, z_axis))
+
+            # Create a 4x4 transformation matrix.
+            T = np.eye(4)
+            T[:3, :3] = R
+            T[:3, 3] = midpoint
+
+            return T
+
+
+        if is_manual:
+            # Prompt user to manually indicate the grasp(s) instead of using antipodal grasping.
+
+            manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
+
+            # Print grasp specific instructions.
+            if grasp_type == GraspType.PAIR:
+                print("")
+                print(
+                    "Manually indicate a grasp by selecting two points along the line connecting "
+                    "the two fingers. The grasp point will be in the middle of the two selected points."
+                    "A grasp pair consists of two selected grasps => You need to indicate a minimum of "
+                    "5 points. You may select multiple grasp pairs where the first 4 points indicate the "
+                    "first pair and so on."
+                )
+            else:
+                print("")
+                print(
+                    "Manually indicate a grasp by selecting two points along the line connecting "
+                    "the two fingers. The grasp point will be in the middle of the two selected points."
+                    "You may select multiple grasps where the first two points indicate the first grasp "
+                    "and so on."
+                )
+
+            # Open the interactive point selection window.
+            selected_pts = ask_user_to_select_points(manipuland_cloud)
+            print(f"Selected {len(selected_pts)} points.")
+
+            if selected_pts.shape[0] < 2:
+                print("Not enough points were selected to form at least one grasp. Re-trying.")
+                # TODO: retry with recursion
+            elif selected_pts.shape[0] < 4 and grasp_type == GraspType.PAIR:
+                print("Need at least 4 points for grasp pairs. Re-trying.")
+                # TODO: retry with recursion
+
+            frames = compute_coordinate_frame_for_point_pair(selected_pts, pcd, k_neighbors=30)
+
+            # Optionally, visualize the point cloud and the coordinate frames.
+            frame_meshes = []
+            for T in frames:
+                frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.05)
+                frame.transform(T)
+                frame_meshes.append(frame)
+            o3d.visualization.draw_geometries([pcd] + frame_meshes)
+
+            if grasp_type == GraspType.PAIR:
+                self.grasp_candidates: List[Tuple[np.ndarray]] = [
+                    (frames[i], frames[i+1]) for i in range(len(frames)-1)
+                ]
+            else:
+                self.grasp_candidates: List[np.ndarray] = frames
+            return
 
 
         # # NOTE: All num_samples should be odd numbers
@@ -1396,11 +1553,13 @@ class GraspListener():
                     grasp_frame1 = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.05).transform(
                         X_WG1
                     )
-                    grasp_frame1 = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.05).transform(
+                    grasp_frame2 = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.05).transform(
                         X_WG2
                     )
 
-                    viz_geoms = [manipuland_cloud, gripper1_cloud, gripper2_cloud, world_frame, grasp_frame1, grasp_frame2]
+                    viz_geoms = [
+                        manipuland_cloud, gripper1_cloud, gripper2_cloud, world_frame, grasp_frame1, grasp_frame2
+                    ]
                     o3d.visualization.draw_geometries(viz_geoms)
         else:
             sorted_indices = np.argsort(candidate_costs)
