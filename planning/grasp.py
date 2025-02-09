@@ -957,7 +957,7 @@ class GraspListener():
         num_yaw_samples = 7,
         split_ratio_threshold = 0.5,
         point_up=False,
-        is_manual=False,
+        is_manual=True,
     ):
         """
         Compute sorted candidate grasps.
@@ -1078,12 +1078,40 @@ class GraspListener():
             T[:3, 3] = midpoint
 
             return T
+        
+        def compute_coordinate_frames_for_point_pairs(selected_points, pcd, k_neighbors=30):
+            """
+            Splits the selected points into pairs and computes a coordinate frame for each pair.
+            
+            If an odd number of points is selected, the last point is disregarded (with a warning).
+            
+            Args:
+                selected_points (np.ndarray): An (N, 3) array of points.
+                pcd (o3d.geometry.PointCloud): The point cloud (with normals computed).
+                k_neighbors (int): Number of neighbors to use for smoothing the normal estimate.
+                
+            Returns:
+                list of np.ndarray: A list of 4x4 transformation matrices (one for each pair).
+            """
+            num_points = selected_points.shape[0]
+            if num_points % 2 == 1:
+                print("Warning: odd number of selected points; disregarding the last point.")
+                num_points -= 1  # Drop the last point
+
+            frames = []
+            for i in range(0, num_points, 2):
+                p1 = selected_points[i]
+                p2 = selected_points[i + 1]
+                T = compute_coordinate_frame_for_point_pair(p1, p2, pcd, k_neighbors)
+                frames.append(T)
+            return frames
 
 
         if is_manual:
             # Prompt user to manually indicate the grasp(s) instead of using antipodal grasping.
 
             manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
+            manipuland_cloud.normals = o3d.utility.Vector3dVector(pcd.normals().T)
 
             # Print grasp specific instructions.
             if grasp_type == GraspType.PAIR:
@@ -1115,7 +1143,9 @@ class GraspListener():
                 print("Need at least 4 points for grasp pairs. Re-trying.")
                 # TODO: retry with recursion
 
-            frames = compute_coordinate_frame_for_point_pair(selected_pts, pcd, k_neighbors=30)
+            frames = compute_coordinate_frames_for_point_pairs(
+                selected_pts, manipuland_cloud, k_neighbors=30
+            )
 
             # Optionally, visualize the point cloud and the coordinate frames.
             frame_meshes = []
@@ -1123,7 +1153,9 @@ class GraspListener():
                 frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.05)
                 frame.transform(T)
                 frame_meshes.append(frame)
-            o3d.visualization.draw_geometries([pcd] + frame_meshes)
+            o3d.visualization.draw_geometries(
+                [manipuland_cloud] + frame_meshes, window_name="manually selected grasps"
+            )
 
             if grasp_type == GraspType.PAIR:
                 self.grasp_candidates: List[Tuple[np.ndarray]] = [

@@ -43,7 +43,7 @@ def get_regions():
     plant_context = plant.GetMyContextFromRoot(diagram_context)
     pos = plant.GetPositions(plant_context)
     pos[0] = -np.pi/2
-    plant.SetPositions(plant_context, [-0.359, -0.519 , 1.813,  5.152,  0.161,  0.253,  0.39 ])
+    plant.SetPositions(plant_context, np.zeros(7))
     params["model"].ForcedPublish(diagram_context)
 
     while True:
