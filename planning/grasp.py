@@ -26,6 +26,7 @@ import multiprocessing
 from multiprocessing.pool import ThreadPool as Pool
 import torch
 from enum import Enum
+import math
 
 lock = threading.Lock()
 
@@ -43,6 +44,7 @@ class GraspListener():
     def __init__(self, hand_finger_path=None, gripper_model_path=None):
         if hand_finger_path == None:
             hand_finger_path = os.path.abspath(os.path.join(os.path.dirname( __file__ ), '..', 'scenario_datas', 'gripper_sdf.pkl'))
+        # TODO: The hand model is wrong and needs to be adjusted (the fingers aren't long enough)!
         self.hand_collision_model = SignedDensityField.from_pkl(hand_finger_path)
         # self.hand_collision_model.visualize()
 
@@ -203,7 +205,7 @@ class GraspListener():
         dist = self.hand_collision_model.get_distance(pcd_G_np.transpose(0, 2, 1))
         return dist.reshape(len(dist), -1).min(axis=-1)
 
-    def find_minimum_distance(self, pcd, X_WG, thre=0.0, min_range=-0.11, max_range=-0.01, num_samples=10):
+    def find_minimum_distance(self, pcd, X_WG, thre=0.0, min_range=-0.11, max_range=-0.01, num_samples=10, viz=False):
         """
         By doing line search, compute the maximum allowable distance along the z axis before penetration.
         Return the maximum distance, as well as the new transform. Returns (np.nan, None) if nothing is returned after
@@ -238,19 +240,22 @@ class GraspListener():
                     # input("no bueno, always crosses")
                     return last_signed_distance, X_WGlast
 
-                # manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
-                # manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
+                if viz:
+                    manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
+                    manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
 
-                # gripper_xyzs = self.hand_collision_model.to_pcd()
-                # gripper_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(gripper_xyzs)).voxel_down_sample(0.005).transform((X_WGlast @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0])).GetAsMatrix4())
-                # gripper_cloud.paint_uniform_color([1.0, 0.0, 0.0])
-                
-                # gripper_next_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(gripper_xyzs)).voxel_down_sample(0.005).transform((X_WGnew @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0])).GetAsMatrix4())
-                # gripper_next_cloud.paint_uniform_color([0.0, 1.0, 0.0])
+                    gripper_xyzs = self.hand_collision_model.to_pcd()
+                    gripper_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(gripper_xyzs)).voxel_down_sample(
+                        0.005).transform((X_WGlast @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0])).GetAsMatrix4())
+                    gripper_cloud.paint_uniform_color([1.0, 0.0, 0.0])
+                    
+                    gripper_next_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(gripper_xyzs)).voxel_down_sample(
+                        0.005).transform((X_WGnew @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0])).GetAsMatrix4())
+                    gripper_next_cloud.paint_uniform_color([0.0, 1.0, 0.0])
 
-                # viz_geoms = [manipuland_cloud, gripper_cloud, gripper_next_cloud]
-                # o3d.visualization.draw_plotly(viz_geoms)
-                # input(f"Found grasp {last_signed_distance}, {signed_distance}, {X_WGlast}")
+                    viz_geoms = [manipuland_cloud, gripper_cloud, gripper_next_cloud]
+                    o3d.visualization.draw_geometries(viz_geoms)
+                    # input(f"Found grasp {last_signed_distance}, {signed_distance}, {X_WGlast}")
                 return last_signed_distance, X_WGlast
             
             # Record the computed values using last z.
@@ -362,15 +367,18 @@ class GraspListener():
         Return:
             - is_nonempty (boolean): boolean set to True if there is a point within the cropped region.
             - pcd_normals_G_np (np.array): pcd normals within the gripper closing region of shape (3, N).
+                The gripper frame has the y-axis connecting the two fingers and the z-axis pointing from the
+                gripper body to the fingers.
             - proportion_enclosed: proportion of normals enclosed out of all possible points in PCD
         """
         pcd_W_np = pcd.xyzs()
         pcd_W_normals = pcd.normals()
 
         # Bounding box of the closing region written in the coordinate frame of the gripper body.
-        # Do not modify
-        crop_min = [-0.01, -0.053, 0.03]  # [-0.054, 0.036, -0.01]
-        crop_max = [0.01, 0.053, 0.15]  # [0.054, 0.117, 0.01]
+        # z-axis points from gripper body to fingers, y-axis is the grasping axis.
+        # It is recommended to tune this while inspecting the crop_cloud with the visualize option.
+        crop_min = [-0.0125, -0.053, 0.03]
+        crop_max = [0.0125, 0.053, 0.03+0.14] # finray is ~14cm long
 
         # Transform the pointcloud to gripper frame.
         X_GW = X_WG.inverse()
@@ -392,12 +400,40 @@ class GraspListener():
         is_nonempty = indices.any()
 
         if visualize:
+            num_points = 1000  # Adjust for density
+            points = np.random.uniform(low=crop_min, high=crop_max, size=(num_points, 3))
+            crop_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(points)).transform(
+                X_WG.GetAsMatrix4()
+            )
+            crop_pcd.paint_uniform_color([1.0, 0.5, 0.0])
+
+            gripper_xyzs = self.hand_collision_model.to_pcd()
+            gripper_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(gripper_xyzs)).voxel_down_sample(
+                0.005).transform((X_WG @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0])).GetAsMatrix4())
+            gripper_cloud.paint_uniform_color([0.0, 1.0, 0.0])
+
+            gripper_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.05).transform(
+                (X_WG @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0])).GetAsMatrix4()
+            )
+
+            crop_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.05).transform(
+                X_WG.GetAsMatrix4()
+            )
+            
             pcd_closing_region = pcd.xyzs().T[indices, :]
             pcd_closing_region_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd_closing_region))
             pcd_closing_region_cloud.paint_uniform_color([1.0, 0.0, 0.0])
             manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
             manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
-            viz_geoms = [manipuland_cloud, pcd_closing_region_cloud, self.make_gripper_line_set(X_WG.GetAsMatrix4(), [0.0, 1.0, 0.0])]
+            viz_geoms = [
+                crop_pcd,
+                crop_frame,
+                # gripper_frame,
+                gripper_cloud,
+                manipuland_cloud,
+                pcd_closing_region_cloud,
+                self.make_gripper_line_set(X_WG.GetAsMatrix4(), [0.0, 1.0, 0.0])
+            ]
             o3d.visualization.draw_geometries(viz_geoms)
         
         proportion_enclosed = len(indices) / (pcd_normals_G_np.shape[1])
@@ -430,7 +466,7 @@ class GraspListener():
         
         antipodal_cost = -np.sum(
             within_box_pt_normals[1, :] ** 2
-        ) / within_box_pt_normals.shape[1]  # along the horizontal axis of the gripper, larger good (antipodal metric)
+        )  # along the horizontal axis of the gripper, larger good (antipodal metric)
 
         # want grasps to avoid alignment with long axes, smaller better
         gripper_vertical_axis_alignment_cost = np.abs(eff_vertical_vec @ split_axes)
@@ -444,7 +480,7 @@ class GraspListener():
 
         proportion_enclosed_cost = - proportion_enclosed
         cost_dict = {
-            "antipodal_cost": 100 * antipodal_cost,
+            "antipodal_cost": antipodal_cost/3,
             "gripper_vertical_axis_alignment_cost_z": 10.0 * gripper_vertical_axis_alignment_cost[2],
             "gripper_vertical_axis_alignment_cost_y": 5.0 * gripper_vertical_axis_alignment_cost[1],
             "split_ratio_cost": 20.0 * split_ratio_cost,
@@ -473,7 +509,7 @@ class GraspListener():
         
         antipodal_cost = -np.sum(
             within_box_pt_normals[1, :] ** 2
-        ) / within_box_pt_normals.shape[1]  # along the horizontal axis of the gripper, larger good (antipodal metric)
+        )  # along the horizontal axis of the gripper, larger good (antipodal metric)
 
         gripper_axis_alignment_cost = -np.abs(eff_vertical_vec @ align_grasp_axis)  # want vertical axis of gripper to face towards desired axis
         gripper_minor_alignment_cost = -np.abs(eff_horizontal_vec @ align_minor_axis) # want horizontal axis of gripper to align with minor axis 
@@ -482,7 +518,7 @@ class GraspListener():
 
         proportion_enclosed_cost = -proportion_enclosed
         cost_dict = {
-            "antipodal_cost": 10.0 * antipodal_cost,
+            "antipodal_cost": antipodal_cost/3,
             "gripper_axis_alignment_cost": 10.0 * gripper_axis_alignment_cost,
             "gripper_minor_alignment_cost": 5.0 * gripper_minor_alignment_cost,
             "split_ratio_minor_axis_cost": 5.0 * split_ratio_minor_axis_cost,
@@ -519,7 +555,7 @@ class GraspListener():
 
         antipodal_cost = -np.sum(
             within_box_pt_normals[1, :] ** 2
-        ) / within_box_pt_normals.shape[1]  # along the y axis of the gripper, larger good (antipodal metric)
+        )  # along the y axis of the gripper, larger good (antipodal metric)
         gripper_vertical_alignment_cost = eff_vertical_vec[2]  # want z axis of gripper to face down, larger worse
         gripper_x_alignment_cost = np.abs(eff_x_vec[0])
         gripper_y_alignment_cost = np.abs(eff_y_vec[1])
@@ -558,28 +594,52 @@ class GraspListener():
         - Vertical position cost (prefer higher grasps)
         :param X_WG: The grasp candidate to compute the cost for.
         :param within_box_pt_normals: Point cloud normals within the gripper closing region of shape (3, N).
-        :param split_ratios: Array of [minor axis split ratio, secondary axis split ratio, major axis split ratio]. Values are in range [0,1] where
-            higher indicates a more equal split along the principal object axis.
+        :param split_ratios: Array of [minor axis split ratio, secondary axis split ratio, major axis split ratio].
+            Values are in range [0,1] where higher indicates a more equal split along the principal object axis.
         """
         R = X_WG.GetAsMatrix4()[:3, :3]
         t = X_WG.GetAsMatrix4()[:3, 3]
 
+        # Prefer alignment to one of the axes. This is a decent heuristic for standing objects.
+        eff_x_vec = R.dot(np.array([1, 0, 0]))
+        eff_y_vec = R.dot(np.array([0, 1, 0]))
+        eff_z_vec = R.dot(np.array([0, 0, 1]))
+        gripper_x_alignment_cost = np.abs(eff_x_vec[0])
+        gripper_y_alignment_cost = np.abs(eff_y_vec[1])
+        gripper_z_alignment_cost = np.abs(eff_z_vec[2])
+        axis_alignment_cost =  -max(gripper_x_alignment_cost, gripper_y_alignment_cost, gripper_z_alignment_cost)
+
         antipodal_cost = -np.sum(
             within_box_pt_normals[1, :] ** 2
-        ) / within_box_pt_normals.shape[1]  # along the y axis of the gripper, larger good (antipodal metric)
+        ) # along the y axis of the gripper, larger good (antipodal metric)
         grasp_height_cost = -t[2]  # prefer higher position
         split_ratio_minor_axis_cost = -split_ratios[0]  # prefer higher split ratio
         split_ratio_major_axis_cost = -split_ratios[2]
 
         proportion_enclosed_cost = -proportion_enclosed
+
+        # alignment_factor decays exponentially as axis_alignment_cost moves from -1 to 0.
+        lambda_factor = -0.5  # More negative = faster decay (keep it high as split ratio already decays exponentially)
+        alignment_factor = math.exp(lambda_factor * (axis_alignment_cost + 1))
+
         cost_dict = {
-            "antipodal_cost": 100 * antipodal_cost,
-            "grasp_height_cost": 10.0 * grasp_height_cost,
-            "split_ratio_minor_axis_cost": 1.0 * split_ratio_minor_axis_cost,
-            "split_ratio_major_axis_cost": 50.0 * split_ratio_major_axis_cost,
-            "proportion_enclosed_cost": 100.0 * proportion_enclosed_cost
+            "antipodal_cost": antipodal_cost,
+            "grasp_height_cost": 0.0 * grasp_height_cost, # no clutter => don't care about this
+            # Split ratios only make sense when the gripper is close to axis aligned
+            "split_ratio_minor_axis_cost": 1.0 * split_ratio_minor_axis_cost * alignment_factor,
+            "split_ratio_major_axis_cost": 10.0 * split_ratio_major_axis_cost * alignment_factor,
+            "proportion_enclosed_cost": 0.0 * proportion_enclosed_cost,  # Captured in antipodal cost
+            "axis_alignment_cost": 10 * axis_alignment_cost, # low weight as coupled with split ratio due to alignment_factor
         }
         cost = sum(cost_dict.values())
+        cost_dict["alignment detail (not part of cost)"] = {
+            "gripper_x_alignment_cost": -gripper_x_alignment_cost,
+            "gripper_y_alignment_cost": -gripper_y_alignment_cost,
+            "gripper_z_alignment_cost": -gripper_z_alignment_cost,
+            "alignment_factor": alignment_factor,
+            "split_ratio_major_axis": split_ratio_major_axis_cost,
+            "split_ratio_minor_axis_cost": split_ratio_minor_axis_cost,
+        }
         return cost, cost_dict
 
     def compute_costs_batch(
@@ -628,74 +688,58 @@ class GraspListener():
     def compute_pcd_split_ratio_xy(pcd_points: np.ndarray) -> np.ndarray:
         """
         Computes the x and y split ratios for each point.
-        The split ratio has range [0,1] where 1 is best (most equal split) and 0 is worst (most unequal split).
+        
+        The split ratio measures how close a point is to the center of the bounding box along the x and y axes.
+        A value of 1 means the point is exactly at the center, while a value of 0 means it is at one of the edges.
+        
+        The split ratio for a given axis is computed as:
 
-        :param pcd_points: Point cloud points of shape (N,3).
-        :return: X and y split ratios for each point of shape (N,2).
+            split_ratio = 1 - abs( (2 * (p - c)) / (max - min) )
+
+        where:
+            - p: The coordinate of the point along the given axis (x or y).
+            - c: The center of the axis, computed as (max + min) / 2.
+            - max: The maximum coordinate value along the axis.
+            - min: The minimum coordinate value along the axis.
+
+        This formula normalizes the distance from the center such that:
+            - Points **at the center** of the bounding box get `split_ratio = 1`.
+            - Points **at the min/max boundary** get `split_ratio = 0`.
+            - Points in between receive values in `(0,1]`, depending on their proximity to the center.
+
+        Edge cases:
+        - If max == min (i.e., all points have the same value along an axis), the split ratio is set to
+            1 to avoid division by zero.
+
+        :param pcd_points: Point cloud points of shape (N,3), where N is the number of points.
+        :return: X and Y split ratios for each point, returned as an array of shape (N,2).
         """
-        # Min/max bounds for split ratio
-        min_point_vals = np.min(pcd_points, axis=0)
-        max_point_vals = np.max(pcd_points, axis=0)
+        # Min/max bounds for split ratio (only for x and y)
+        min_vals = np.min(pcd_points[:, :2], axis=0)  # (2,)
+        max_vals = np.max(pcd_points[:, :2], axis=0)  # (2,)
+        
+        # Compute center and half-range
+        center = (max_vals + min_vals) / 2
+        half_range = (max_vals - min_vals) / 2
 
-        # Compute split ratio
-        split = np.array([max_point_vals - pcd_points, pcd_points - min_point_vals])
-        split_ratio = np.min(split, axis=0) / np.max(split, axis=0)
-        return split_ratio[:, :2]
+        # Compute split ratio (normalized distance from center)
+        split_ratio = 1 - np.abs((pcd_points[:, :2] - center) / half_range)
+
+        # Handle edge case: if max == min (avoid division by zero)
+        split_ratio = np.where(half_range > 0, split_ratio, 1.0)
+
+        # Ensure values are within [0,1] (handle floating point issues)
+        split_ratio = np.clip(split_ratio, 0, 1)
+
+        return split_ratio
 
     @staticmethod
-    def compute_pcd_split_ratio_major_axis(pcd_points: np.ndarray, viz_split_ratio_axes: bool = False) -> np.ndarray:
+    def compute_pcd_split_ratio(pcd_points: np.ndarray, viz_split_ratio_axes: bool = True) -> np.ndarray:
         """
-        Computes the split ratio of the major point cloud axis.
+        Computes the split ratios for each pcd point.
         The split ratio has range [0,1] where 1 is best (most equal split) and 0 is worst (most unequal split).
 
-        :param pcd_points: Point cloud points of shape (N,3).
-        :param viz_major_axis: Whether to visualize the pcd with the principle and minor axes in open3d.
-        :return: Minor and major point cloud split ratio for each point of shape (N,2) where the first entry is the
-            minor axis.
-        """
-        cov = np.cov(pcd_points.T)
-        eigval, eigvec = np.linalg.eig(cov)
-
-        order = eigval.argsort()
-        principal_component = eigvec[:, order[-1]]
-        minor_component = eigvec[:, order[0]]
-
-        # Rotate point cloud to align the principal component with the z-axis and the minor component with the x-axis
-        z_axis, x_axis = [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]
-        rot_principal_component_to_axes, _ = R.align_vectors(
-            np.array([z_axis, x_axis]), np.stack([principal_component, minor_component])
-        )
-        pcd_points_axis_aligned = pcd_points @ rot_principal_component_to_axes.as_matrix().T
-
-        if viz_split_ratio_axes:
-            # Visualize the point cloud in blue, the principal axis in red, and the minor axis in green
-            pcd_points_axis_aligned_normalized = pcd_points_axis_aligned - np.mean(pcd_points_axis_aligned, axis=0)
-            pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd_points_axis_aligned_normalized))
-            pcd.paint_uniform_color([0.0, 0.0, 1.0])
-            principle_component_line = o3d.geometry.LineSet()
-            principle_component_line.points = o3d.utility.Vector3dVector(
-                np.array([[0.0, 0.0, -0.3], [0.0, 0.0, 0.3], [-0.1, 0.0, 0.0], [0.1, 0.0, 0.0]])
-            )
-            principle_component_line.lines = o3d.utility.Vector2iVector(np.array([[0, 1], [2, 3]]))
-            principle_component_line.colors = o3d.utility.Vector3dVector(np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]))
-            world_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.01)
-            o3d.visualization.draw_geometries([pcd, principle_component_line, world_frame])
-
-        # Min/max bounds for split ratio
-        min_point_vals = np.min(pcd_points_axis_aligned, axis=0)
-        max_point_vals = np.max(pcd_points_axis_aligned, axis=0)
-
-        # Compute split ratio
-        split = np.array([max_point_vals - pcd_points_axis_aligned, pcd_points_axis_aligned - min_point_vals])
-        split_ratio = np.min(split, axis=0) / np.max(split, axis=0)
-
-        return split_ratio[:, [0, 2]]
-
-    @staticmethod
-    def compute_pcd_split_ratio(pcd_points: np.ndarray, viz_split_ratio_axes: bool = False) -> np.ndarray:
-        """
-        Computes the split ratio of the major point cloud axis.
-        The split ratio has range [0,1] where 1 is best (most equal split) and 0 is worst (most unequal split).
+        See `compute_pcd_split_ratio_xy` for more details.
 
         :param pcd_points: Point cloud points of shape (N,3).
         :param viz_major_axis: Whether to visualize the pcd with the principle and minor axes in open3d.
@@ -706,9 +750,9 @@ class GraspListener():
         eigval, eigvec = np.linalg.eig(cov)
 
         order = eigval.argsort()
-        principal_component = eigvec[:, order[-1]]
-        secondary_component = eigvec[:, order[1]]
         minor_component = eigvec[:, order[0]]
+        secondary_component = eigvec[:, order[1]]
+        principal_component = eigvec[:, order[2]]
 
         # Rotate point cloud to align the principal component with the z-axis and the minor component with the x-axis
         z_axis, x_axis = [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]
@@ -718,33 +762,58 @@ class GraspListener():
 
         pcd_points_axis_aligned = pcd_points @ rot_principal_component_to_axes.as_matrix().T
 
+        # Min/max bounds for split ratio
+        min_point_vals = np.min(pcd_points_axis_aligned, axis=0)
+        max_point_vals = np.max(pcd_points_axis_aligned, axis=0)
+        center = (max_point_vals + min_point_vals) / 2
+        half_range = (max_point_vals - min_point_vals) / 2
+
+        # Compute split ratio
+        # split_ratio = 1 - np.abs((pcd_points_axis_aligned - center) / half_range)
+
+        # Compute exponential decay split ratio.
+        decay_rate = 2.0
+        normalized_distance = np.abs((pcd_points_axis_aligned - center) / half_range)
+        normalized_distance = np.clip(normalized_distance, 0, 1)
+        split_ratio = np.exp(-decay_rate * normalized_distance) - np.exp(-decay_rate)
+
+        # return split axes
+        axes = np.stack([principal_component, secondary_component, minor_component])
+        length = np.linalg.norm(max_point_vals - min_point_vals)
+
         if viz_split_ratio_axes:
             # Visualize the point cloud in blue, the principal axis in red, and the minor axis in green
-            pcd_points_axis_aligned_normalized = pcd_points_axis_aligned - np.mean(pcd_points_axis_aligned, axis=0)
+            mean_val = np.mean(pcd_points_axis_aligned, axis=0)
+            pcd_points_axis_aligned_normalized = pcd_points_axis_aligned - mean_val
             pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd_points_axis_aligned_normalized))
-            pcd.paint_uniform_color([0.0, 0.0, 1.0])
+            pcd.paint_uniform_color([0.7, 0.7, 0.7]) # Gray
             principle_component_line = o3d.geometry.LineSet()
             principle_component_line.points = o3d.utility.Vector3dVector(
                 np.array([[0.0, 0.0, -0.3], [0.0, 0.0, 0.3], [-0.1, 0.0, 0.0], [0.1, 0.0, 0.0]])
             )
             principle_component_line.lines = o3d.utility.Vector2iVector(np.array([[0, 1], [2, 3]]))
             principle_component_line.colors = o3d.utility.Vector3dVector(np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]))
+            sampled_indices = np.random.choice(len(pcd_points), 5, replace=False)
+
+            sampled_points = pcd_points_axis_aligned_normalized[sampled_indices]
+            sampled_ratios = split_ratio[sampled_indices]
+            colors = np.random.rand(5, 3)
+            
+            sampled_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(sampled_points))
+            sampled_pcd.colors = o3d.utility.Vector3dVector(colors)
+
+            print("Min point vals:", min_point_vals)
+            print("Max point vals:", max_point_vals)
+            print("Center:", center)
+            
+            print("Split ratios of points in order [minor, middle, major]:")
+            for i, (ratio, color) in enumerate(zip(sampled_ratios, colors)):
+                print(f"\033[38;2;{int(color[0]*255)};{int(color[1]*255)};{int(color[2]*255)}m● Point {i}: {ratio}\033[0m"
+                      f"    ->   Coordinates: {sampled_points[i]+mean_val}"
+                )
+            
             world_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.01)
-            o3d.visualization.draw_geometries([pcd, principle_component_line, world_frame])
-
-        # Min/max bounds for split ratio
-        min_point_vals = np.min(pcd_points_axis_aligned, axis=0)
-        max_point_vals = np.max(pcd_points_axis_aligned, axis=0)
-
-        # upper bound on distance between points
-        length = np.linalg.norm(max_point_vals - min_point_vals)
-
-        # Compute split ratio
-        split = np.array([max_point_vals - pcd_points_axis_aligned, pcd_points_axis_aligned - min_point_vals])
-        split_ratio = np.min(split, axis=0) / np.max(split, axis=0)
-
-        # return split axes
-        axes = np.stack([principal_component, secondary_component, minor_component])
+            o3d.visualization.draw_geometries([pcd, sampled_pcd, principle_component_line, world_frame])
 
         return split_ratio[:, [0, 1, 2]], axes, length
 
@@ -923,7 +992,7 @@ class GraspListener():
             split_axes = np.array([[1,0,0], [0,1,0]])
             length = None
         else:
-            split_ratios, split_axes, length = self.compute_pcd_split_ratio(pcd_points, viz_split_ratio_axes=False)
+            split_ratios, split_axes, length = self.compute_pcd_split_ratio(pcd_points)
         mask = np.any(split_ratios > split_ratio_threshold, axis=1)
         split_ratio_filtered_points = pcd_points[mask]
         split_ratio_filtered_normals = pcd.normals()[:, mask].T
@@ -962,7 +1031,7 @@ class GraspListener():
         VISUALIZE_EACH = False
         VISUALIZE_ALL = False
         VISUALIZE_ORIG = False
-        VISUALIZE_SORTED_WITH_COSTS = False
+        VISUALIZE_SORTED_WITH_COSTS = True
 
         if VISUALIZE_ORIG:
             from pydrake.all import StartMeshcat, PointCloud
@@ -1276,8 +1345,15 @@ class GraspListener():
                     mean_gripper_point = np.mean(np.concatenate([gripper1_cloud.points, gripper2_cloud.points]), axis=0)
                     world_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(
                         size=0.05, origin=[mean_gripper_point[0], mean_gripper_point[1], 0])
+                    
+                    grasp_frame1 = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.05).transform(
+                        X_WG1
+                    )
+                    grasp_frame1 = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.05).transform(
+                        X_WG2
+                    )
 
-                    viz_geoms = [manipuland_cloud, gripper1_cloud, gripper2_cloud, world_frame]
+                    viz_geoms = [manipuland_cloud, gripper1_cloud, gripper2_cloud, world_frame, grasp_frame1, grasp_frame2]
                     o3d.visualization.draw_geometries(viz_geoms)
         else:
             sorted_indices = np.argsort(candidate_costs)
@@ -1308,8 +1384,12 @@ class GraspListener():
                     mean_gripper_point = np.mean(gripper_cloud.points, axis=0)
                     world_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(
                         size=0.05, origin=[mean_gripper_point[0], mean_gripper_point[1], 0])
+                    
+                    grasp_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.05).transform(
+                        X_WG
+                    )
 
-                    viz_geoms = [manipuland_cloud, gripper_cloud, world_frame]
+                    viz_geoms = [manipuland_cloud, gripper_cloud, world_frame, grasp_frame]
                     o3d.visualization.draw_geometries(viz_geoms)
 
     def get_best_grasps(self, candidate_num=-1) -> List[Tuple[np.ndarray]]:

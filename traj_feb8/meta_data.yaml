@@ -1,0 +1,125 @@
+AL Iteration: 20
+Cost function value: 164.59383807355323
+Max absolute lambda: 18.36398054848154
+Mean absolute lambda: 0.008556593763206534
+_runtime: 64257.13157391548
+_step: 999678
+_timestamp: 1738971492.3752718
+al_iter0:
+  _type: html-file
+  path: media/html/al_iter0_3_e7d8b373853144639240.html
+  sha256: e7d8b373853144639240da4487105e68e979b129406342666934db1cab2da0a9
+  size: 8566570
+al_iter1:
+  _type: html-file
+  path: media/html/al_iter1_7_872594bc96105f1ab42c.html
+  sha256: 872594bc96105f1ab42c27ffbcb80cee299ceef05d26a6e5981b46b341dc2765
+  size: 8566570
+al_iter10:
+  _type: html-file
+  path: media/html/al_iter10_43_d0cdf6eabe654b996dc6.html
+  sha256: d0cdf6eabe654b996dc60e745596488d6ab82591b8bdd734e8d86cbad03e1b35
+  size: 8566570
+al_iter11:
+  _type: html-file
+  path: media/html/al_iter11_47_bee119d38cfa083d213a.html
+  sha256: bee119d38cfa083d213a44807c0c861717ed9137ca30e295a732fb6ae391bc08
+  size: 8566570
+al_iter12:
+  _type: html-file
+  path: media/html/al_iter12_51_ce3d0520e5d4df3049bf.html
+  sha256: ce3d0520e5d4df3049bfefe8c8564b552f81ef5b73abd18574fbab472f19f21d
+  size: 8566570
+al_iter13:
+  _type: html-file
+  path: media/html/al_iter13_55_413ab1e0967a2eb45352.html
+  sha256: 413ab1e0967a2eb4535298197a138e0330780ff2ea1a8bb4e2e4e43010891722
+  size: 8566570
+al_iter14:
+  _type: html-file
+  path: media/html/al_iter14_59_aa68fc6ad725338363c5.html
+  sha256: aa68fc6ad725338363c59aff671da020e69e3ac8712b426ba886ba813a436505
+  size: 8566570
+al_iter15:
+  _type: html-file
+  path: media/html/al_iter15_63_7c5a56879a4f3b24dc7a.html
+  sha256: 7c5a56879a4f3b24dc7aae7dbf2cffd2b3ca55ef6f110b65abaeddc4116ee9ab
+  size: 8566570
+al_iter16:
+  _type: html-file
+  path: media/html/al_iter16_67_d0c3bc2797fb8e44ccf4.html
+  sha256: d0c3bc2797fb8e44ccf4fc0670885d1fa32d3dcef493057923b1003b2c28ce9b
+  size: 8566570
+al_iter17:
+  _type: html-file
+  path: media/html/al_iter17_71_164e11afc8ac45eceadb.html
+  sha256: 164e11afc8ac45eceadb0ec29ab9ff650cc6734b42b28766f4f95cfffaaf5c5e
+  size: 8566570
+al_iter18:
+  _type: html-file
+  path: media/html/al_iter18_75_73b527bddcd0ecbabfd7.html
+  sha256: 73b527bddcd0ecbabfd73e0597c1728cd279abce991b5890ee4be3e5a4215ce8
+  size: 8566570
+al_iter2:
+  _type: html-file
+  path: media/html/al_iter2_11_5bd8ee0901bb2ac840de.html
+  sha256: 5bd8ee0901bb2ac840de63d8c124480fffab20fed3dd6b02798dc2d2dc6fa1b1
+  size: 8566570
+al_iter3:
+  _type: html-file
+  path: media/html/al_iter3_15_953650deb3fbda764d08.html
+  sha256: 953650deb3fbda764d08ea416aebb25855e7cd285eef19fcbd274ecc170ef750
+  size: 8566570
+al_iter4:
+  _type: html-file
+  path: media/html/al_iter4_19_dccc57927fb0c0c479fd.html
+  sha256: dccc57927fb0c0c479fd88a2085541eee581a3a61fad35bf1433cbbe20a23873
+  size: 8566570
+al_iter5:
+  _type: html-file
+  path: media/html/al_iter5_23_39194c3150e1fb18de59.html
+  sha256: 39194c3150e1fb18de594afe06087cc92a705c0cfe87e487b7b2f7eabc948357
+  size: 8566570
+al_iter6:
+  _type: html-file
+  path: media/html/al_iter6_27_76bcf13f056b8b9fbc93.html
+  sha256: 76bcf13f056b8b9fbc93ad5061e71c2459129efc40333ceadbfdadee6839a4d2
+  size: 8566570
+al_iter7:
+  _type: html-file
+  path: media/html/al_iter7_31_60c3c4c560c358d0ffa3.html
+  sha256: 60c3c4c560c358d0ffa31045cecc71723a2ecec50289c70d4094aef26cab869c
+  size: 8566570
+al_iter8:
+  _type: html-file
+  path: media/html/al_iter8_35_5ff3aa0ceb5164db7533.html
+  sha256: 5ff3aa0ceb5164db75338df253947f436acf2e7af6a7cd1615a8abbd13b9f786
+  size: 8566570
+al_iter9:
+  _type: html-file
+  path: media/html/al_iter9_39_bfc83296cf4e18da7209.html
+  sha256: bfc83296cf4e18da72099d7f3923e4af490e2b9d6d7aebb317c43ccbed833157
+  size: 8566570
+augmented Lagrangian loss: 164.6531851605539
+condition_number: 166.770444369313
+constraint_violation_accelerationBound: 0
+constraint_violation_collisionAvoidance: 0
+constraint_violation_endAcceleration: 0
+constraint_violation_endVelocity: 0
+constraint_violation_positionBound: 0
+constraint_violation_startAcceleration: 0
+constraint_violation_startVelocity: 0
+constraint_violation_velocityBound: 0
+e_optimality: -2113.76903701496
+equality_constraint_error: 5.086396405317841e-06
+inequality_constraint_error: 4.794431975385274e-06
+mu: 1000.0
+nevergrad_set_bounds: false
+num_constraint_violations: 0
+num_constraints: 22028
+num_identifiable_params: 43
+num_params: 70
+optimizer_name: NGOpt
+parametrization_name: Array{(77,)}
+sub-optim: CMApara
+total_constraint_error: 9.880828380703114e-06

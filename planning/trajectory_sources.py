@@ -58,6 +58,7 @@ class TrajectoryWithTimingInformationSource(LeafSystem):
         if np.isnan(traj_time):
             traj_value = self._current_cmd_input_port.Eval(context)
         else:
+            traj_time = max(0.0, traj_time)
             traj_value = current_traj.trajectory.value(traj_time).ravel()
 
         output.SetFromVector(traj_value)

@@ -457,7 +457,7 @@ def start_scenario(
     meshcat.AddButton("Stop Simulation", "Escape")
     print("Press Escape to stop the simulation")
     while meshcat.GetButtonClicks("Stop Simulation") < 1 and not planner.done:
-        simulator.AdvanceTo(simulator.get_context().get_time() + 0.03)
+        simulator.AdvanceTo(simulator.get_context().get_time() + 60.0)
 
     meshcat.DeleteButton("Stop Simulation")
 

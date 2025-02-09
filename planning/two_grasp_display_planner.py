@@ -76,7 +76,7 @@ sys.path.append(PYCUCI_ROOT+'/bazel-bin/cuci/src/pybind/pycuci')
 import pycuci as cci
 PETE_ASSETS =  os.path.dirname(__file__)+"/../pete_assets/"
 SAFE_DIRECTIVES = PETE_ASSETS+'assets/directives/iiwa7_on_table_with_ceiling.yaml'
-SYS_ID_TRAJ_PARAMETER_PATH = Path(os.path.abspath(os.path.join(__file__ ,"../../traj_feb7")))
+SYS_ID_TRAJ_PARAMETER_PATH = Path(os.path.abspath(os.path.join(__file__ ,"../../traj_feb8")))
 # SYS_ID_TRAJ_PARAMETER_PATH = Path(os.path.abspath(os.path.join(__file__ ,"../../../robot_payload_id/logs/corner_setup_payload_box/iiwa_eoptimality_10s_5Fterm_1000timesteps_20_100000/al_19")))
 
 from mmt_gcs.planning.mintime_scs import MintimeSCSWithPathFixing
@@ -589,7 +589,7 @@ stage_center90 = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/2)
 bin_depth = 0.02
 platform_height = 0.068
 
-end_bin = RigidTransform(RotationMatrix(RollPitchYaw(0.0, np.pi/2, np.pi)), [0.20, -0.55, 0.2])
+end_bin = RigidTransform(RotationMatrix(RollPitchYaw(0.0, np.pi/2, np.pi)), [0.30, -0.55, 0.2])
 
 class TwoGraspPlanner(LeafSystem):
     def __init__(
@@ -726,7 +726,7 @@ class TwoGraspPlanner(LeafSystem):
         self.default_home = default_home
         self.DeclareInitializationDiscreteUpdateEvent(self.Initialize)
 
-        self.DeclarePeriodicUnrestrictedUpdateEvent(0.1, 0.0, self.Update)
+        self.DeclarePeriodicUnrestrictedUpdateEvent(0.05, 0.0, self.Update)
 
         self.grasp_node = GraspListener(gripper_model_path=gripper_model_path)
         self.q_pregrasp1 = None
@@ -1199,6 +1199,8 @@ class TwoGraspPlanner(LeafSystem):
     def PlanSysIdPick(self, context, state, after_scan_state):
         self.GetPointCloud(context, state, after_scan_state)
         self.meshcat.SetObject("cloud", self.current_manipuland_pcd, point_size=0.001, rgba=Rgba(0,0,1,1))
+        self.meshcat.SetObject("scene_cloud", self.current_scene_pcd, point_size=0.001, rgba=Rgba(0,1,0,1))
+        pcd_with_background = Concatenate([self.current_manipuland_pcd, self.current_scene_pcd])
 
         # get end effector pose from grasp pose
         X_GE = RigidTransform(RotationMatrix(RollPitchYaw(0, 0, 0)), [0, 0, -self.eef_to_gripper_length])
@@ -1217,7 +1219,7 @@ class TwoGraspPlanner(LeafSystem):
         # Planning first grasping trajectory
         self.grasp_node.compute_candidate_grasps(
             self.current_manipuland_pcd,
-            self.current_scene_pcd,
+            pcd_with_background,
             candidate_num=1,
             num_samples=10,
             random_seed=np.random.randint(1000),
@@ -1258,7 +1260,9 @@ class TwoGraspPlanner(LeafSystem):
         gripper_cloud.paint_uniform_color([1.0, 0.0, 0.0])
 
         viz_geoms = [manipuland_cloud, gripper_cloud]
-        # o3d.visualization.draw_plotly(viz_geoms)
+        o3d.visualization.draw_plotly(viz_geoms)
+
+        input("press enter to execute pick")
 
         # Solve for pick trajectory before moving
         X_WE = X_WG_sys_id.multiply(X_GE)
@@ -1266,7 +1270,7 @@ class TwoGraspPlanner(LeafSystem):
             "pick": X_WE,
             "prepick": X_WE @ X_GgraspGpregrasp,
             "place": end_bin,
-            "postplace": end_bin @ RigidTransform([0, 0.0, -0.1]),
+            "postplace": end_bin,
         }
 
         X_G, times = MakePickGripperFrames(X_G)
@@ -1991,7 +1995,7 @@ class TwoGraspPlanner(LeafSystem):
         state.get_mutable_abstract_state(self._current_joint_traj_idx).set_value(
             TrajectoryWithTimingInformation(
                 trajectory=self.excitation_traj,
-                start_time_s=current_time+1.0,
+                start_time_s=current_time + 2.0,
             )
         )
     
