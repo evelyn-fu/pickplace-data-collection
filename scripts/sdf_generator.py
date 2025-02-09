@@ -27,37 +27,37 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--x_min",
-        default="-0.095",
+        default="-0.1",
         help="minimum x point to check for sdf",
         nargs='?',
     )
     parser.add_argument(
         "--x_max",
-        default="0.095",
+        default="0.1",
         help="maximum x point to check for sdf",
         nargs='?',
     )
     parser.add_argument(
         "--y_min",
-        default="-0.09",
+        default="-0.1",
         help="minimum y point to check for sdf",
         nargs='?',
     )
     parser.add_argument(
         "--y_max",
-        default="0.14",
+        default="0.30",
         help="maximum y point to check for sdf",
         nargs='?',
     )
     parser.add_argument(
         "--z_min",
-        default="-0.09",
+        default="-0.05",
         help="minimum z point to check for sdf",
         nargs='?',
     )
     parser.add_argument(
         "--z_max",
-        default="0.03",
+        default="0.05",
         help="maximum z point to check for sdf",
         nargs='?',
     )
@@ -122,4 +122,5 @@ if __name__ == "__main__":
     print("SDF lookup time", time.time()-start)
     print(f"Signed distance at point {point}: {distance_at_point}")
 
-    sdf.visualize()
+    # sdf.visualize()
+    # sdf.visualize_matplotlib()

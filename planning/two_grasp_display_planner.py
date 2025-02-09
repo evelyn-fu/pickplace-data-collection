@@ -587,7 +587,7 @@ bin_sides_vox = np.concatenate(bin_sides_components, axis=0).T
 stage_center0 = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0.0)), [0.5, 0.0, 0.0])
 stage_center90 = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/2)), [0.5, 0.0, 0.0])
 bin_depth = 0.02
-platform_height = 0.068
+platform_height = 0.070 # use value a bit higher than it is to reduce pcd noise
 
 end_bin = RigidTransform(RotationMatrix(RollPitchYaw(0.0, np.pi/2, np.pi)), [0.30, -0.55, 0.2])
 
@@ -1096,7 +1096,8 @@ class TwoGraspPlanner(LeafSystem):
             pitch_max = 0.0,
             num_pitch_samples=1,
             num_yaw_samples=20,
-            point_up=True
+            point_up=True,
+            split_ratio_threshold=0, # split ratio doesn't make sense for multi-item
         )
 
         grasps = self.grasp_node.get_best_grasps()
@@ -1221,9 +1222,10 @@ class TwoGraspPlanner(LeafSystem):
             self.current_manipuland_pcd,
             pcd_with_background,
             candidate_num=1,
-            num_samples=10,
+            num_samples=30,
             random_seed=np.random.randint(1000),
-            grasp_type=GraspType.STABLE
+            grasp_type=GraspType.STABLE,
+            split_ratio_threshold=0.65,
         )
 
         grasps = self.grasp_node.get_best_grasps()
@@ -1332,6 +1334,15 @@ class TwoGraspPlanner(LeafSystem):
 
         merged_pcd = Concatenate([pcd0, pcd1, pcd2])
         down_sampled_pcd = merged_pcd.VoxelizedDownSample(voxel_size=ONLINE_VOXEL_RADIUS)
+
+        VISUALIZE_MERGED_PCD = False
+        if VISUALIZE_MERGED_PCD:
+            pcd = down_sampled_pcd.xyzs().T # Shape (N,3)
+            pcd_normals = down_sampled_pcd.normals().T # Shape (N,3)
+            o3d_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd))
+            o3d_pcd.paint_uniform_color([0,0,1])
+            o3d_pcd.normals = o3d.utility.Vector3dVector(pcd_normals)
+            o3d.visualization.draw_geometries([o3d_pcd], point_show_normal=True, window_name="merged pcd")
         
         # remove outliers
         o3d_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(down_sampled_pcd.xyzs().T))
@@ -1655,7 +1666,8 @@ class TwoGraspPlanner(LeafSystem):
             candidate_num=1,
             num_samples=30,
             random_seed=np.random.randint(1000),
-            grasp_type=GraspType.PAIR
+            grasp_type=GraspType.PAIR,
+            split_ratio_threshold=0.15,
         )
 
         grasp_pairs = self.grasp_node.get_best_grasps()

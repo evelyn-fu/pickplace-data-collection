@@ -43,8 +43,9 @@ class GraspListener():
 
     def __init__(self, hand_finger_path=None, gripper_model_path=None):
         if hand_finger_path == None:
-            hand_finger_path = os.path.abspath(os.path.join(os.path.dirname( __file__ ), '..', 'scenario_datas', 'gripper_sdf.pkl'))
-        # TODO: The hand model is wrong and needs to be adjusted (the fingers aren't long enough)!
+            hand_finger_path = os.path.abspath(
+                os.path.join(os.path.dirname( __file__ ), '..', 'scenario_datas', 'gripper_sdf_new.pkl'))
+        print("Loading hand collision model from ", hand_finger_path)
         self.hand_collision_model = SignedDensityField.from_pkl(hand_finger_path)
         # self.hand_collision_model.visualize()
 
@@ -382,9 +383,9 @@ class GraspListener():
 
         # Transform the pointcloud to gripper frame.
         X_GW = X_WG.inverse()
-        R = X_GW.GetAsMatrix4()[:3, :3]
+        R_GW = X_GW.GetAsMatrix4()[:3, :3]
         pcd_G_np = X_GW.multiply(pcd_W_np)
-        pcd_normals_G_np = R @ (pcd_W_normals)  # in the grasp frame
+        pcd_normals_G_np = R_GW @ pcd_W_normals  # in the grasp frame
 
         # Check if there are any points within the cropped region.
         mask = (
@@ -422,6 +423,8 @@ class GraspListener():
             
             pcd_closing_region = pcd.xyzs().T[indices, :]
             pcd_closing_region_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd_closing_region))
+            pcd_closing_region_normals = pcd_normals_G_np[:, indices].T
+            pcd_closing_region_cloud.normals = o3d.utility.Vector3dVector(pcd_closing_region_normals)
             pcd_closing_region_cloud.paint_uniform_color([1.0, 0.0, 0.0])
             manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
             manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
@@ -434,7 +437,7 @@ class GraspListener():
                 pcd_closing_region_cloud,
                 self.make_gripper_line_set(X_WG.GetAsMatrix4(), [0.0, 1.0, 0.0])
             ]
-            o3d.visualization.draw_geometries(viz_geoms)
+            o3d.visualization.draw_geometries(viz_geoms, point_show_normal=True)
         
         proportion_enclosed = len(indices) / (pcd_normals_G_np.shape[1])
 
@@ -604,10 +607,14 @@ class GraspListener():
         eff_x_vec = R.dot(np.array([1, 0, 0]))
         eff_y_vec = R.dot(np.array([0, 1, 0]))
         eff_z_vec = R.dot(np.array([0, 0, 1]))
-        gripper_x_alignment_cost = np.abs(eff_x_vec[0])
-        gripper_y_alignment_cost = np.abs(eff_y_vec[1])
-        gripper_z_alignment_cost = np.abs(eff_z_vec[2])
-        axis_alignment_cost =  -max(gripper_x_alignment_cost, gripper_y_alignment_cost, gripper_z_alignment_cost)
+
+        # Vertical grasps
+        gripper_z_to_world_z_alignment_score = np.abs(eff_z_vec[2])
+        # Right angled grasps
+        gripper_x_to_world_z_alignment_score = np.abs(np.dot(eff_x_vec, np.array([0, 0, 1])))
+      
+        # Prefer side grasps
+        axis_alignment_cost = -max(gripper_z_to_world_z_alignment_score, 2*gripper_x_to_world_z_alignment_score)
 
         antipodal_cost = -np.sum(
             within_box_pt_normals[1, :] ** 2
@@ -623,19 +630,19 @@ class GraspListener():
         alignment_factor = math.exp(lambda_factor * (axis_alignment_cost + 1))
 
         cost_dict = {
-            "antipodal_cost": antipodal_cost,
+            "antipodal_cost": antipodal_cost/10, # reduce as normals seem to be wrong...
             "grasp_height_cost": 0.0 * grasp_height_cost, # no clutter => don't care about this
             # Split ratios only make sense when the gripper is close to axis aligned
-            "split_ratio_minor_axis_cost": 1.0 * split_ratio_minor_axis_cost * alignment_factor,
-            "split_ratio_major_axis_cost": 10.0 * split_ratio_major_axis_cost * alignment_factor,
-            "proportion_enclosed_cost": 0.0 * proportion_enclosed_cost,  # Captured in antipodal cost
-            "axis_alignment_cost": 10 * axis_alignment_cost, # low weight as coupled with split ratio due to alignment_factor
+            # Use zero weights as split ratios don't mean much after grid search (would need to recompute)
+            "split_ratio_minor_axis_cost": 0 * split_ratio_minor_axis_cost * alignment_factor,
+            "split_ratio_major_axis_cost": 0 * split_ratio_major_axis_cost * alignment_factor,
+            "proportion_enclosed_cost": 200.0 * proportion_enclosed_cost,  # Captured in antipodal cost but antipodal normals seem wrong
+            "axis_alignment_cost": 100 * axis_alignment_cost,
         }
         cost = sum(cost_dict.values())
         cost_dict["alignment detail (not part of cost)"] = {
-            "gripper_x_alignment_cost": -gripper_x_alignment_cost,
-            "gripper_y_alignment_cost": -gripper_y_alignment_cost,
-            "gripper_z_alignment_cost": -gripper_z_alignment_cost,
+            "gripper_z_to_world_z_alignment_score": -gripper_z_to_world_z_alignment_score,
+            "gripper_x_to_world_z_alignment_score": -gripper_x_to_world_z_alignment_score,
             "alignment_factor": alignment_factor,
             "split_ratio_major_axis": split_ratio_major_axis_cost,
             "split_ratio_minor_axis_cost": split_ratio_minor_axis_cost,
@@ -734,7 +741,7 @@ class GraspListener():
         return split_ratio
 
     @staticmethod
-    def compute_pcd_split_ratio(pcd_points: np.ndarray, viz_split_ratio_axes: bool = True) -> np.ndarray:
+    def compute_pcd_split_ratio(pcd_points: np.ndarray, viz_split_ratio_axes: bool = False) -> np.ndarray:
         """
         Computes the split ratios for each pcd point.
         The split ratio has range [0,1] where 1 is best (most equal split) and 0 is worst (most unequal split).
@@ -793,11 +800,13 @@ class GraspListener():
             )
             principle_component_line.lines = o3d.utility.Vector2iVector(np.array([[0, 1], [2, 3]]))
             principle_component_line.colors = o3d.utility.Vector3dVector(np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]))
-            sampled_indices = np.random.choice(len(pcd_points), 5, replace=False)
+
+            num_samples = 10
+            sampled_indices = np.random.choice(len(pcd_points), num_samples, replace=False)
 
             sampled_points = pcd_points_axis_aligned_normalized[sampled_indices]
             sampled_ratios = split_ratio[sampled_indices]
-            colors = np.random.rand(5, 3)
+            colors = np.random.rand(num_samples, 3)
             
             sampled_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(sampled_points))
             sampled_pcd.colors = o3d.utility.Vector3dVector(colors)
@@ -932,19 +941,21 @@ class GraspListener():
         align_minor_axis = [1, 0, 0], 
         split_axis=2, 
         minor_split_axis=0,
+        # Note that GPD paper does 10 z translations and 7 roll rotations and nothing else
         y_min = -0.01,
         y_max = 0.01,
         num_y_samples = 3,
         roll_min = -np.pi / 2,
         roll_max = np.pi / 2,
         num_roll_samples = 7,
-        pitch_min = -np.pi / 4,
-        pitch_max = np.pi / 4,
-        num_pitch_samples = 5,
+        pitch_min = 0,
+        pitch_max = 0,
+        num_pitch_samples = 1,
         # TODO: Look into exploiting Panda gripper symmetry (grasps rotated by n*pi should be equivalent)
         yaw_min = -np.pi / 2,
         yaw_max = np.pi / 2,
         num_yaw_samples = 7,
+        split_ratio_threshold = 0.5,
         point_up=False,
     ):
         """
@@ -965,7 +976,6 @@ class GraspListener():
               grasps, sorted based on cost.
         """
 
-        split_ratio_threshold = 0.6
 
         # # NOTE: All num_samples should be odd numbers
         # y_min = -0.01
@@ -982,20 +992,40 @@ class GraspListener():
         # yaw_max = np.pi / 2
         # num_yaw_samples = 7
 
+        PARALLEL = False # There are bugs in the parallel implementation => Don't use!
+        VISUALIZE_FILTERED_CLOUDS = True
+        VISUALIZE = False
+        VISUALIZE_EACH = False
+        VISUALIZE_ALL = True # Heat map of good to bad grasps but too messy for fine detail
+        VISUALIZE_ORIG = False
+        VISUALIZE_SORTED_WITH_COSTS = False
+
         np.random.seed(random_seed)
 
         pcd_points = pcd.xyzs().T
 
-        # Filter pcd based on split ratio: must pass threshold for any 2/3 axes
+        # Filter pcd based on split ratio
         if grasp_type == GraspType.TOP:
             split_ratios = self.compute_pcd_split_ratio_xy(pcd_points)
             split_axes = np.array([[1,0,0], [0,1,0]])
             length = None
         else:
             split_ratios, split_axes, length = self.compute_pcd_split_ratio(pcd_points)
-        mask = np.any(split_ratios > split_ratio_threshold, axis=1)
+
+        # Allow points where at least 2 out of 3 split ratios exceed the threshold
+        mask = np.sum(split_ratios > split_ratio_threshold, axis=1) >= 2
         split_ratio_filtered_points = pcd_points[mask]
         split_ratio_filtered_normals = pcd.normals()[:, mask].T
+
+        if VISUALIZE_FILTERED_CLOUDS:
+            manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
+            manipuland_cloud.paint_uniform_color([0.7, 0.7, 0.7])
+            filtered_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(split_ratio_filtered_points))
+            filtered_cloud.paint_uniform_color([1,0,0])
+
+            o3d.visualization.draw_geometries([
+                manipuland_cloud, filtered_cloud
+            ], window_name="points after split ratio filtering")
 
         # Kdtree based on unfiltered points for better normal queries
         kdtree = KDTree(pcd_points)
@@ -1011,6 +1041,17 @@ class GraspListener():
 
         print("len sample indicies", darboux_frame_sample_indices)
 
+        if VISUALIZE_FILTERED_CLOUDS:
+            manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
+            manipuland_cloud.paint_uniform_color([0.7, 0.7, 0.7])
+            filtered_cloud = o3d.geometry.PointCloud(
+                o3d.utility.Vector3dVector(split_ratio_filtered_points[darboux_frame_sample_indices]))
+            filtered_cloud.paint_uniform_color([1,0,0])
+
+            o3d.visualization.draw_geometries([
+                manipuland_cloud, filtered_cloud
+            ], window_name="sampled points for grasp computation")
+
         # Compute darboux frames at samples
         X_WPs = self.compute_darboux_frames(
             points=split_ratio_filtered_points[darboux_frame_sample_indices],
@@ -1025,13 +1066,6 @@ class GraspListener():
         manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
         manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
         viz_geoms = [manipuland_cloud]
-
-        PARALLEL = False
-        VISUALIZE = False
-        VISUALIZE_EACH = False
-        VISUALIZE_ALL = False
-        VISUALIZE_ORIG = False
-        VISUALIZE_SORTED_WITH_COSTS = True
 
         if VISUALIZE_ORIG:
             from pydrake.all import StartMeshcat, PointCloud
@@ -1252,9 +1286,22 @@ class GraspListener():
 
             print("parallel antipodal grasp time: {:.3f}".format(time.time() - start_time))
             if VISUALIZE_ALL:
-                for X_G in candidate_lst:
-                    viz_geoms.append(self.make_gripper_line_set(X_G, [0, 0, 1]))
-                o3d.visualization.draw_geometries(viz_geoms)
+                import matplotlib.pyplot as plt
+                sorted_indices = np.argsort(candidate_costs)
+                sorted_candidates = [candidate_lst[i] for i in sorted_indices]
+                sorted_costs = [candidate_costs[i] for i in sorted_indices]
+
+                # Normalize costs to [0,1] range for interpolation
+                min_cost = min(sorted_costs)
+                max_cost = max(sorted_costs)
+                cost_range = max_cost - min_cost
+                normalized_costs = [(c - min_cost) / cost_range if cost_range > 0 else 0.5 for c in sorted_costs]
+
+                viz_geoms = [manipuland_cloud]
+                for X_G, norm_cost in zip(sorted_candidates, normalized_costs):
+                    color = plt.cm.jet(norm_cost)[:3]  # Use jet colormap (RGB values)
+                    viz_geoms.append(self.make_gripper_line_set(X_G, color))
+                o3d.visualization.draw_geometries(viz_geoms, window_name="all grasps (red is high cost, blue is low cost)")
 
         start = time.time()
 

@@ -12,7 +12,8 @@ import numpy as np
 import torch
 import IPython
 from subprocess import call
-
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 
 class SignedDensityField(object):
     """Data is stored in the following way
@@ -160,6 +161,24 @@ class SignedDensityField(object):
         mlab.pipeline.volume(grid, vmin=vmin, vmax=(vmax + vmin) / 2)
         mlab.axes()
         mlab.show()
+
+
+
+    def visualize_matplotlib(self, max_dist=0.1):
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection="3d")
+
+        # Threshold for visualization (show only near-surface)
+        threshold = np.abs(self.data) < max_dist
+        x, y, z = np.where(threshold)
+
+        ax.scatter(x, y, z, c=self.data[x, y, z], cmap="coolwarm", marker="o", alpha=0.5)
+        
+        ax.set_xlabel("X")
+        ax.set_ylabel("Y")
+        ax.set_zlabel("Z")
+        plt.show()
+
 
     def to_pcd(sdf):
         """
