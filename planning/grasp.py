@@ -1107,7 +1107,7 @@ class GraspListener():
         num_yaw_samples = 3,
         split_ratio_threshold = 0.5,
         point_up=False,
-        is_manual=True,
+        is_manual=False,
         voxel_radius=0.005,
         ground_z = 0.06,
     ):
@@ -1223,7 +1223,7 @@ class GraspListener():
         VISUALIZE_EACH = False
         VISUALIZE_ALL = False # Heat map of good to bad grasps but too messy for fine detail
         VISUALIZE_ORIG = False
-        VISUALIZE_SORTED_WITH_COSTS = True
+        VISUALIZE_SORTED_WITH_COSTS = False
 
         np.random.seed(random_seed)
 

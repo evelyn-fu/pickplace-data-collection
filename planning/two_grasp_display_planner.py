@@ -832,7 +832,7 @@ class TwoGraspPlanner(LeafSystem):
             if context.get_time() > traj_q.end_time() + start_time:
                 state.get_mutable_abstract_state(
                     int(self._mode_index)
-                ).set_value(PlannerState.PLAN_PICK)
+                ).set_value(PlannerState.SCANNING1)
             return
         if mode == PlannerState.PLAN_PICK:
             self.PlanBinPick(context, state, PlannerState.GO_TO_PICK_PREGRASP)
@@ -1072,9 +1072,9 @@ class TwoGraspPlanner(LeafSystem):
         scene_pcd.resize(new_scene_pts.shape[1])
         scene_pcd.mutable_xyzs()[:] = new_scene_pts
         
-        # np.save(os.path.abspath(os.path.join(__file__ ,"../../bin_background.npy")), scene_pcd.xyzs())
-        # np.save(os.path.abspath(os.path.join(__file__ ,"../../bin_contents.npy")), bin_pcd.xyzs())
-        # print("saved bin pcds")
+        np.save(os.path.abspath(os.path.join(__file__ ,"../../bin_background.npy")), scene_pcd.xyzs())
+        np.save(os.path.abspath(os.path.join(__file__ ,"../../bin_contents.npy")), bin_pcd.xyzs())
+        print("saved bin pcds")
 
         # remove outliers
         o3d_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(bin_pcd.xyzs().T))
@@ -1536,6 +1536,10 @@ class TwoGraspPlanner(LeafSystem):
         merged_pcd.mutable_xyzs()[:] = filtered_pts.T
         self.current_scene_pcd = merged_pcd
         print("table pcd got in", time.time()-start, "seconds")
+        
+        np.save(os.path.abspath(os.path.join(__file__ ,"../../dual_grasp_background_pcd.npy")), self.current_scene_pcd.xyzs())
+        np.save(os.path.abspath(os.path.join(__file__ ,"../../dual_grasp_pcd.npy")), self.current_manipuland_pcd.xyzs())
+        print("saved dual grasp pcds")
 
         # Find grasp candidates
         if mode == PlannerState.SCANNING1:
