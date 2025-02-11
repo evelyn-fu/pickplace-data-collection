@@ -813,7 +813,7 @@ class TwoGraspPlanner(LeafSystem):
             if context.get_time() > traj_q.end_time() + start_time:
                 state.get_mutable_abstract_state(
                     int(self._mode_index)
-                ).set_value(PlannerState.PLAN_PICK)
+                ).set_value(PlannerState.SCANNING1)
             return
         if mode == PlannerState.PLAN_PICK:
             self.PlanBinPick(context, state, PlannerState.GO_TO_PICK_PREGRASP)
@@ -1032,6 +1032,9 @@ class TwoGraspPlanner(LeafSystem):
     def PlanBinPick(self, context, state, after_scan_state):
         # Get pcd 
         cloud = self.GetInputPort("cloud_bin").Eval(context)
+        X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[0.02, 0.0, 0.0])
+        transformed_xyzs = X_adjust @ cloud.xyzs()
+        cloud.mutable_xyzs()[:] = transformed_xyzs
         bin_pcd = cloud.Crop(lower_xyz=[-0.03, 0.44, -bin_depth], upper_xyz=[0.145, 0.75, 0.16])
         bin_pcd.EstimateNormals(radius=0.1, num_closest=30)
         bin_pcd.FlipNormalsTowardPoint(self._X_WC_bin.translation())
@@ -1039,6 +1042,9 @@ class TwoGraspPlanner(LeafSystem):
 
         # Get background pcd 
         cloud = self.GetInputPort("cloud_bin").Eval(context)
+        X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[0.02, 0.0, 0.0])
+        transformed_xyzs = X_adjust @ cloud.xyzs()
+        cloud.mutable_xyzs()[:] = transformed_xyzs
         scene_pcd = cloud.Crop(lower_xyz=[-0.05, 0.42, -bin_depth-0.1], upper_xyz=[0.165, 0.77, 0.16])
         scene_pcd.EstimateNormals(radius=0.1, num_closest=30)
         scene_pcd.FlipNormalsTowardPoint(self._X_WC_bin.translation())
@@ -1193,10 +1199,10 @@ class TwoGraspPlanner(LeafSystem):
             X_G
         )
 
+        self.PlanToPregrasp(context, state)
         state.get_mutable_abstract_state(
             int(self._mode_index)
         ).set_value(after_scan_state)
-        self.PlanToPregrasp(context, state)
     
     def PlanSysIdPick(self, context, state, after_scan_state):
         self.GetPointCloud(context, state, after_scan_state)
@@ -1293,10 +1299,10 @@ class TwoGraspPlanner(LeafSystem):
             checker=cci_checker
         )
 
+        self.PlanToPregrasp(context, state)
         state.get_mutable_abstract_state(
             int(self._mode_index)
         ).set_value(after_scan_state)
-        self.PlanToPregrasp(context, state)
 
     def PlanBinPickPoseTraj(self, context, state):
         current_time = context.get_time()
@@ -1319,24 +1325,33 @@ class TwoGraspPlanner(LeafSystem):
         start = time.time()
         # Get manipuland pcd 
         cloud0 = self.GetInputPort("cloud_front").Eval(context)
+        X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[-0.017, -0.03, 0.0])
+        transformed_xyzs = X_adjust @ cloud0.xyzs()
+        cloud0.mutable_xyzs()[:] = transformed_xyzs
         pcd0 = cloud0.Crop(lower_xyz=[0.23, -0.17, platform_height], upper_xyz=[0.7, 0.17, 0.27])
         pcd0.EstimateNormals(radius=0.1, num_closest=30)
         pcd0.FlipNormalsTowardPoint(self._X_WC0.translation())
 
         cloud1 = self.GetInputPort("cloud_back_left").Eval(context)
+        X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[-0.03, -0.005, 0.0])
+        transformed_xyzs = X_adjust @ cloud1.xyzs()
+        cloud1.mutable_xyzs()[:] = transformed_xyzs
         pcd1 = cloud1.Crop(lower_xyz=[0.23, -0.17, platform_height], upper_xyz=[0.7, 0.17, 0.27])
         pcd1.EstimateNormals(radius=0.1, num_closest=30)
-        pcd1.FlipNormalsTowardPoint(self._X_WC1.translation())
+        pcd1.FlipNormalsTowardPoint(self._X_WC2.translation()) # I screwed up the cameras somewhere so the left anf right are flipped, need to fix
 
         cloud2 = self.GetInputPort("cloud_back_right").Eval(context)
+        X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[0.0, 0.0, 0.0])
+        transformed_xyzs = X_adjust @ cloud2.xyzs()
+        cloud2.mutable_xyzs()[:] = transformed_xyzs
         pcd2 = cloud2.Crop(lower_xyz=[0.23, -0.17, platform_height], upper_xyz=[0.7, 0.17, 0.27])
         pcd2.EstimateNormals(radius=0.1, num_closest=30)
-        pcd2.FlipNormalsTowardPoint(self._X_WC2.translation())
+        pcd2.FlipNormalsTowardPoint(self._X_WC1.translation())
 
         merged_pcd = Concatenate([pcd0, pcd1, pcd2])
         down_sampled_pcd = merged_pcd.VoxelizedDownSample(voxel_size=ONLINE_VOXEL_RADIUS)
 
-        VISUALIZE_MERGED_PCD = False
+        VISUALIZE_MERGED_PCD = True
         if VISUALIZE_MERGED_PCD:
             pcd = down_sampled_pcd.xyzs().T # Shape (N,3)
             pcd_normals = down_sampled_pcd.normals().T # Shape (N,3)
@@ -1507,10 +1522,10 @@ class TwoGraspPlanner(LeafSystem):
         if mode == PlannerState.PLAN_SYS_ID:
             return
         
+        self.PlanToPregrasp(context, state)
         state.get_mutable_abstract_state(
             int(self._mode_index)
         ).set_value(after_scan_state)
-        self.PlanToPregrasp(context, state)
 
         return
 
@@ -1578,20 +1593,23 @@ class TwoGraspPlanner(LeafSystem):
         if mode == PlannerState.PLAN_SYS_ID:
             q_goal = self.q_sys_id_pregrasp
             obstacles_vox = np.hstack([ceiling_vox, camera_vox, bin_cam_vox, self.current_manipuland_pcd.xyzs()])
-    
-        traj = scs_trajopt(
-            q, 
-            q_goal, 
-            self.drm_planner,
-            self.cci_objects, 
-            self.edge_inflator, 
-            obstacles_vox, 
-            self.velocity_limits, 
-            self.acceleration_limits
-        )
+
+        try:
+            traj = scs_trajopt(
+                q, 
+                q_goal, 
+                self.drm_planner,
+                self.cci_objects, 
+                self.edge_inflator, 
+                obstacles_vox, 
+                self.velocity_limits, 
+                self.acceleration_limits
+            )
+        except:
+            return
         if traj is None:
             logging.error("Failed to find a path to the grasping start positions.")
-            exit(1)
+            return
 
         breaks = np.linspace(0, traj.end_time(), int(1e3), endpoint=False)
         knots = traj.vector_values(breaks)
@@ -1665,10 +1683,11 @@ class TwoGraspPlanner(LeafSystem):
             self.current_manipuland_pcd,
             pcd_with_background,
             candidate_num=1,
-            num_samples=30,
+            num_samples=50,
             random_seed=np.random.randint(1000),
             grasp_type=GraspType.PAIR,
             split_ratio_threshold=0.15,
+            ground_z=platform_height
         )
 
         grasp_pairs = self.grasp_node.get_best_grasps()

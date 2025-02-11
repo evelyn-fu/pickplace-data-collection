@@ -192,13 +192,13 @@ def start_scenario(
     if use_hardware:
         # from camera calibation
         # Front camera
-        x_front_rgb = RigidTransform(np.loadtxt("/home/real2sim/calibrations/12_6_calibrations/front_calibration_12_6_daniilidis.txt"))
+        x_front_rgb = RigidTransform(np.loadtxt("/home/real2sim/calibrations/2_10_calibrations_aligned/front.txt"))
 
         # Back Right camera
-        x_back_right_rgb = RigidTransform(np.loadtxt("/home/real2sim/calibrations/12_6_calibrations/back_right_calibration_12_5_daniilidis.txt"))
+        x_back_right_rgb = RigidTransform(np.loadtxt("/home/real2sim/calibrations/2_10_calibrations_aligned/back_right.txt"))
 
         # Back Left camera
-        x_back_left_rgb = RigidTransform(np.loadtxt("/home/real2sim/calibrations/12_6_calibrations/back_left_calibration_12_5_daniilidis.txt"))
+        x_back_left_rgb = RigidTransform(np.loadtxt("/home/real2sim/calibrations/2_10_calibrations_aligned/back_left.txt"))
         
         # Bin camera
         x_bin_rgb = RigidTransform(np.loadtxt("/home/real2sim/calibrations/bin_calibration_2_7_daniilidis.txt"))
@@ -233,13 +233,13 @@ def start_scenario(
         x_bin_camera = x_bin_rgb @ x_depth_rgb_bin
     else:
         # Front camera
-        x_front_camera = RigidTransform(np.loadtxt("/home/real2sim/calibrations/12_6_calibrations/front_calibration_12_6_daniilidis.txt"))
+        x_front_camera = RigidTransform(np.loadtxt("/home/real2sim/calibrations/2_10_calibrations_aligned/front.txt"))
 
         # Back Right camera
-        x_back_right_camera = RigidTransform(np.loadtxt("/home/real2sim/calibrations/12_6_calibrations/back_right_calibration_12_5_daniilidis.txt"))
+        x_back_right_camera = RigidTransform(np.loadtxt("/home/real2sim/calibrations/2_10_calibrations_aligned/back_right.txt"))
 
         # Back Left camera
-        x_back_left_camera = RigidTransform(np.loadtxt("/home/real2sim/calibrations/12_6_calibrations/back_left_calibration_12_5_daniilidis.txt"))
+        x_back_left_camera = RigidTransform(np.loadtxt("/home/real2sim/calibrations/2_10_calibrations_aligned/back_left.txt"))
 
         # Bin camera
         x_bin_camera = RigidTransform(np.loadtxt("/home/real2sim/calibrations/bin_calibration_2_7_daniilidis.txt"))
