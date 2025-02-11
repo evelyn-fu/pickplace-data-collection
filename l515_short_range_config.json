@@ -1,0 +1,45 @@
+{
+    "device": {
+        "fw version": "1.5.4.1",
+        "name": "Intel RealSense L515",
+        "product line": "L500"
+    },
+    "parameters": {
+        "Alternate IR": 0.0,
+        "Apd Temperature": -9999.0,
+        "Confidence Threshold": 1.0,
+        "Depth Offset": 4.5,
+        "Depth Units": 0.0002500000118743628,
+        "Digital Gain": 2.0,
+        "Enable IR Reflectivity": 0.0,
+        "Enable Max Usable Range": 0.0,
+        "Error Polling Enabled": 1.0,
+        "Frames Queue Size": 16.0,
+        "Freefall Detection Enabled": 1.0,
+        "Global Time Enabled": 0.0,
+        "Host Performance": 0.0,
+        "Humidity Temperature": 33.63584518432617,
+        "Inter Cam Sync Mode": 0.0,
+        "Invalidation Bypass": 0.0,
+        "LDD temperature": 33.86676025390625,
+        "Laser Power": 100.0,
+        "Ma Temperature": 33.6446418762207,
+        "Mc Temperature": 32.935691833496094,
+        "Min Distance": 190.0,
+        "Noise Estimation": 0.0,
+        "Noise Filtering": 4.0,
+        "Post Processing Sharpening": 1.0,
+        "Pre Processing Sharpening": 0.0,
+        "Receiver Gain": 18.0,
+        "Sensor Mode": 0.0,
+        "Visual Preset": 5.0
+    },
+    "schema version": 1,
+    "viewer": {
+        "stream-depth-format": "Z16",
+        "stream-fps": "30",
+        "stream-height": "480",
+        "stream-ir-format": "Y8",
+        "stream-width": "640"
+    }
+}
