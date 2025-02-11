@@ -1087,6 +1087,8 @@ class TwoGraspPlanner(LeafSystem):
         
         np.save(os.path.abspath(os.path.join(__file__ ,"../../bin_background.npy")), scene_pcd.xyzs())
         np.save(os.path.abspath(os.path.join(__file__ ,"../../bin_contents.npy")), bin_pcd.xyzs())
+        np.save(os.path.abspath(os.path.join(__file__ ,"../../bin_background_normals.npy")), scene_pcd.normals())
+        np.save(os.path.abspath(os.path.join(__file__ ,"../../bin_contents_normals.npy")), bin_pcd.normals())
         print("saved bin pcds")
 
         # remove outliers
@@ -1552,6 +1554,8 @@ class TwoGraspPlanner(LeafSystem):
         
         np.save(os.path.abspath(os.path.join(__file__ ,"../../dual_grasp_background_pcd.npy")), self.current_scene_pcd.xyzs())
         np.save(os.path.abspath(os.path.join(__file__ ,"../../dual_grasp_pcd.npy")), self.current_manipuland_pcd.xyzs())
+        np.save(os.path.abspath(os.path.join(__file__ ,"../../dual_grasp_background_normals.npy")), self.current_scene_pcd.normals())
+        np.save(os.path.abspath(os.path.join(__file__ ,"../../dual_grasp_normals.npy")), self.current_manipuland_pcd.normals())
         print("saved dual grasp pcds")
 
         # Find grasp candidates
