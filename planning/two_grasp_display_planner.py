@@ -765,8 +765,8 @@ class TwoGraspPlanner(LeafSystem):
         self.acceleration_limits = 0.4 * np.ones(7)
         self.display_velocity_limits = 0.1 * np.ones(7)
         self.rotate_velocity_limits = 0.1 * np.ones(7)
-        self.rotate_velocity_limits[6] = 0.1
-        # self.rotate_velocity_limits[6] = 1.0 # Uncomment this for fast debug runs but bad scanning data
+        # self.rotate_velocity_limits[6] = 0.1
+        self.rotate_velocity_limits[6] = 1.0 # Uncomment this for fast debug runs but bad scanning data
         self.display_acceleration_limits = 0.1 * np.ones(7)
         self.regions = [] #regions
         self.gripper_length = gripper_length

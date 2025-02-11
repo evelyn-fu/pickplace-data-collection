@@ -22,7 +22,7 @@ from pydrake.perception import (
     DepthImageToPointCloud
 )
 
-from manipulation.systems import AddIiwaDifferentialIK
+# from manipulation.systems import AddIiwaDifferentialIK
 from manipulation.systems import ExtractPose
 from manipulation.station import MakeHardwareStation, LoadScenario
 
@@ -43,6 +43,7 @@ from planning.turntable_planner import TurntablePlanner
 from perception.image_saver import ImageSaver
 from perception.camera_in_world import CameraPoseInWorldSource
 from planning.trajectory_sources import TrajectoryWithTimingInformationSource, DummyTrajSource
+from planning.diffik import AddIiwaDifferentialIK
 # from iiwa import IiwaHardwareStationDiagram
 
 def get_regions_static(scenario_path, dirstr):
@@ -368,7 +369,16 @@ def start_scenario(
         )
 
     # Set up differential inverse kinematics.
-    diff_ik = AddIiwaDifferentialIK(builder, controller_plant)
+    velocity_limits = 0.4 * np.ones(7)
+    acceleration_limits = 1.0 * np.ones(7)
+    diff_ik = AddIiwaDifferentialIK(
+        builder, 
+        controller_plant, 
+        frame=None,
+        velocity_lims=velocity_limits, 
+        acceleration_lims=acceleration_limits, # doesn't actually do anything since using this stops the robot from moving???
+        joint_centering_gain=5.0
+    )
     builder.Connect(planner.GetOutputPort("X_WG"), diff_ik.get_input_port(0))
     if use_hardware:
         builder.Connect(
