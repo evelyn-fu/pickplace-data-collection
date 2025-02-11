@@ -69,8 +69,10 @@ def realsense(dirstr="temp", serial="810512062206", config_path=None):
         config.enable_stream(rs.stream.depth, 1024, 768, rs.format.z16, 30)
         config.enable_stream(rs.stream.color, 1920, 1080, rs.format.rgb8, 30)
     else:
-        config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 30)
-        config.enable_stream(rs.stream.color, 1920, 1080, rs.format.rgb8, 30)
+        config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
+        config.enable_stream(rs.stream.color, 640, 480, rs.format.rgb8, 30)
+        # config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 30)
+        # config.enable_stream(rs.stream.color, 1280, 720, rs.format.rgb8, 30)
 
     # Start streaming
     profile = pipeline.start(config)
