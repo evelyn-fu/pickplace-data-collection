@@ -1107,7 +1107,7 @@ class GraspListener():
         num_yaw_samples = 3,
         split_ratio_threshold = 0.5,
         point_up=False,
-        is_manual=False,
+        is_manual=True,
         voxel_radius=0.005,
         ground_z = 0.06,
     ):

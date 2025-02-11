@@ -45,7 +45,9 @@ def MakePickGripperFrames(X_G, preplace_time=0.0, postpick_height=0.2):
 
     return X_G, times
 
-def MakePickAndDisplayGripperFrames(X_G, gripper_length, pregrasp_dist, place_flipped=False, X_GE=None):
+def MakePickAndDisplayGripperFrames(
+        X_G, gripper_length, pregrasp_dist, place_flipped=False, X_GE=None, lift_for_display_height=0.2
+):
     """
     Takes a partial specification with X_G["pick"], X_G["prepick"], and
     X_G["display_traj"] (a tuple of two list of poses of any length that begin with the same pose,
@@ -96,7 +98,9 @@ def MakePickAndDisplayGripperFrames(X_G, gripper_length, pregrasp_dist, place_fl
     times["pick_end"] = 2.0
 
     # raise object off surface
-    X_G["postpick"] = RigidTransform(X_G["pick"].rotation(), X_G["pick"].translation() + [0, 0, 0.2])
+    X_G["postpick"] = RigidTransform(
+        X_G["pick"].rotation(), X_G["pick"].translation() + [0, 0, lift_for_display_height]
+    )
     times["postpick"] = 6.0
 
     # time to consecutive frames
@@ -104,7 +108,9 @@ def MakePickAndDisplayGripperFrames(X_G, gripper_length, pregrasp_dist, place_fl
 
     # Prepare to place back down
     if place_flipped:
-        X_G["preplace"] = RigidTransform(X_G["place"].rotation(), X_G["place"].translation() + [0, 0, 0.2])
+        X_G["preplace"] = RigidTransform(
+            X_G["place"].rotation(), X_G["place"].translation() + [0, 0, lift_for_display_height]
+        )
     else:
         X_G["preplace"] = X_G["postpick"]
     times["preplace"] = 0.0

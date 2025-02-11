@@ -76,8 +76,8 @@ sys.path.append(PYCUCI_ROOT+'/bazel-bin/cuci/src/pybind/pycuci')
 import pycuci as cci
 PETE_ASSETS =  os.path.dirname(__file__)+"/../pete_assets/"
 SAFE_DIRECTIVES = PETE_ASSETS+'assets/directives/iiwa7_on_table_with_ceiling.yaml'
-# SYS_ID_TRAJ_PARAMETER_PATH = Path(os.path.abspath(os.path.join(__file__ ,"../../traj_feb8")))
-SYS_ID_TRAJ_PARAMETER_PATH = Path(os.path.abspath(os.path.join(__file__ ,"../../sysid_traj_075_limits")))
+SYS_ID_TRAJ_PARAMETER_PATH = Path(os.path.abspath(os.path.join(__file__ ,"../../traj_feb8")))
+# SYS_ID_TRAJ_PARAMETER_PATH = Path(os.path.abspath(os.path.join(__file__ ,"../../sysid_traj_075_limits")))
 
 from mmt_gcs.planning.mintime_scs import MintimeSCSWithPathFixing
 from mmt_gcs.planning.corridor_planning_utils import CCICollisionChecker, CollisionCheckerBase
@@ -535,15 +535,31 @@ class PickState(Enum):
     TO_PLACE = 5
     PLACE = 6
 
+scanning_traj_robot_to_workspace_dist = 0.4
+scanning_traj_height = 0.45
+lift_for_display_height = 0.05
 yaw_display_traj = []
-
-yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0)), [0.4, 0.0, 0.6]))
-yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi/4)), [0.4, 0.0, 0.6]))
-yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi/2)), [0.4, 0.0, 0.6]))
-yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -3*np.pi/4)), [0.4, 0.0, 0.6]))
-yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi)), [0.4, 0.0, 0.6]))
-yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -5*np.pi)), [0.4, 0.0, 0.6]))
-yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -3*np.pi/2)), [0.4, 0.0, 0.6]))
+yaw_display_traj.append(
+    RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0)),
+                   [scanning_traj_robot_to_workspace_dist, 0.0, scanning_traj_height]))
+yaw_display_traj.append(
+    RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi/4)),
+                   [scanning_traj_robot_to_workspace_dist, 0.0, scanning_traj_height]))
+yaw_display_traj.append(
+    RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi/2)),
+                   [scanning_traj_robot_to_workspace_dist, 0.0, scanning_traj_height]))
+yaw_display_traj.append(
+    RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -3*np.pi/4)),
+                   [scanning_traj_robot_to_workspace_dist, 0.0, scanning_traj_height]))
+yaw_display_traj.append(
+    RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi)),
+                   [scanning_traj_robot_to_workspace_dist, 0.0, scanning_traj_height]))
+yaw_display_traj.append(
+    RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -5*np.pi)),
+                   [scanning_traj_robot_to_workspace_dist, 0.0, scanning_traj_height]))
+yaw_display_traj.append(
+    RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -3*np.pi/2)),
+                   [scanning_traj_robot_to_workspace_dist, 0.0, scanning_traj_height]))
 
 q_home = [0.3, 0.4, 0.0, -1.2, 0.0, 1.0, -1.57]
 
@@ -553,7 +569,7 @@ ceiling_vox += np.array([0.4, 0.0, 0.9])[:, np.newaxis]
 
 x, y = np.meshgrid(np.arange(0.0, 0.075, 0.3), np.arange(0.0, -0.075, -0.3))
 camera_vox = np.vstack((x.flatten(), y.flatten(), np.zeros_like(x.flatten())))
-camera_vox += np.array([0.9, 0.0, 0.3])[:, np.newaxis]
+camera_vox += np.array([0.8, 0.0, 0.3])[:, np.newaxis]
 
 x, y = np.meshgrid(np.arange(-0.2, 0.075, 0.02), np.arange(0.02, -0.075, -0.36))
 bin_cam_vox = np.vstack((x.flatten(), y.flatten(), np.zeros_like(x.flatten())))
@@ -584,11 +600,14 @@ for z_offset in np.linspace(0, -0.1, int(0.1/0.005)):
     bin_sides_components.append(generate_rectangle_points(corner1, corner2, corner3, corner4, 0.005, z_offset))
 bin_sides_vox = np.concatenate(bin_sides_components, axis=0).T
 
-stage_center0 = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0.0)), [0.5, 0.0, 0.0])
-stage_center90 = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, np.pi/2)), [0.5, 0.0, 0.0])
-bin_depth = 0.02
+# Stage center transforms are used for placing the object onto the workspace after bin picking.
+stage_center0 = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi/2)), [0.5, 0.0, 0.1])
+stage_center90 = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0.0)), [0.5, 0.0, 0.0])
+
+bin_depth = 0.08
 platform_height = 0.070 # use value a bit higher than it is to reduce pcd noise
 
+# Pose of the 2nd bin to place the object into.
 end_bin = RigidTransform(RotationMatrix(RollPitchYaw(0.0, np.pi/2, np.pi)), [0.30, -0.55, 0.2])
 
 class TwoGraspPlanner(LeafSystem):
@@ -746,8 +765,8 @@ class TwoGraspPlanner(LeafSystem):
         self.acceleration_limits = 0.4 * np.ones(7)
         self.display_velocity_limits = 0.1 * np.ones(7)
         self.rotate_velocity_limits = 0.1 * np.ones(7)
-        # self.rotate_velocity_limits[6] = 0.075
-        self.rotate_velocity_limits[6] = 1.0
+        self.rotate_velocity_limits[6] = 0.1
+        # self.rotate_velocity_limits[6] = 1.0 # Uncomment this for fast debug runs but bad scanning data
         self.display_acceleration_limits = 0.1 * np.ones(7)
         self.regions = [] #regions
         self.gripper_length = gripper_length
@@ -1155,8 +1174,10 @@ class TwoGraspPlanner(LeafSystem):
         parallel_score = np.abs(eff_parallel_vec @ principal_component)
         
         if perpendicular_score > parallel_score:
+            print("Using stage_center90")
             stage_center = stage_center90
         else:
+            print("Using stage_center0")
             stage_center = stage_center0
 
         manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(bin_pcd.xyzs().T))
@@ -1781,7 +1802,10 @@ class TwoGraspPlanner(LeafSystem):
             }
 
             X_G1["display_traj"] = yaw_display_traj
-            X_G1, times1 = MakePickAndDisplayGripperFrames(X_G1, self.gripper_length, self.pregrasp_dist, self.place_flipped1, X_GE)
+            X_G1, times1 = MakePickAndDisplayGripperFrames(
+                X_G1, self.gripper_length, self.pregrasp_dist,
+                self.place_flipped1, X_GE, lift_for_display_height
+            )
 
             display_traj1, self.q_display_center1 = MakeDisplayJointPositionsTrajectory(
                 X_G1, 
@@ -1826,7 +1850,10 @@ class TwoGraspPlanner(LeafSystem):
                 "prepick": X_WE2 @ X_GgraspGpregrasp
             }
             X_G2["display_traj"] = yaw_display_traj
-            X_G2, times2 = MakePickAndDisplayGripperFrames(X_G2, self.gripper_length, self.pregrasp_dist, self.place_flipped2, X_GE)
+            X_G2, times2 = MakePickAndDisplayGripperFrames(
+                X_G2, self.gripper_length, self.pregrasp_dist,
+                self.place_flipped2, X_GE, lift_for_display_height
+            )
 
             display_traj2, self.q_display_center2 = MakeDisplayJointPositionsTrajectory(
                 X_G2, 
