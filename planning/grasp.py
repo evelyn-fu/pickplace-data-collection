@@ -67,8 +67,6 @@ class GraspListener():
         self.plant_context = self.plant.GetMyContextFromRoot(context)
         self.scene_graph_context = self.scene_graph.GetMyContextFromRoot(context)
 
-        # Required if using manual grasp selection.
-        gui.Application.instance.initialize()
 
     def check_collision(self, pcd, X_G, visualize=False):
         """Returns true if not in collision and false otherwise."""
@@ -457,7 +455,8 @@ class GraspListener():
             split_ratios: np.ndarray,
             split_axes: np.ndarray,
             ground_z: float,
-            object_height: float
+            object_height: float,
+            num_pcd_pts: float
             ) -> tuple[float, dict]:
         """
         Computes a grasp candidate cost based on a weighted sum of:
@@ -475,9 +474,16 @@ class GraspListener():
         eff_vertical_vec = R.dot(np.array([0, 0, 1])) # vertical axis of gripper (parallel to fingers)
         eff_horizontal_vec = R.dot(np.array([0, 1, 0])) # horizontal axis of gripper (line connecting finger tips)
         
+        # antipodal_within_grasp_cost = -np.sum(
+        #     -within_box_pt_normals[1, :] ** 2
+        # ) / within_box_pt_normals.shape[1] # along the horizontal axis of the gripper, larger good (antipodal metric)
+
+        good_normals_within_grasp = np.sum(within_box_pt_normals[1, :] > 0.9)
+        antipodal_within_grasp_cost = -good_normals_within_grasp / within_box_pt_normals.shape[1]
+
         antipodal_cost = -np.sum(
-            within_box_pt_normals[1, :] ** 2
-        ) / within_box_pt_normals.shape[1] # along the horizontal axis of the gripper, larger good (antipodal metric)
+            -within_box_pt_normals[1, :] ** 2
+        ) / num_pcd_pts # along the horizontal axis of the gripper, larger good (antipodal metric)
 
         # want grasps to avoid alignment with long axes, smaller better
         gripper_vertical_axis_alignment_cost = np.abs(eff_vertical_vec @ split_axes)
@@ -493,15 +499,16 @@ class GraspListener():
         min_high_enough = ground_z + object_height/2
         higher_up_cost = -min(t[2] - min_high_enough, 0) / min_high_enough 
 
-        proportion_enclosed_cost = -proportion_enclosed
+        proportion_enclosed_cost = -good_normals_within_grasp/num_pcd_pts
         cost_dict = {
-            "antipodal_cost": 200.0 * antipodal_cost,
+            # "antipodal_cost": 100.0 * antipodal_cost,
+            "antipodal_within_grasp_cost": 100.0 * antipodal_within_grasp_cost,
             "gripper_vertical_axis_alignment_cost_z": 10.0 * gripper_vertical_axis_alignment_cost[2],
             "gripper_vertical_axis_alignment_cost_y": 5.0 * gripper_vertical_axis_alignment_cost[1],
             # "split_ratio_major_axis_cost": 20.0 * split_ratio_major_axis_cost,
             # "split_ratio_minor_axis_cost": 10.0 * split_ratio_minor_axis_cost,
             "higher_up_cost": 10.0 * higher_up_cost,
-            "proportion_enclosed_cost": 20.0 * proportion_enclosed_cost
+            "proportion_enclosed_cost": 100.0 * (num_pcd_pts/within_box_pt_normals.shape[1]) * proportion_enclosed_cost
         }
 
         # print(cost_dict)
@@ -874,6 +881,94 @@ class GraspListener():
             o3d.visualization.draw_plotly([pcd, sampled_pcd, principle_component_line, world_frame])
 
         return split_ratio[:, [0, 1, 2]], axes, length
+    
+    @staticmethod
+    def compute_pcd_split_ratio_at_point(pcd_points: np.ndarray, point: np.ndarray, viz_split_ratio_axes: bool = False) -> np.ndarray:
+        """
+        Computes the split ratios for each pcd point.
+        The split ratio has range [0,1] where 1 is best (most equal split) and 0 is worst (most unequal split).
+
+        See `compute_pcd_split_ratio_xy` for more details.
+
+        :param pcd_points: Point cloud points of shape (N,3).
+        :param viz_major_axis: Whether to visualize the pcd with the principle and minor axes in open3d.
+        :return: Minor, secondary, and major point cloud split ratio for each point of shape (N,3) where the first entry is the
+            minor axis, second is the secondary, and last is the major axis.
+        """
+        cov = np.cov(pcd_points.T)
+        eigval, eigvec = np.linalg.eig(cov)
+
+        order = eigval.argsort()
+        minor_component = eigvec[:, order[0]]
+        secondary_component = eigvec[:, order[1]]
+        principal_component = eigvec[:, order[2]]
+
+        # Rotate point cloud to align the principal component with the z-axis and the minor component with the x-axis
+        z_axis, x_axis = [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]
+        rot_principal_component_to_axes, _ = R.align_vectors(
+            np.array([z_axis, x_axis]), np.stack([principal_component, minor_component])
+        )
+
+        pcd_points_axis_aligned = pcd_points @ rot_principal_component_to_axes.as_matrix().T
+        point_axis_aligned = point @ rot_principal_component_to_axes.as_matrix().T
+
+
+        # Min/max bounds for split ratio
+        min_point_vals = np.min(pcd_points_axis_aligned, axis=0)
+        max_point_vals = np.max(pcd_points_axis_aligned, axis=0)
+        center = (max_point_vals + min_point_vals) / 2
+        half_range = (max_point_vals - min_point_vals) / 2
+
+        # Compute split ratio
+        # split_ratio = 1 - np.abs((pcd_points_axis_aligned - center) / half_range)
+
+        # Compute exponential decay split ratio.
+        decay_rate = 2.0
+        normalized_distance = np.abs((point_axis_aligned - center) / half_range)
+        normalized_distance = np.clip(normalized_distance, 0, 1)
+        split_ratio = np.exp(-decay_rate * normalized_distance) - np.exp(-decay_rate)
+
+        # return split axes
+        axes = np.stack([principal_component, secondary_component, minor_component])
+        length = np.linalg.norm(max_point_vals - min_point_vals)
+
+        if viz_split_ratio_axes:
+            # Visualize the point cloud in blue, the principal axis in red, and the minor axis in green
+            mean_val = np.mean(pcd_points_axis_aligned, axis=0)
+            pcd_points_axis_aligned_normalized = pcd_points_axis_aligned - mean_val
+            pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd_points_axis_aligned_normalized))
+            pcd.paint_uniform_color([0.7, 0.7, 0.7]) # Gray
+            principle_component_line = o3d.geometry.LineSet()
+            principle_component_line.points = o3d.utility.Vector3dVector(
+                np.array([[0.0, 0.0, -0.3], [0.0, 0.0, 0.3], [-0.1, 0.0, 0.0], [0.1, 0.0, 0.0]])
+            )
+            principle_component_line.lines = o3d.utility.Vector2iVector(np.array([[0, 1], [2, 3]]))
+            principle_component_line.colors = o3d.utility.Vector3dVector(np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]))
+
+            num_samples = 10
+            sampled_indices = np.random.choice(len(pcd_points), num_samples, replace=False)
+
+            sampled_points = pcd_points_axis_aligned_normalized[sampled_indices]
+            sampled_ratios = split_ratio[sampled_indices]
+            colors = np.random.rand(num_samples, 3)
+            
+            sampled_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(sampled_points))
+            sampled_pcd.colors = o3d.utility.Vector3dVector(colors)
+
+            print("Min point vals:", min_point_vals)
+            print("Max point vals:", max_point_vals)
+            print("Center:", center)
+            
+            print("Split ratios of points in order [minor, middle, major]:")
+            for i, (ratio, color) in enumerate(zip(sampled_ratios, colors)):
+                print(f"\033[38;2;{int(color[0]*255)};{int(color[1]*255)};{int(color[2]*255)}m● Point {i}: {ratio}\033[0m"
+                      f"    ->   Coordinates: {sampled_points[i]+mean_val}"
+                )
+            
+            world_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.01)
+            o3d.visualization.draw_plotly([pcd, sampled_pcd, principle_component_line, world_frame])
+
+        return split_ratio, axes, length
 
 
     @staticmethod
@@ -994,16 +1089,19 @@ class GraspListener():
         y_min = -0.01,
         y_max = 0.01,
         num_y_samples = 3,
+        x_min = -0.01,
+        x_max = 0.01,
+        num_x_samples = 3,
         roll_min = -np.pi / 2,
         roll_max = np.pi / 2,
-        num_roll_samples = 7,
+        num_roll_samples = 5,
         pitch_min = -np.pi / 8,
         pitch_max = np.pi / 8,
         num_pitch_samples = 3,
         # TODO: Look into exploiting Panda gripper symmetry (grasps rotated by n*pi should be equivalent)
-        yaw_min = -np.pi / 2,
-        yaw_max = np.pi / 2,
-        num_yaw_samples = 7,
+        yaw_min = -np.pi / 4,
+        yaw_max = np.pi / 4,
+        num_yaw_samples = 3,
         split_ratio_threshold = 0.5,
         point_up=False,
         is_manual=False,
@@ -1032,7 +1130,7 @@ class GraspListener():
             # Prompt user to manually indicate the grasp(s) instead of using antipodal grasping.
 
             manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
-
+            
             print(
                 "Manually select grasps using the GUI. The y-axis connects the two finers and "
                 "the z-axis points from the hand to the fingers."
@@ -1046,26 +1144,46 @@ class GraspListener():
                 app = FramePlacerApp(manipuland_cloud)
                 gui.Application.instance.run()
                 frames = app.frames
+                origin = app.frame_origin
                 del app
                 print(f"Got {len(frames)} frames")
-                if grasp_type == GraspType.PAIR and len(frames) < 2:
-                    print("Need at least 2 frames for pair grasps. Retrying.")
-                    return get_frames()
-                elif len(frames) < 1:
-                    print("Need at least 1 frame. Retrying.")
-                    return get_frames()
-                return frames
+                # if grasp_type == GraspType.PAIR and len(frames) < 2:
+                #     print("Need at least 2 frames for pair grasps. Retrying.")
+                #     return get_frames()
+                # elif len(frames) < 1:
+                #     print("Need at least 1 frame. Retrying.")
+                #     return get_frames()
+                return frames, origin
             
-            X_WGs = get_frames()
+            while True:
+                X_WGs, origin = get_frames()
 
-            # Move up to prevent collisions.
-            X_WGs_collision_free = []
-            for i, X_WG in enumerate(X_WGs):
-                distance, X_WPnew = self.find_minimum_distance(pcd_with_background, RigidTransform(X_WG))
-                if np.isnan(distance):
-                    print(f"Frame {i} in collision")
-                    continue
-                X_WGs_collision_free.append(X_WPnew.GetAsMatrix4())
+                # Move up to prevent collisions.
+                X_WGs_collision_free = []
+                for i, X_WG in enumerate(X_WGs):
+                    print(origin)
+                    distance, X_WPnew = self.find_minimum_distance(pcd_with_background, RigidTransform(X_WG))
+                    if np.isnan(distance):
+                        print(f"Frame {i} in collision")
+                        continue
+                    X_WGs_collision_free.append(X_WPnew.GetAsMatrix4())
+
+                    # Calculate scores
+                    pcd_points = pcd.xyzs().T
+                    split_ratio, split_axes, length = self.compute_pcd_split_ratio_at_point(pcd_points, origin)
+                    is_nonempty, within_box_pt_normals, proportion_enclosed = self.check_nonempty(pcd, X_WPnew)
+                    cost, cost_dict = self.compute_costs(
+                                    X_WPnew, 
+                                    within_box_pt_normals,
+                                    proportion_enclosed, 
+                                    split_ratio,
+                                    split_axes,
+                                    ground_z,
+                                    np.max(pcd_points[:, 2]) - np.min(pcd_points[:, 2]),
+                                    pcd_points.shape[0]
+                                )
+                if input == "C":
+                    break
             
             if grasp_type == GraspType.PAIR:
                 self.grasp_candidates: List[Tuple[np.ndarray]] = [
@@ -1096,26 +1214,28 @@ class GraspListener():
         VISUALIZE_FILTERED_CLOUDS = True
         VISUALIZE = False
         VISUALIZE_EACH = False
-        VISUALIZE_ALL = True # Heat map of good to bad grasps but too messy for fine detail
+        VISUALIZE_ALL = False # Heat map of good to bad grasps but too messy for fine detail
         VISUALIZE_ORIG = False
         VISUALIZE_SORTED_WITH_COSTS = True
 
         np.random.seed(random_seed)
 
+        downsampled_pcd = pcd.VoxelizedDownSample(voxel_size=0.02)
+        downsampled_pcd_points = downsampled_pcd.xyzs().T
         pcd_points = pcd.xyzs().T
 
         # Filter pcd based on split ratio
         if grasp_type == GraspType.TOP:
-            split_ratios = self.compute_pcd_split_ratio_xy(pcd_points, 0.1, voxel_radius, VISUALIZE_CLUSTERS)
+            split_ratios = self.compute_pcd_split_ratio_xy(downsampled_pcd_points, 0.1, voxel_radius, VISUALIZE_CLUSTERS)
             split_axes = np.array([[1,0,0], [0,1,0]])
             length = None
         else:
-            split_ratios, split_axes, length = self.compute_pcd_split_ratio(pcd_points)
+            split_ratios, split_axes, length = self.compute_pcd_split_ratio(downsampled_pcd_points)
 
         # Allow points where at least 2 out of 3 split ratios exceed the threshold
         mask = np.sum(split_ratios > split_ratio_threshold, axis=1) >= 2
-        split_ratio_filtered_points = pcd_points[mask]
-        split_ratio_filtered_normals = pcd.normals()[:, mask].T
+        split_ratio_filtered_points = downsampled_pcd_points[mask]
+        split_ratio_filtered_normals = downsampled_pcd.normals()[:, mask].T
 
         if VISUALIZE_FILTERED_CLOUDS:
             manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
@@ -1128,7 +1248,7 @@ class GraspListener():
             ], window_name="points after split ratio filtering")
 
         # Kdtree based on unfiltered points for better normal queries
-        kdtree = KDTree(pcd_points)
+        kdtree = KDTree(downsampled_pcd_points)
 
         # Sample random points to compute darboux frames for
         num_split_ratio_filtered_points = len(split_ratio_filtered_points)
@@ -1156,7 +1276,7 @@ class GraspListener():
         X_WPs = self.compute_darboux_frames(
             points=split_ratio_filtered_points[darboux_frame_sample_indices],
             normals=split_ratio_filtered_normals[darboux_frame_sample_indices],
-            pcd=pcd,
+            pcd=downsampled_pcd,
             kdtree=kdtree,
             point_up=point_up
         )
@@ -1210,117 +1330,17 @@ class GraspListener():
                 color = np.random.rand(3)
                 color /= np.linalg.norm(color)
                 color = tuple(color)# NOTE: The best variations to sample/ search over is situation/ grasp environment dependent (e.g. bin vs table)
-                for y in np.linspace(y_min, y_max, num_y_samples):
-                    for pitch in np.linspace(pitch_min, pitch_max, num_pitch_samples):
-                        for roll in np.linspace(roll_min, roll_max, num_roll_samples):
-                            for yaw in np.linspace(yaw_min, yaw_max, num_yaw_samples):
-                                # TODO: Explore whether it is faster to do this transform in numpy
-                                X_PPnew = RigidTransform(RollPitchYaw(roll, pitch, yaw), np.array([0, y, 0]))
-                                X_WPnew = X_WP.multiply(X_PPnew)
+                for x in np.linspace(x_min, x_max, num_x_samples):
+                    for y in np.linspace(y_min, y_max, num_y_samples):
+                        for pitch in np.linspace(pitch_min, pitch_max, num_pitch_samples):
+                            for roll in np.linspace(roll_min, roll_max, num_roll_samples):
+                                for yaw in np.linspace(yaw_min, yaw_max, num_yaw_samples):
+                                    # TODO: Explore whether it is faster to do this transform in numpy
+                                    X_PPnew = RigidTransform(RollPitchYaw(roll, pitch, yaw), np.array([x, y, 0]))
+                                    X_WPnew = X_WP.multiply(X_PPnew)
 
-                                if VISUALIZE:
-                                    # visualize
-                                    manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
-                                    manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
-
-                                    gripper_xyzs = self.hand_collision_model.to_pcd()
-                                    # RollPitchYaw(np.pi/2, 0, np.pi/2) is world to wsg specific transform.
-                                    # WSG y axis needs to be aligned with world -z.
-                                    gripper_cloud = o3d.geometry.PointCloud(
-                                        o3d.utility.Vector3dVector(gripper_xyzs)).voxel_down_sample(0.005).transform(
-                                            (X_WPnew @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0])).GetAsMatrix4())
-                                    gripper_cloud.paint_uniform_color([1.0, 0.0, 0.0])
-
-                                    o3d.visualization.draw_plotly([
-                                        manipuland_cloud,
-                                        gripper_cloud,
-                                        self.make_triad_line_set(X_WPnew.GetAsMatrix4(), [0.0, 1.0, 0.0])
-                                    ])
-                                    print("darboux frame", X_WPnew)
-
-                
-                                R_WPnew = X_WPnew.GetAsMatrix4()[:3, :3]
-                                eff_vertical_vec = R_WPnew.dot(np.array([0, 0, 1])) # don't want it to face up
-                                if eff_vertical_vec[2] > 0:
-                                    continue
-                                
-                                # Compute a new transform that minimizes z-direction distance without penetration
-                                # Use pcd with floor to avoid gripper smashing into the table
-                                if point_up:
-                                    # Need to increase sampling range
-                                    distance, X_WPnew = self.find_minimum_distance(
-                                        pcd_with_background,
-                                        X_WPnew,
-                                        min_range=-0.1,
-                                        max_range=0.4,
-                                        num_samples=100,
-                                    )
-                                else:
-                                    distance, X_WPnew = self.find_minimum_distance(pcd_with_background, X_WPnew)
-                                # If distance cannot be found, go over to the next iteration
-                                if np.isnan(distance):
-                                    continue
-
-                                # If the candidate has no collisions and the closing region is non
-                                # empty, then append it to the list of candidates.
-                                is_nonempty, within_box_pt_normals, proportion_enclosed = self.check_nonempty(pcd, X_WPnew)
-                                if is_nonempty:
-                                    candidate_lst.append(X_WPnew.GetAsMatrix4())
-                                    candidate_lst_by_grasp_origin_pt.append(X_WP.GetAsMatrix4())
-                                    viz_geoms.append(self.make_gripper_line_set(X_WPnew.GetAsMatrix4(), color))
-                                    if grasp_type == GraspType.PAIR:
-                                        cost, cost_dict = self.compute_costs(
-                                                X_WPnew, 
-                                                within_box_pt_normals,
-                                                proportion_enclosed, 
-                                                split_ratio,
-                                                split_axes,
-                                                ground_z,
-                                                np.max(pcd_points[:, 2]) - np.min(pcd_points[:, 2])
-                                            )
-                                        candidate_costs.append(
-                                            cost
-                                        )
-                                        candidiate_cost_dicts.append(cost_dict)
-                                    elif grasp_type == GraspType.SIDE:
-                                        cost, cost_dict = self.compute_costs_single(
-                                                X_WPnew, 
-                                                within_box_pt_normals, 
-                                                proportion_enclosed,
-                                                split_ratio, 
-                                                split_axis, 
-                                                minor_split_axis, 
-                                                align_grasp_axis, 
-                                                align_minor_axis
-                                            )
-                                        candidate_costs.append(
-                                            cost
-                                        )
-                                        candidiate_cost_dicts.append(cost_dict)
-                                    elif grasp_type == GraspType.TOP:
-                                        cost, cost_dict = self.compute_costs_top(
-                                                X_WPnew, 
-                                                within_box_pt_normals, 
-                                                split_ratio,
-                                                proportion_enclosed,
-                                            )
-                                        candidate_costs.append(
-                                            cost
-                                        )
-                                        candidiate_cost_dicts.append(cost_dict)
-                                    elif grasp_type == GraspType.STABLE:
-                                        cost, cost_dict = self.compute_costs_stable(
-                                                X_WPnew, 
-                                                within_box_pt_normals, 
-                                                split_ratio,
-                                                proportion_enclosed
-                                            )
-                                        candidate_costs.append(
-                                            cost
-                                        )
-                                        candidiate_cost_dicts.append(cost_dict)
-                                    if VISUALIZE_EACH:
-                                        print(candidate_costs[-1])
+                                    if VISUALIZE:
+                                        # visualize
                                         manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
                                         manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
 
@@ -1328,14 +1348,116 @@ class GraspListener():
                                         # RollPitchYaw(np.pi/2, 0, np.pi/2) is world to wsg specific transform.
                                         # WSG y axis needs to be aligned with world -z.
                                         gripper_cloud = o3d.geometry.PointCloud(
-                                            o3d.utility.Vector3dVector(gripper_xyzs)
-                                        ).voxel_down_sample(0.005).transform(
-                                            (X_WPnew @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0])
-                                        ).GetAsMatrix4())
+                                            o3d.utility.Vector3dVector(gripper_xyzs)).voxel_down_sample(0.005).transform(
+                                                (X_WPnew @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0])).GetAsMatrix4())
                                         gripper_cloud.paint_uniform_color([1.0, 0.0, 0.0])
 
-                                        viz_geoms = [manipuland_cloud, gripper_cloud]
-                                        o3d.visualization.draw_geometries(viz_geoms)
+                                        o3d.visualization.draw_plotly([
+                                            manipuland_cloud,
+                                            gripper_cloud,
+                                            self.make_triad_line_set(X_WPnew.GetAsMatrix4(), [0.0, 1.0, 0.0])
+                                        ])
+                                        print("darboux frame", X_WPnew)
+
+                    
+                                    R_WPnew = X_WPnew.GetAsMatrix4()[:3, :3]
+                                    eff_vertical_vec = R_WPnew.dot(np.array([0, 0, 1])) # don't want it to face up
+                                    if eff_vertical_vec[2] > 0:
+                                        continue
+                                    
+                                    # Compute a new transform that minimizes z-direction distance without penetration
+                                    # Use pcd with floor to avoid gripper smashing into the table
+                                    if point_up:
+                                        # Need to increase sampling range
+                                        distance, X_WPnew = self.find_minimum_distance(
+                                            pcd_with_background,
+                                            X_WPnew,
+                                            min_range=-0.1,
+                                            max_range=0.4,
+                                            num_samples=100,
+                                        )
+                                    else:
+                                        distance, X_WPnew = self.find_minimum_distance(pcd_with_background, X_WPnew)
+                                    # If distance cannot be found, go over to the next iteration
+                                    if np.isnan(distance):
+                                        continue
+
+                                    # If the candidate has no collisions and the closing region is non
+                                    # empty, then append it to the list of candidates.
+                                    is_nonempty, within_box_pt_normals, proportion_enclosed = self.check_nonempty(pcd, X_WPnew)
+                                    if is_nonempty:
+                                        candidate_lst.append(X_WPnew.GetAsMatrix4())
+                                        candidate_lst_by_grasp_origin_pt.append(X_WP.GetAsMatrix4())
+                                        viz_geoms.append(self.make_gripper_line_set(X_WPnew.GetAsMatrix4(), color))
+                                        if grasp_type == GraspType.PAIR:
+                                            cost, cost_dict = self.compute_costs(
+                                                    X_WPnew, 
+                                                    within_box_pt_normals,
+                                                    proportion_enclosed, 
+                                                    split_ratio,
+                                                    split_axes,
+                                                    ground_z,
+                                                    np.max(pcd_points[:, 2]) - np.min(pcd_points[:, 2]),
+                                                    pcd_points.shape[0]
+                                                )
+                                            candidate_costs.append(
+                                                cost
+                                            )
+                                            candidiate_cost_dicts.append(cost_dict)
+                                        elif grasp_type == GraspType.SIDE:
+                                            cost, cost_dict = self.compute_costs_single(
+                                                    X_WPnew, 
+                                                    within_box_pt_normals, 
+                                                    proportion_enclosed,
+                                                    split_ratio, 
+                                                    split_axis, 
+                                                    minor_split_axis, 
+                                                    align_grasp_axis, 
+                                                    align_minor_axis
+                                                )
+                                            candidate_costs.append(
+                                                cost
+                                            )
+                                            candidiate_cost_dicts.append(cost_dict)
+                                        elif grasp_type == GraspType.TOP:
+                                            cost, cost_dict = self.compute_costs_top(
+                                                    X_WPnew, 
+                                                    within_box_pt_normals, 
+                                                    split_ratio,
+                                                    proportion_enclosed,
+                                                )
+                                            candidate_costs.append(
+                                                cost
+                                            )
+                                            candidiate_cost_dicts.append(cost_dict)
+                                        elif grasp_type == GraspType.STABLE:
+                                            cost, cost_dict = self.compute_costs_stable(
+                                                    X_WPnew, 
+                                                    within_box_pt_normals, 
+                                                    split_ratio,
+                                                    proportion_enclosed
+                                                )
+                                            candidate_costs.append(
+                                                cost
+                                            )
+                                            candidiate_cost_dicts.append(cost_dict)
+                                        if VISUALIZE_EACH:
+                                            print(candidate_costs[-1])
+                                            manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
+                                            manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
+
+                                            gripper_xyzs = self.hand_collision_model.to_pcd()
+                                            # RollPitchYaw(np.pi/2, 0, np.pi/2) is world to wsg specific transform.
+                                            # WSG y axis needs to be aligned with world -z.
+                                            gripper_cloud = o3d.geometry.PointCloud(
+                                                o3d.utility.Vector3dVector(gripper_xyzs)
+                                            ).voxel_down_sample(0.005).transform(
+                                                (X_WPnew @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0])
+                                            ).GetAsMatrix4())
+                                            gripper_cloud.paint_uniform_color([1.0, 0.0, 0.0])
+
+                                            viz_geoms = [manipuland_cloud, gripper_cloud]
+                                            o3d.visualization.draw_geometries(viz_geoms)
 
             print("sequential antipodal grasp time: {:.3f}".format(time.time() - start_time))
             if VISUALIZE_ALL:
@@ -1412,8 +1534,8 @@ class GraspListener():
             candidate_lst = np.array(candidate_lst)
             candidate_lst_by_grasp_origin_pt = np.array(candidate_lst_by_grasp_origin_pt)
             candidate_costs = np.array(candidate_costs)
-            # sorted_candidate_inds = np.argsort(candidate_costs)[:len(candidate_costs) // 10]
-            sorted_candidate_inds = np.argsort(candidate_costs)[:num_samples]
+            sorted_candidate_inds = np.argsort(candidate_costs)[:len(candidate_costs) // 20]
+            # sorted_candidate_inds = np.argsort(candidate_costs)[:num_samples]
             candidates_filtered = candidate_lst[sorted_candidate_inds]
             candidates_grasp_origin_filtered = candidate_lst_by_grasp_origin_pt[sorted_candidate_inds]
             candidate_costs_filtered = candidate_costs[sorted_candidate_inds]
@@ -1440,6 +1562,7 @@ class GraspListener():
             rotation_cost = np.maximum(np.exp(-rotation_diffs/np.pi), np.exp(-(np.pi - rotation_diffs)/np.pi))
 
             grasps_quality = candidate_costs_filtered[:, np.newaxis] + candidate_costs_filtered[np.newaxis, :]
+            best_quality = np.abs(np.max(grasps_quality))
 
             pair_cost_dicts = []
             N = len(candidates_filtered)
@@ -1447,8 +1570,8 @@ class GraspListener():
                 for j in range(N):
                     pair_cost_dicts.append({
                         "grasps_quality": grasps_quality[i, j],
-                        "translation_cost": 30 * translation_cost[i, j],
-                        "rotation_cost": 60 * rotation_cost[i, j]
+                        "translation_cost": 2 * best_quality * translation_cost[i, j],
+                        "rotation_cost": 5 * best_quality * rotation_cost[i, j]
                     })
 
             pair_costs = np.array([

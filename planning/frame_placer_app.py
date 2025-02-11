@@ -8,6 +8,7 @@ class FramePlacerApp:
         self.pcd = pcd
         self.frames = []         # List to store finalized 4x4 transformation matrices.
         self.temp_origin = None  # The origin (3D point) chosen for the temporary frame.
+        self.frame_origin = None # The origin (3D point) chosen for the previous confirmed frame
         self.temp_angles = [0.0, 0.0, 0.0]  # [roll, pitch, yaw] in degrees.
         self.is_placing = False  # Whether we are waiting for a click to place a frame.
         self.temp_frame_name = "TempFrame"
@@ -147,6 +148,7 @@ class FramePlacerApp:
         frame_geom.transform(T)
         self.scene.scene.add_geometry(name, frame_geom, rendering.MaterialRecord())
         print(f"Frame confirmed: {T}")
+        self.frame_origin = self.temp_origin
         self.temp_origin = None
         self.is_placing = False
         try:

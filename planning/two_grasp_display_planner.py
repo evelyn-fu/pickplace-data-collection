@@ -1683,11 +1683,12 @@ class TwoGraspPlanner(LeafSystem):
             self.current_manipuland_pcd,
             pcd_with_background,
             candidate_num=1,
-            num_samples=50,
+            num_samples=30,
             random_seed=np.random.randint(1000),
             grasp_type=GraspType.PAIR,
             split_ratio_threshold=0.15,
-            ground_z=platform_height
+            ground_z=platform_height,
+            # is_manual=True
         )
 
         grasp_pairs = self.grasp_node.get_best_grasps()
