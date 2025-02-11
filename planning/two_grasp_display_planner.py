@@ -627,7 +627,8 @@ class TwoGraspPlanner(LeafSystem):
             default_home=q_home,
             gripper_length=0.145,
             pregrasp_dist=0.17,
-            eef_to_gripper_length=0.16, # 0.16 for the real value
+            eef_to_gripper_length=0.16, # 0.16 for the real value,
+            num_objs=1,
         ):
         LeafSystem.__init__(self)
 
@@ -642,6 +643,7 @@ class TwoGraspPlanner(LeafSystem):
         self._X_WC1 = X_WC1
         self._X_WC2 = X_WC2
         self._X_WC_bin = X_WC_bin
+        self.objs_left = num_objs
 
         # for getting current positions
         self._ee_index = plant.GetBodyByName("iiwa_link_7").index()
@@ -765,8 +767,8 @@ class TwoGraspPlanner(LeafSystem):
         self.acceleration_limits = 0.4 * np.ones(7)
         self.display_velocity_limits = 0.1 * np.ones(7)
         self.rotate_velocity_limits = 0.1 * np.ones(7)
-        # self.rotate_velocity_limits[6] = 0.1
-        self.rotate_velocity_limits[6] = 1.0 # Uncomment this for fast debug runs but bad scanning data
+        self.rotate_velocity_limits[6] = 0.1
+        # self.rotate_velocity_limits[6] = 1.0 # Uncomment this for fast debug runs but bad scanning data
         self.display_acceleration_limits = 0.1 * np.ones(7)
         self.regions = [] #regions
         self.gripper_length = gripper_length
@@ -978,10 +980,21 @@ class TwoGraspPlanner(LeafSystem):
                 int(self._current_joint_traj_idx)
             ).get_value().start_time_s
             if context.get_time() > traj_q.end_time() + start_time:
-                state.get_mutable_abstract_state(
-                    int(self._mode_index)
-                ).set_value(PlannerState.DONE)
-                self.done = True
+                self.objs_left -= 1
+                if self.objs_left > 0:
+                    state.get_mutable_abstract_state(
+                        int(self._mode_index)
+                    ).set_value(PlannerState.RESET)
+                else:
+                    state.get_mutable_abstract_state(
+                        int(self._mode_index)
+                    ).set_value(PlannerState.DONE)
+                    self.done = True
+            return
+        if mode == PlannerState.RESET:
+            state.get_mutable_abstract_state(
+                int(self._mode_index)
+            ).set_value(PlannerState.START)
             return
         
     def UpdateInGrasp(self, context, state, after_grasp_state):

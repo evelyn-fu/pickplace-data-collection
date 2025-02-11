@@ -4,6 +4,7 @@ import os
 import copy
 import pickle
 import datetime
+import shutil
 from scipy.spatial.transform import Rotation as R
 from pydrake.geometry import (
     StartMeshcat,
@@ -93,7 +94,8 @@ def start_scenario(
         use_hardware=False, 
         save_imgs=False,
         turntable=False,
-        time_horizon=10.0
+        time_horizon=10.0,
+        num_objects=1
     ):
 
     meshcat.ResetRenderMode()
@@ -116,31 +118,24 @@ def start_scenario(
     # plant = station.get_plant()
 
     # initialize image writer and save directories
-    if not os.path.exists(dirstr):
-        os.makedirs(dirstr)
-    if not use_hardware and save_imgs: # don't save images while running on hardware for now to avoid bottleneck
-        if not os.path.exists(dirstr+"/rgb/"):
-            os.makedirs(dirstr+"/rgb/")
-        if not os.path.exists(dirstr+"/rgb_alpha/"):
-            os.makedirs(dirstr+"/rgb_alpha/")
-        if not os.path.exists(dirstr+"/depth/"):
-            os.makedirs(dirstr+"/depth/")
-        if not os.path.exists(dirstr+"/masks/"):
-            os.makedirs(dirstr+"/masks/")
-        if not os.path.exists(dirstr+"/gripper_masks/"):
-            os.makedirs(dirstr+"/gripper_masks/")
-        if not use_hardware and not os.path.exists(dirstr+"/ob_in_cam/"):
-            os.makedirs(dirstr+"/ob_in_cam/")
-
+    if os.path.exists(dirstr):
+        shutil.rmtree(dirstr)
+    os.makedirs(dirstr)
+    if save_imgs:
         # save images
         if use_hardware:
             # this doesn't work because saving images takes too long and bottlenecks the whole system
             # please use scripts/realsense.py instead in parallel
-            img_saver = builder.AddSystem(ImageSaver(depth_format="32F", dirstr=dirstr, labels=False, camera_info=True))
-            builder.Connect(external_station.GetOutputPort("camera0.rgb_image"), img_saver.GetInputPort("rgb_in"))
-            builder.Connect(external_station.GetOutputPort("camera0.depth_image"), img_saver.GetInputPort("depth_in"))
-            builder.Connect(external_station.GetOutputPort("camera0.rgb_camera_info"), img_saver.GetInputPort("rgb_info_in"))
-            builder.Connect(external_station.GetOutputPort("handeye_camera.depth_camera_info"), img_saver.GetInputPort("depth_info_in"))
+            img_saver = builder.AddSystem(
+                ImageSaver(
+                    depth_format="32F", 
+                    dirstr=dirstr, 
+                    labels=False, 
+                    camera_info=True,
+                    use_hardware=True,
+                    num_objects=num_objects
+                    )
+                )
         else:
             img_saver = builder.AddSystem(
                 ImageSaver(
@@ -289,7 +284,8 @@ def start_scenario(
                 models_path=os.path.join(dir_path, os.path.join("scenario_datas", models_path)),
                 gripper_model_path=gripper_model_path))
     else:
-        planner = builder.AddSystem(TwoGraspPlanner(
+        planner = builder.AddSystem(
+            TwoGraspPlanner(
                 plant=plant, 
                 controller_plant=controller_plant,
                 X_WC0=x_front_camera,
@@ -300,7 +296,10 @@ def start_scenario(
                 dirstr=dirstr,
                 time_horizon=time_horizon,
                 models_path=os.path.join(dir_path, os.path.join("scenario_datas", models_path)),
-                gripper_model_path=gripper_model_path))
+                gripper_model_path=gripper_model_path,
+                num_objs=num_objects
+            )
+        )
 
     if save_imgs:
         builder.Connect(planner.GetOutputPort("planner_state"), img_saver.GetInputPort("planner_state"))
@@ -492,6 +491,12 @@ if __name__ == "__main__":
         nargs='?',
     )
     parser.add_argument(
+        "--num_objects",
+        default="1",
+        help="number of objects to scan",
+        nargs='?',
+    )
+    parser.add_argument(
         "--use_hardware",
         action="store_true",
         help="Whether to use real world hardware.",
@@ -531,6 +536,7 @@ if __name__ == "__main__":
         models_path=args.models_path, 
         use_hardware=args.use_hardware, 
         save_imgs=args.save_imgs,
+        num_objects=int(args.num_objects),
         turntable=args.turntable,
-        time_horizon=args.time_horizon
+        time_horizon=args.time_horizon,
     )
