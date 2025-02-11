@@ -67,6 +67,9 @@ class GraspListener():
         self.plant_context = self.plant.GetMyContextFromRoot(context)
         self.scene_graph_context = self.scene_graph.GetMyContextFromRoot(context)
 
+        # Required for using gui. Should only ever call this once.
+        gui.Application.instance.initialize()
+
 
     def check_collision(self, pcd, X_G, visualize=False):
         """Returns true if not in collision and false otherwise."""
@@ -1140,22 +1143,26 @@ class GraspListener():
             )
 
             def get_frames():
-                gui.Application.instance.initialize()
+                # NOTE: This will fail with `GLFW Error: The GLFW library is not initialized` if
+                # any other non-plotly o3d visualization is called between two instantiations of
+                # the gui. The recommendation is to not use manual grasping with other o3d
+                # visualizations.
                 app = FramePlacerApp(manipuland_cloud)
                 gui.Application.instance.run()
                 frames = app.frames
                 origin = app.frame_origin
                 del app
                 print(f"Got {len(frames)} frames")
-                # if grasp_type == GraspType.PAIR and len(frames) < 2:
-                #     print("Need at least 2 frames for pair grasps. Retrying.")
-                #     return get_frames()
-                # elif len(frames) < 1:
-                #     print("Need at least 1 frame. Retrying.")
-                #     return get_frames()
+                if grasp_type == GraspType.PAIR and len(frames) < 2:
+                    print("Need at least 2 frames for pair grasps. Retrying.")
+                    return get_frames()
+                elif len(frames) < 1:
+                    print("Need at least 1 frame. Retrying.")
+                    return get_frames()
                 return frames, origin
             
-            while True:
+            num_repeats = 1 # Increase for grasp cost debugging
+            for _ in range(num_repeats):
                 X_WGs, origin = get_frames()
 
                 # Move up to prevent collisions.

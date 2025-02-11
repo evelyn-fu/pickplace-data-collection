@@ -76,8 +76,8 @@ sys.path.append(PYCUCI_ROOT+'/bazel-bin/cuci/src/pybind/pycuci')
 import pycuci as cci
 PETE_ASSETS =  os.path.dirname(__file__)+"/../pete_assets/"
 SAFE_DIRECTIVES = PETE_ASSETS+'assets/directives/iiwa7_on_table_with_ceiling.yaml'
-SYS_ID_TRAJ_PARAMETER_PATH = Path(os.path.abspath(os.path.join(__file__ ,"../../traj_feb8")))
-# SYS_ID_TRAJ_PARAMETER_PATH = Path(os.path.abspath(os.path.join(__file__ ,"../../../robot_payload_id/logs/corner_setup_payload_box/iiwa_eoptimality_10s_5Fterm_1000timesteps_20_100000/al_19")))
+# SYS_ID_TRAJ_PARAMETER_PATH = Path(os.path.abspath(os.path.join(__file__ ,"../../traj_feb8")))
+SYS_ID_TRAJ_PARAMETER_PATH = Path(os.path.abspath(os.path.join(__file__ ,"../../sysid_traj_075_limits")))
 
 from mmt_gcs.planning.mintime_scs import MintimeSCSWithPathFixing
 from mmt_gcs.planning.corridor_planning_utils import CCICollisionChecker, CollisionCheckerBase
@@ -813,7 +813,7 @@ class TwoGraspPlanner(LeafSystem):
             if context.get_time() > traj_q.end_time() + start_time:
                 state.get_mutable_abstract_state(
                     int(self._mode_index)
-                ).set_value(PlannerState.SCANNING1)
+                ).set_value(PlannerState.PLAN_PICK)
             return
         if mode == PlannerState.PLAN_PICK:
             self.PlanBinPick(context, state, PlannerState.GO_TO_PICK_PREGRASP)
@@ -1351,7 +1351,7 @@ class TwoGraspPlanner(LeafSystem):
         merged_pcd = Concatenate([pcd0, pcd1, pcd2])
         down_sampled_pcd = merged_pcd.VoxelizedDownSample(voxel_size=ONLINE_VOXEL_RADIUS)
 
-        VISUALIZE_MERGED_PCD = True
+        VISUALIZE_MERGED_PCD = False
         if VISUALIZE_MERGED_PCD:
             pcd = down_sampled_pcd.xyzs().T # Shape (N,3)
             pcd_normals = down_sampled_pcd.normals().T # Shape (N,3)
