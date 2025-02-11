@@ -169,6 +169,8 @@ def realsense(dirstr="temp", serial="810512062206", config_path=None):
                 continue
 
             depth_image = np.asanyarray(aligned_depth_frame.get_data()).copy()
+            # Convert depth to millimeters
+            depth_image = (depth_image * depth_scale * 1000).astype(np.uint16)
             color_image = np.asanyarray(color_frame.get_data()).copy()
 
             if save_on:
