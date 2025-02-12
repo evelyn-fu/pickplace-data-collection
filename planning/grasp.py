@@ -1218,7 +1218,7 @@ class GraspListener():
 
         PARALLEL = False # There are bugs in the parallel implementation => Don't use!
         VISUALIZE_CLUSTERS = False
-        VISUALIZE_FILTERED_CLOUDS = True
+        VISUALIZE_FILTERED_CLOUDS = False
         VISUALIZE = False
         VISUALIZE_EACH = False
         VISUALIZE_ALL = False # Heat map of good to bad grasps but too messy for fine detail
