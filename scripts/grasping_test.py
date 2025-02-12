@@ -11,6 +11,7 @@ from pydrake.geometry import (
     RenderLabel,
     Role,
 )
+from pydrake.all import ConstantVectorSource
 from pydrake.systems.analysis import Simulator
 from pydrake.systems.framework import DiagramBuilder
 from pydrake.systems.sensors import CameraInfo
@@ -366,6 +367,14 @@ def start_scenario(
             planner.GetOutputPort("wsg_position"),
             station.GetInputPort("wsg.position"),
         )
+
+    # Increase max force.
+    wsg_force_source = builder.AddNamedSystem(
+        "wsg_force_source", ConstantVectorSource([80.0]) # 80N is max
+    )
+    builder.Connect(
+        wsg_force_source.get_output_port(), station.GetInputPort("wsg.force_limit")
+    )
 
     # Set up differential inverse kinematics.
     velocity_limits = 0.4 * np.ones(7)
