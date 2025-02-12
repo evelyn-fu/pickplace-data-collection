@@ -756,9 +756,11 @@ class TwoGraspPlanner(LeafSystem):
         self.q_display_center1 = None
         self.q_display_center2 = None
         self.q_sys_id_pregrasp = None
-        self.q_postgrasp = None
+        self.q_postgrasp1 = None
+        self.q_postgrasp2 = None
+        self.q_postgrasp_bin = None
         self.place_flipped1 = False
-        self.place_flipped2 = False
+        self.place_flipped2 = True
         self.meshcat = meshcat
         self.plant = plant
         self._iiwa_controller_plant = controller_plant
@@ -1328,7 +1330,7 @@ class TwoGraspPlanner(LeafSystem):
         )
 
         q_home = context.get_discrete_state(self._q0_index).get_value().copy()
-        self.q_postgrasp = solve_via_analytic_IK(
+        self.q_postgrasp_bin = solve_via_analytic_IK(
             pose=X_G["preplace"],
             current_config=q_home,
             ik_domain=self.ik_domain,
@@ -1848,7 +1850,7 @@ class TwoGraspPlanner(LeafSystem):
         # Second Pick
         X_WG2 = self.X_WG2
         X_WE2 = X_WG2.multiply(X_GE)
-        if self.q_postgrasp is not None:
+        if self.q_postgrasp2 is not None:
             print("only updating pick and prepick")
             X_G2 = context.get_abstract_state(int(self._gripper_pose_index2)).get_value()
             X_G2["pick"] = X_WE2
@@ -1886,7 +1888,7 @@ class TwoGraspPlanner(LeafSystem):
             if self.place_flipped2:
                 print("Solving for flipped place")
                 
-                self.q_postgrasp = solve_via_analytic_IK(
+                self.q_postgrasp2 = solve_via_analytic_IK(
                     pose=X_G2["preplace"],
                     current_config=self.q_display_center2,
                     ik_domain=self.ik_domain,
@@ -1969,11 +1971,11 @@ class TwoGraspPlanner(LeafSystem):
         if mode == PlannerState.GRASP1:
             q_goal = self.q_display_center1
             if not self.place_flipped1:
-                self.q_postgrasp = q
+                self.q_postgrasp1 = q
         else:
             q_goal = self.q_display_center2
             if not self.place_flipped2:
-                self.q_postgrasp = q
+                self.q_postgrasp2 = q
         
         obstacles_vox = np.hstack([ceiling_vox, camera_vox, bin_cam_vox])
 
@@ -2083,7 +2085,13 @@ class TwoGraspPlanner(LeafSystem):
     def GoToPlace(self, context, state):
         mode = context.get_abstract_state(int(self._mode_index)).get_value()
         q = self.get_input_port(self._iiwa_position_index).Eval(context)
-        q_goal = self.q_postgrasp
+
+        if mode == PlannerState.GRASP1:        
+            q_goal = self.q_postgrasp1
+        if mode == PlannerState.GRASP2:        
+            q_goal = self.q_postgrasp2
+        if mode == PlannerState.SYS_ID_GRASP:        
+            q_goal = self.q_postgrasp_bin
         
         if mode == PlannerState.SYS_ID_GRASP:
             print("going to bin place")
