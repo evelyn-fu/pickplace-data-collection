@@ -1183,10 +1183,21 @@ class TwoGraspPlanner(LeafSystem):
 
         flattened_cloud = np.copy(cropped_cloud.xyzs())
         flattened_cloud[:,2] = np.mean(flattened_cloud[:,2])
-        principal_component, _, _ = compute_principal_minor_components(cropped_cloud.xyzs().T)
-        R = X_WG_bin.GetAsMatrix4()[:3,:3]
-        eff_perpendicular_vec = R.dot(np.array([1, 0, 0]))
-        eff_parallel_vec = R.dot(np.array([0, 1, 0]))
+        principal_component, secondary_component, _ = compute_principal_minor_components(cropped_cloud.xyzs().T)
+        
+        # visualize axes, principal axis is z axis (blue), secondary axis is x axis (red)
+        z_axis, x_axis = [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]
+        rot_principal_component_to_axes, _ = R.align_vectors(
+            np.array([z_axis, x_axis]), np.stack([principal_component, secondary_component])
+        )
+        com = np.mean(cropped_cloud.xyzs().T, axis=0)
+        rot = RotationMatrix(rot_principal_component_to_axes.as_matrix().T)
+        AddMeshcatTriad(self.meshcat, "principal axis", 
+                        X_PT=RigidTransform(rot,
+                        [com[0], com[1], com[2]]))
+        rot_mat = X_WG_bin.GetAsMatrix4()[:3,:3]
+        eff_perpendicular_vec = rot_mat.dot(np.array([1, 0, 0]))
+        eff_parallel_vec = rot_mat.dot(np.array([0, 1, 0]))
         perpendicular_score = np.abs(eff_perpendicular_vec @ principal_component)
         parallel_score = np.abs(eff_parallel_vec @ principal_component)
         
