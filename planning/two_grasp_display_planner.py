@@ -1725,7 +1725,7 @@ class TwoGraspPlanner(LeafSystem):
             self.current_manipuland_pcd,
             pcd_with_background,
             candidate_num=1,
-            num_samples=30,
+            num_samples=50,
             random_seed=np.random.randint(1000),
             grasp_type=GraspType.PAIR,
             split_ratio_threshold=0.15,
