@@ -1171,12 +1171,12 @@ class GraspListener():
                 origin = app.frame_origin
                 del app
                 print(f"Got {len(frames)} frames")
-                # if grasp_type == GraspType.PAIR and len(frames) < 2:
-                #     print("Need at least 2 frames for pair grasps. Retrying.")
-                #     return get_frames()
-                # elif len(frames) < 1:
-                #     print("Need at least 1 frame. Retrying.")
-                #     return get_frames()
+                if grasp_type == GraspType.PAIR and len(frames) < 2:
+                    print("Need at least 2 frames for pair grasps. Retrying.")
+                    return get_frames()
+                elif len(frames) < 1:
+                    print("Need at least 1 frame. Retrying.")
+                    return get_frames()
                 return frames, origin
             
             num_repeats = 1000 # Increase for grasp cost debugging

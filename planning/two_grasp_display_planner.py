@@ -836,7 +836,7 @@ class TwoGraspPlanner(LeafSystem):
             if context.get_time() > traj_q.end_time() + start_time:
                 state.get_mutable_abstract_state(
                     int(self._mode_index)
-                ).set_value(PlannerState.PLAN_PICK)
+                ).set_value(PlannerState.PLAN_SYS_ID)
             return
         if mode == PlannerState.PLAN_PICK:
             self.PlanBinPick(context, state, PlannerState.GO_TO_PICK_PREGRASP)
