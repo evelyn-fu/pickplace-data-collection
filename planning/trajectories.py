@@ -95,7 +95,7 @@ def MakePickAndDisplayGripperFrames(
     X_G["pick_start"] = X_G["pick"]
     X_G["pick_end"] = X_G["pick"]
     times["pick_start"] = 4.0
-    times["pick_end"] = 2.0
+    times["pick_end"] = 0.5
 
     # raise object off surface
     X_G["postpick"] = RigidTransform(
@@ -122,7 +122,7 @@ def MakePickAndDisplayGripperFrames(
         times["place_start"] = 10.0
     else:
         times["place_start"] = 6.0
-    times["place_end"] = 2.0
+    times["place_end"] = 0.5
 
     # Go back to prepick pose
     if place_flipped:
