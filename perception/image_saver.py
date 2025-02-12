@@ -249,12 +249,13 @@ class ImageSaver(LeafSystem):
         
     def Publish(self, context):
         save_states = [
-            PlannerState.GO_TO_PREGRASP1,
+            # PlannerState.GO_TO_PREGRASP1,
             PlannerState.GRASP1,
-            PlannerState.GO_HOME1,
-            PlannerState.GO_TO_PREGRASP2,
+            # PlannerState.GO_HOME1,
+            # PlannerState.GO_TO_PREGRASP2,
             PlannerState.GRASP2,
-            PlannerState.GO_HOME2]
+            # PlannerState.GO_HOME2
+        ]
         mode = self.GetInputPort("planner_state").Eval(context)
         if mode not in save_states:
             if mode == PlannerState.RESET and not self.object_saved:
@@ -263,7 +264,7 @@ class ImageSaver(LeafSystem):
             if mode == PlannerState.START:
                 self.object_saved = False
             return
-        
+
         time_ms = int(context.get_time() * 1000)
         timestr = f"{time_ms:06d}"
         

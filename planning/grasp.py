@@ -1185,7 +1185,7 @@ class GraspListener():
                     return get_frames()
                 return frames, origin
             
-            num_repeats = 1000 # Increase for grasp cost debugging
+            num_repeats = 1 # Increase for grasp cost debugging. Keep at 1 otherwise.
             for _ in range(num_repeats):
                 X_WGs, origin = get_frames()
                 if len(X_WGs) == 0:
