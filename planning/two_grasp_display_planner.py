@@ -19,7 +19,7 @@ from planning.trajectories import (
     TrajType
 )
 from planning.gcs import plan_unconstrained_gcs_path_start_to_goal
-from planning.inverse_kinematics import solve_via_analytic_IK
+from planning.inverse_kinematics import solve_via_analytic_IK, solve_via_analytic_IK_with_retries
 from iiwa_setup_dataclasses.trajectories import TrajectoryWithTimingInformation, Trajectory
 from iiwa_setup_dataclasses.bspline_trajectory import CompositeBezierCurveTrajectoryAttributes
 from pydrake.systems.framework import LeafSystem
@@ -836,7 +836,7 @@ class TwoGraspPlanner(LeafSystem):
             if context.get_time() > traj_q.end_time() + start_time:
                 state.get_mutable_abstract_state(
                     int(self._mode_index)
-                ).set_value(PlannerState.PLAN_SYS_ID)
+                ).set_value(PlannerState.PLAN_PICK)
             return
         if mode == PlannerState.PLAN_PICK:
             self.PlanBinPick(context, state, PlannerState.GO_TO_PICK_PREGRASP)
@@ -1139,7 +1139,7 @@ class TwoGraspPlanner(LeafSystem):
             num_pitch_samples=1,
             num_yaw_samples=20,
             point_up=True,
-            split_ratio_threshold=0.65,
+            split_ratio_threshold=0.15,
             voxel_radius=ONLINE_VOXEL_RADIUS
         )
 
@@ -1155,7 +1155,7 @@ class TwoGraspPlanner(LeafSystem):
             X_WG_eef = (RigidTransform(X_WG) @ X_GE)
             X_WPregrasp = RigidTransform(X_WG_eef.rotation(), X_WG_eef.translation() + [0, 0, 0.18])
 
-            q_goal = solve_via_analytic_IK(
+            q_goal = solve_via_analytic_IK_with_retries(
                 pose=X_WPregrasp,
                 current_config=q,
                 ik_domain=self.ik_domain,
@@ -1282,7 +1282,7 @@ class TwoGraspPlanner(LeafSystem):
             X_WG = grasps[i]
             X_WPregrasp = (RigidTransform(X_WG) @ X_GE) @ X_GgraspGpregrasp
 
-            q_goal = solve_via_analytic_IK(
+            q_goal = solve_via_analytic_IK_with_retries(
                 pose=X_WPregrasp,
                 current_config=q,
                 ik_domain=self.ik_domain,
@@ -1330,7 +1330,7 @@ class TwoGraspPlanner(LeafSystem):
         )
 
         q_home = context.get_discrete_state(self._q0_index).get_value().copy()
-        self.q_postgrasp_bin = solve_via_analytic_IK(
+        self.q_postgrasp_bin = solve_via_analytic_IK_with_retries(
             pose=X_G["preplace"],
             current_config=q_home,
             ik_domain=self.ik_domain,
@@ -1502,17 +1502,13 @@ class TwoGraspPlanner(LeafSystem):
                                                 self.cci_objects['cci_plant'].getRobotGeometryIds(), 
                                                 cci.Voxels(down_sampled_pcd.xyzs()), 
                                                 ONLINE_VOXEL_RADIUS)
-                attempts = 0
-                while attempts < 50:
-                    q_goal2 = solve_via_analytic_IK(
-                        pose=X_WPregrasp2,
-                        current_config=self.q_pregrasp2,
-                        ik_domain=self.ik_domain,
-                        checker=cci_checker
-                    )
-                    if q_goal2 is not None:
-                        break
-                    attempts += 1
+                q_goal2 = solve_via_analytic_IK_with_retries(
+                    pose=X_WPregrasp2,
+                    current_config=self.q_pregrasp2,
+                    ik_domain=self.ik_domain,
+                    checker=cci_checker,
+                    retries=50
+                )
 
                 if q_goal2 is None:
                     print("Failed to solve IK for grasp 2")
@@ -1746,7 +1742,7 @@ class TwoGraspPlanner(LeafSystem):
             X_WPregrasp1 = (RigidTransform(X_WG1) @ X_GE) @ X_GgraspGpregrasp
             X_WPregrasp2 = (RigidTransform(X_WG2) @ X_GE) @ X_GgraspGpregrasp
 
-            q_goal1 = solve_via_analytic_IK(
+            q_goal1 = solve_via_analytic_IK_with_retries(
                 pose=X_WPregrasp1,
                 current_config=q,
                 ik_domain=self.ik_domain,
@@ -1762,7 +1758,7 @@ class TwoGraspPlanner(LeafSystem):
                 print("grasp 1 configuration has collision with scene")
                 continue
 
-            q_goal2 = solve_via_analytic_IK(
+            q_goal2 = solve_via_analytic_IK_with_retries(
                 pose=X_WPregrasp2,
                 current_config=q,
                 ik_domain=self.ik_domain,
@@ -1888,7 +1884,7 @@ class TwoGraspPlanner(LeafSystem):
             if self.place_flipped2:
                 print("Solving for flipped place")
                 
-                self.q_postgrasp2 = solve_via_analytic_IK(
+                self.q_postgrasp2 = solve_via_analytic_IK_with_retries(
                     pose=X_G2["preplace"],
                     current_config=self.q_display_center2,
                     ik_domain=self.ik_domain,

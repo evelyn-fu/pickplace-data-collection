@@ -95,7 +95,7 @@ def MakePickAndDisplayGripperFrames(
     X_G["pick_start"] = X_G["pick"]
     X_G["pick_end"] = X_G["pick"]
     times["pick_start"] = 4.0
-    times["pick_end"] = 0.5
+    times["pick_end"] = 2.0
 
     # raise object off surface
     X_G["postpick"] = RigidTransform(
@@ -122,7 +122,7 @@ def MakePickAndDisplayGripperFrames(
         times["place_start"] = 10.0
     else:
         times["place_start"] = 6.0
-    times["place_end"] = 0.5
+    times["place_end"] = 2.0
 
     # Go back to prepick pose
     if place_flipped:
@@ -211,7 +211,13 @@ def MakeGripperCommandTrajectory(times, traj_type=TrajType.PREDISPLAY, t0=0.0):
         if len(sample_times) == 0:
             sample_times.append(times[name] + t0)
         else:
-            sample_times.append(sample_times[-1] + times[name])
+            if name == "pick_end" or name == "place_end":
+                sample_times.append(sample_times[-1] + 0.5)
+            elif name == "postpick" or name == "postplace":
+                prev = "pick_end" if name == "postpick" else "place_end"
+                sample_times.append(sample_times[-1] + times[name] + (times[prev] - 0.5))
+            else:
+                sample_times.append(sample_times[-1] + times[name])
         
         if name == "prepick" or name == "pick_start" or name == "place_end" or name == "postplace":
             positions.append(opened)

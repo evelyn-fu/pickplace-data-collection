@@ -10,7 +10,8 @@ from pydrake.all import (
     RigidTransform,
     RotationMatrix,
     Solve,
-    HPolyhedron
+    HPolyhedron,
+    RollPitchYaw
 )
 
 from mmt_gcs.planning.corridor_planning_utils import CollisionCheckerBase
@@ -116,3 +117,37 @@ def solve_via_analytic_IK(pose: RigidTransform,
     + 0.5*np.linalg.norm(candidates, axis=0)
     print(f" dists : {len(dists)} {dists.shape}")
     return candidates[:, np.argmin(dists)]
+
+def solve_via_analytic_IK_with_retries(pose: RigidTransform,
+                          current_config : np.ndarray,
+                          ik_domain: HPolyhedron,
+                          checker: CollisionCheckerBase,
+                          retries: int = 10):
+    result = solve_via_analytic_IK(pose, current_config, ik_domain, checker)
+    if result is not None:
+        return result
+    
+    def add_noise_to_transform(transform, max_rotation_deg=1.0, max_translation=0.005):
+        # Convert max rotation degrees to radians
+        max_rotation_rad = np.radians(max_rotation_deg)
+
+        # Add small random noise to the rotation (in radians)
+        noise_rotation = np.random.uniform(-max_rotation_rad, max_rotation_rad, 3)  # Roll, Pitch, Yaw noise
+        noise_rpy = RotationMatrix(RollPitchYaw(*noise_rotation))
+
+        # Add small random noise to the translation (in meters)
+        noise_translation = np.random.uniform(-max_translation, max_translation, 3)  # x, y, z noise
+
+        # Create noisy transform
+        noisy_transform = RigidTransform(transform.rotation() @ noise_rpy,
+                                        transform.translation() + noise_translation)
+
+        return noisy_transform
+    
+    for i in range(retries):
+        nudged_pose = add_noise_to_transform(pose)
+        result = solve_via_analytic_IK(nudged_pose, current_config, ik_domain, checker)
+        if result is not None:
+            return result
+        
+    return None

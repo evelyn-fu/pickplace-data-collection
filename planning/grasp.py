@@ -470,7 +470,6 @@ class GraspListener():
         R = X_WG.GetAsMatrix4()[:3, :3]
         t = X_WG.GetAsMatrix4()[:3, 3]
         eff_vertical_vec = R.dot(np.array([0, 0, 1])) # vertical axis of gripper (parallel to fingers)
-        eff_horizontal_vec = R.dot(np.array([0, 1, 0])) # horizontal axis of gripper (line connecting finger tips)
         
         antipodal_within_grasp_cost = -np.sum(
             np.exp(within_box_pt_normals[1, :] ** 2)
@@ -485,20 +484,11 @@ class GraspListener():
 
         # want grasps to avoid alignment with long axes, smaller better
         gripper_vertical_axis_alignment_cost = np.abs(eff_vertical_vec @ split_axes)
-        gripper_horizontal_axis_alignment_cost = -np.max(np.abs(eff_horizontal_vec @ split_axes))
-
-        split_ratio_minor_axis_cost = -split_ratios[0]  # prefer higher split ratio
-        split_ratio_major_axis_cost = -split_ratios[2]
-        # # consider lower two split ratio costs (grasp should be even along at least two axes)
-        # split_ratio_costs = -split_ratios
-        # split_ratio_costs_sorted = np.sort(split_ratio_costs)
-        # split_ratio_cost = split_ratio_costs_sorted[0] #+ split_ratio_costs_sorted[1]
-        # higher_up_cost = t[2]
         min_high_enough = ground_z + 3*object_height/4
         higher_up_cost = -min(t[2] - min_high_enough, 0) / min_high_enough 
 
         proportion_enclosed = within_box_pt_normals.shape[1]/num_pcd_pts
-        proportion_enclosed_cost = 1e3 if proportion_enclosed < 0.03 else 0
+        proportion_enclosed_cost = 1e3 if proportion_enclosed < 0.05 else 0
         proportion_good_enclosed = good_normals_within_grasp/num_pcd_pts
         proportion_good_enclosed_cost = 1e3 if proportion_good_enclosed < 0.01 else 0
         cost_dict = {
@@ -506,8 +496,6 @@ class GraspListener():
             "antipodal_within_grasp_cost": 100.0 * antipodal_within_grasp_cost,
             "gripper_vertical_axis_alignment_cost_z": 10.0 * gripper_vertical_axis_alignment_cost[2],
             "gripper_vertical_axis_alignment_cost_y": 5.0 * gripper_vertical_axis_alignment_cost[1],
-            # "split_ratio_major_axis_cost": 20.0 * split_ratio_major_axis_cost,
-            # "split_ratio_minor_axis_cost": 10.0 * split_ratio_minor_axis_cost,
             "higher_up_cost": 50.0 * higher_up_cost,
             "proportion_enclosed": proportion_enclosed,
             "proportion_enclosed_cost": proportion_enclosed_cost,
@@ -517,11 +505,6 @@ class GraspListener():
             "within_box_pt_normals.shape[1]": within_box_pt_normals.shape[1],
             "good_normals_within_grasp": good_normals_within_grasp
         }
-
-        # print("num_pcd_pts", num_pcd_pts)
-        # print("within_box_pt_normals.shape[1]", within_box_pt_normals.shape[1])
-        # print("good_normals_within_grasp", good_normals_within_grasp)
-        # print(cost_dict)
 
         considered_costs = [
             cost_dict["antipodal_within_grasp_cost"],
@@ -599,7 +582,7 @@ class GraspListener():
 
         antipodal_cost = -np.sum(
             within_box_pt_normals[1, :] ** 2
-        ) / within_box_pt_normals.shape[1] # along the y axis of the gripper, larger good (antipodal metric)
+        )  # along the y axis of the gripper, larger good (antipodal metric)
         gripper_vertical_alignment_cost = eff_vertical_vec[2]  # want z axis of gripper to face down, larger worse
         gripper_x_alignment_cost = np.abs(eff_x_vec[0])
         gripper_y_alignment_cost = np.abs(eff_y_vec[1])
@@ -610,7 +593,7 @@ class GraspListener():
         proportion_enclosed_cost = -proportion_enclosed
         cost_dict = {
             # Antipodal doesn't make sense for partial point clouds
-            "antipodal_cost": 100.0 * antipodal_cost,
+            "antipodal_cost": 0 * antipodal_cost,
             "gripper_vertical_alignment_cost": 100.0 * gripper_vertical_alignment_cost,
             # Alignment scores are in range [-1,0] where -1 indicates perfect alignment with one of the axes. 
             "xy_alignment_cost": -100.0 * max(gripper_x_alignment_cost, gripper_y_alignment_cost),
@@ -619,7 +602,7 @@ class GraspListener():
             "split_ratio_minor_axis_cost": 50*split_ratio_minor_axis_cost, # This is world x-axis
             "split_ratio_major_axis_cost": 0*split_ratio_major_axis_cost,
             # proportion_enclosed is the propertion of total pcd points that are within the fingers
-            # "proportion_enclosed_cost": 100.0 * proportion_enclosed_cost
+            "proportion_enclosed_cost": 100.0 * proportion_enclosed_cost
         }
         cost = sum(cost_dict.values())
 
@@ -630,7 +613,8 @@ class GraspListener():
             X_WG: RigidTransform, 
             within_box_pt_normals: np.ndarray, 
             split_ratios: float,
-            proportion_enclosed: float
+            proportion_enclosed: float,
+            num_pcd_pts: float,
         ) -> tuple[float, dict]:
         """
         Computes a grasp candidate cost based on a weighted sum of:
@@ -643,6 +627,22 @@ class GraspListener():
         """
         R = X_WG.GetAsMatrix4()[:3, :3]
         t = X_WG.GetAsMatrix4()[:3, 3]
+
+        antipodal_within_grasp_cost = -np.sum(
+            np.exp(within_box_pt_normals[1, :] ** 2)
+        ) / within_box_pt_normals.shape[1] # along the horizontal axis of the gripper, larger good (antipodal metric)
+
+        good_normals_within_grasp = np.sum(within_box_pt_normals[1, :] > 0.9)
+        # antipodal_within_grasp_cost = -good_normals_within_grasp / within_box_pt_normals.shape[1]
+
+        antipodal_cost = -np.sum(
+            np.exp(within_box_pt_normals[1, :] ** 2)
+        ) / num_pcd_pts # along the horizontal axis of the gripper, larger good (antipodal metric)
+
+        proportion_enclosed = within_box_pt_normals.shape[1]/num_pcd_pts
+        proportion_enclosed_cost = 1e3 if proportion_enclosed < 0.03 else 0
+        proportion_good_enclosed = good_normals_within_grasp/num_pcd_pts
+        proportion_good_enclosed_cost = 1e3 if proportion_good_enclosed < 0.01 else 0
 
         # Prefer alignment to one of the axes. This is a decent heuristic for standing objects.
         eff_x_vec = R.dot(np.array([1, 0, 0]))
@@ -660,7 +660,6 @@ class GraspListener():
         antipodal_cost = -np.sum(
             within_box_pt_normals[1, :] ** 2
         ) / within_box_pt_normals.shape[1] # along the y axis of the gripper, larger good (antipodal metric)
-        grasp_height_cost = -t[2]  # prefer higher position
         split_ratio_minor_axis_cost = -split_ratios[0]  # prefer higher split ratio
         split_ratio_major_axis_cost = -split_ratios[2]
 
@@ -671,14 +670,21 @@ class GraspListener():
         alignment_factor = math.exp(lambda_factor * (axis_alignment_cost + 1))
 
         cost_dict = {
-            "antipodal_cost": 100.0 * antipodal_cost, # reduce as normals seem to be wrong...
-            "grasp_height_cost": 0.0 * grasp_height_cost, # no clutter => don't care about this
-            # Split ratios only make sense when the gripper is close to axis aligned
-            # Use zero weights as split ratios don't mean much after grid search (would need to recompute)
-            "split_ratio_minor_axis_cost": 0 * split_ratio_minor_axis_cost * alignment_factor,
-            "split_ratio_major_axis_cost": 0 * split_ratio_major_axis_cost * alignment_factor,
-            # "proportion_enclosed_cost": 200.0 * proportion_enclosed_cost,  # Captured in antipodal cost but antipodal normals seem wrong
-            "axis_alignment_cost": 100 * axis_alignment_cost,
+            # "antipodal_cost": 100.0 * antipodal_cost, # reduce as normals seem to be wrong...
+            # "grasp_height_cost": 0.0 * grasp_height_cost, # no clutter => don't care about this
+            # # Split ratios only make sense when the gripper is close to axis aligned
+            # # Use zero weights as split ratios don't mean much after grid search (would need to recompute)
+            # "split_ratio_minor_axis_cost": 0 * split_ratio_minor_axis_cost * alignment_factor,
+            # "split_ratio_major_axis_cost": 0 * split_ratio_major_axis_cost * alignment_factor,
+            # # "proportion_enclosed_cost": 200.0 * proportion_enclosed_cost,  # Captured in antipodal cost but antipodal normals seem wrong
+            # "axis_alignment_cost": 100 * axis_alignment_cost,
+
+            "antipodal_cost": 50.0 * antipodal_cost,
+            "antipodal_within_grasp_cost": 100.0 * antipodal_within_grasp_cost,
+            "proportion_enclosed": proportion_enclosed,
+            "proportion_enclosed_cost": proportion_enclosed_cost,
+            "proportion_good_enclosed": proportion_good_enclosed,
+            "proportion_good_enclosed_cost": proportion_good_enclosed_cost,
         }
         cost = sum(cost_dict.values())
         cost_dict["alignment detail (not part of cost)"] = {
@@ -1257,7 +1263,7 @@ class GraspListener():
         VISUALIZE_EACH = False
         VISUALIZE_ALL = False # Heat map of good to bad grasps but too messy for fine detail
         VISUALIZE_ORIG = False
-        VISUALIZE_SORTED_WITH_COSTS = True
+        VISUALIZE_SORTED_WITH_COSTS = False
 
         np.random.seed(random_seed)
 
@@ -1463,7 +1469,8 @@ class GraspListener():
                                                     X_WPnew, 
                                                     within_box_pt_normals, 
                                                     split_ratio,
-                                                    proportion_enclosed
+                                                    proportion_enclosed,
+                                                    pcd_points.shape[0]
                                                 )
                                         
                                         if cost < best_cost:
