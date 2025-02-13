@@ -148,8 +148,8 @@ class SystemIDDataSaver(LeafSystem):
         print("Saving system ID data to disk.")
 
         # Convert to numpy arrays.
-        measured_position_data = np.concatenate(self.measured_positions)
-        measured_torque_data = np.concatenate(self.measured_torques)
+        measured_position_data = np.stack(self.measured_positions)
+        measured_torque_data = np.stack(self.measured_torques)
         sample_times_s = np.array(self.measured_times)
 
         # Remove duplicated samples.
