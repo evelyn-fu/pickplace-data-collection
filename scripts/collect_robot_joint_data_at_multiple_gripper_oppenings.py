@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 
 import numpy as np
+import pycuci as cci
 
 from manipulation.station import LoadScenario
 from pydrake.all import (
@@ -20,6 +21,119 @@ from pydrake.all import (
 from robot_payload_id.control.trajectory import FourierSeriesTrajectory
 from robot_payload_id.utils import FourierSeriesTrajectoryAttributes
 from manipulation.station import MakeHardwareStation, RobotDiagram
+from mmt_gcs.planning.mintime_scs import MintimeSCSWithPathFixing
+from mmt_gcs.planning.corridor_planning_utils import CCICollisionChecker
+from mmt_gcs.planning.region_generation import CCI_inflate_edges_given_pwl_path
+
+PETE_ASSETS = os.path.dirname(__file__) + "/../pete_assets/"
+MMT_GCS_ROOT = os.path.abspath(os.path.join(__file__, "../../../mmt_gcs/"))
+ONLINE_VOXEL_RADIUS = 0.005
+
+
+def get_cci_edge_inflator(verbose=False):
+    cci_parser = cci.URDFParser()
+    cci_parser.register_package("adaptive_decomp", PETE_ASSETS + "assets")
+    cci_parser.register_package("iiwa_description", PETE_ASSETS + "assets/iiwa")
+    cci_parser.register_package(
+        "wsg_description", PETE_ASSETS + "assets/wsg_description"
+    )
+    cci_parser.register_package(
+        "tri_finray_gripper", PETE_ASSETS + "assets/tri_finray_gripper"
+    )
+    cci_parser.parse_directives(PETE_ASSETS + "assets/directives/iiwa7_on_table.yaml")
+    cci_plant = cci_parser.build_plant()
+    cci_mplant = cci_plant.getMinimalPlant()
+    cci_domain = cci.HPolyhedron()
+    cci_domain.MakeBox(
+        cci_plant.getPositionLowerLimits(), cci_plant.getPositionUpperLimits()
+    )
+    cci_objects = {
+        "cci_plant": cci_plant,
+        "cci_mplant": cci_mplant,
+        "cci_domain": cci_domain,
+    }
+
+    cci_fei_opts = cci.FastEdgeInflationOptions()
+    cci_fei_opts.num_particles = 10000
+    cci_fei_opts.max_hyperplanes_per_iteration = 20
+    cci_fei_opts.epsilon = 0.005
+    cci_fei_opts.delta = 0.005
+    cci_fei_opts.max_iterations = 30
+    cci_fei_opts.mixing_steps = 60
+    cci_fei_opts.configurataon_margin = 0.01
+    cci_fei_opts.verbose = verbose
+
+    edge_inflator = cci.CudaEdgeInflator(
+        cci_objects["cci_mplant"],
+        cci_objects["cci_plant"].getRobotGeometryIds(),
+        cci_fei_opts,
+        cci_objects["cci_domain"],
+    )
+
+    return edge_inflator, cci_objects
+
+
+def get_drm_planner(cci_obj, vox=None):
+    drm_pl_opts = cci.DrmPlannerOptions()
+    drm_pl_opts.max_number_planning_attempts = 50
+    drm_pl_opts.try_shortcutting = True
+    drm_pl_opts.online_edge_step_size = 0.005
+
+    drm_planner = cci.DrmPlanner(cci_obj["cci_plant"], drm_pl_opts)
+    drm_planner.LoadRoadmap(
+        MMT_GCS_ROOT
+        + "/tmp/iiwa_hardware/iiwa_roadmap_1_0_0.01_0.2_50000_10_4.5_0.45.rm"
+    )
+
+    if vox is not None:
+        online_voxel_observation = cci.Voxels(vox.T)
+        drm_planner.BuildCollisionSet(online_voxel_observation)
+
+    return drm_planner
+
+
+def scs_trajopt(
+    start, goal, drm_planner, cci_obj, edge_inflator, vox, vel_limits, acc_limits
+):
+    online_voxel_observation = cci.Voxels(vox)
+
+    success, pwl_plan = drm_planner.Plan(
+        start, goal, online_voxel_observation, ONLINE_VOXEL_RADIUS
+    )
+
+    regions, edges = CCI_inflate_edges_given_pwl_path(
+        pwl_plan,
+        edge_inflator,
+        online_voxel_observation,
+        ONLINE_VOXEL_RADIUS,
+        verbose=True,
+    )
+
+    cci_checker = CCICollisionChecker(
+        cci_obj["cci_mplant"],
+        cci_obj["cci_plant"].getRobotGeometryIds(),
+        online_voxel_observation,
+        ONLINE_VOXEL_RADIUS,
+    )
+
+    vel_limits_reflected = [-vel_limits, vel_limits]
+    acc_limits_reflected = [-acc_limits, acc_limits]
+    traj, cost, timing_info, traj_col_free, first_solve_collision_free, collisions = (
+        MintimeSCSWithPathFixing(
+            start,
+            goal,
+            regions,
+            edges,
+            vel_limits_reflected,
+            acc_limits_reflected,
+            cci_checker,
+            edge_inflator,
+            online_voxel_observation,
+            ONLINE_VOXEL_RADIUS,
+        )
+    )
+
+    return traj
 
 
 def main():
@@ -157,26 +271,37 @@ def main():
     # Build and setup simulation
     diagram = builder.Build()
 
+    # Create cci planner.
+    edge_inflator, cci_objects = get_cci_edge_inflator()
+    drm_planner = get_drm_planner(cci_objects)
+
     gripper_closed = 0.0
     gripper_open = 0.1
     gripper_positions = np.linspace(gripper_closed, gripper_open, num_gripper_openings)
 
     for gripper_position in gripper_positions:
-        # Set the gripper position.
-        wsg_traj_source.UpdateTrajectory(
-            PiecewisePolynomial.ZeroOrderHold([0.0, 1.0], [gripper_position] * 2)
-        )
-
-        # TODO: Move to starting position.
+        # Move to starting position
         simulator = Simulator(diagram)
         ApplySimulatorConfig(scenario.simulator_config, simulator)
         simulator.set_target_realtime_rate(1.0)
         simulator.Initialize()
-        # start_positions
-        # traj_source.UpdateTrajectory()
-        # simulator.AdvanceTo()
+        current_positions = station.GetOutputPort("iiwa.position_measured").Eval(
+            simulator.get_context()
+        )
+        traj = scs_trajopt(
+            start=current_positions,
+            goal=start_positions,
+            drm_planner=drm_planner,
+            cci_obj=cci_objects,
+            edge_inflator=edge_inflator,
+            vox=cci.Voxels(),
+            vel_limits=np.ones(num_positions),
+            acc_limits=np.ones(num_positions),
+        )
+        traj_source.UpdateTrajectory(traj)
+        simulator.AdvanceTo(traj.end_time() + 1.0)
 
-        # Excecute system ID trajectory.
+        # Excecute system ID trajectory
         simulator = Simulator(diagram)
         ApplySimulatorConfig(scenario.simulator_config, simulator)
         simulator.set_target_realtime_rate(1.0)
