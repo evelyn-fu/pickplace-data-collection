@@ -209,31 +209,42 @@ class GraspListener():
         sdf = self.compute_sdf_batch(pcd, X_G, visualize)
         return sdf > thre
 
-    def compute_sdf_batch(self, pcd_W_np: np.ndarray, X_Gs: np.ndarray, use_extra_buffer=False, visualize=False):
+    def compute_sdf_batch(self, pcd: np.ndarray, X_Gs: np.ndarray, use_extra_buffer=False, visualize=False):
         """A lookup to the pre-computed sdf of the hand collision model.
         parallelize over the transforms
-        :param X_Gs: n x 4 x 4
-        :param pcd_W_np: n x m x 3
+        :param X_Gs: m x 4 x 4
+        :param pcd_W_np: n x 3
         """
         R = RotationMatrix(RollPitchYaw(np.pi/2, 0, np.pi/2)).matrix()
+        pcd_points = pcd.xyzs().T
 
         # Convert R to a 4x4 transformation matrix (embedding the rotation in a 4x4 matrix)
         R_4x4 = np.eye(4)
         R_4x4[:3, :3] = R
+        R_4x4[3, 3] = 1
 
         # Perform the operation on all matrices in the batch
-        print(X_Gs @ R_4x4)
         X_GWs = np.linalg.inv(X_Gs @ R_4x4)
+        pcd_G_np = (X_GWs[:, :3, :3] @ pcd_points.T) + X_GWs[:, :3, 3, None]
 
-        pcd_G_np = X_GWs[:, :3, :3] @ pcd_W_np + X_GWs[:, :3, [3]]
         # get_distance only requires the last dimension to be 3: ... x 3 -> ... x 1
         if use_extra_buffer:
             dist = self.hand_extra_buffer_collision_model.get_distance(pcd_G_np.transpose(0, 2, 1))
+            gripper_xyzs = self.hand_extra_buffer_collision_model.to_pcd()
         else:
             dist = self.hand_collision_model.get_distance(pcd_G_np.transpose(0, 2, 1))
+            gripper_xyzs = self.hand_extra_buffer_collision_model.to_pcd()
+        
+        if visualize:
+            gripper_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(gripper_xyzs)).voxel_down_sample(0.005)
+            gripper_cloud.paint_uniform_color([1.0, 0.0, 0.0])
+            for i in range(pcd_G_np.shape[0]):
+                scene_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd_G_np[i, :, :].T))
+                o3d.visualization.draw_geometries([gripper_cloud, scene_cloud])
+
         return dist.reshape(len(dist), -1).min(axis=-1)
 
-    def find_minimum_distance(self, pcd, X_WG, thre=0.0, min_range=-0.11, max_range=-0.01, num_samples=10, use_extra_buffer=False, viz=False):
+    def find_minimum_distance(self, pcd, X_WG, thre=0.0, min_range=-0.11, max_range=-0.01, num_samples=10, use_extra_buffer=False, backwards=False, viz=False):
         """
         By doing line search, compute the maximum allowable distance along the z axis before penetration.
         Return the maximum distance, as well as the new transform. Returns (np.nan, None) if nothing is returned after
@@ -241,11 +252,13 @@ class GraspListener():
 
         NOTE: This does not consider the collision scene (e.g. table) but only the object point cloud.
         """
+        if use_extra_buffer:
+            max_range = min_range + (max_range - min_range) / 2
+            num_samples = num_samples // 2
         z_grid = np.linspace(min_range, max_range, num_samples)
         signed_distance = -np.inf
         X_WGnew = RigidTransform()
 
-        always_crosses = False
         X_WGlast = None
         last_signed_distance = np.nan
         for z in z_grid:
@@ -257,7 +270,6 @@ class GraspListener():
             # If the value crossed for the first time, return.
             if signed_distance < thre:
                 if X_WGlast is None:
-                    always_crosses = True
                     break
 
                 if viz:
@@ -284,8 +296,8 @@ class GraspListener():
             last_signed_distance = signed_distance
             X_WGlast = X_WGnew
 
-        if always_crosses and use_extra_buffer: # only do for dual grasp for now to prevent long grasp plan times
-            z_grid = np.linspace(min_range, min_range - (max_range-min_range), num_samples)
+        if backwards:
+            z_grid = np.linspace(min_range, min_range + (max_range-min_range), num_samples)
             X_WGlast = None
             last_signed_distance = np.nan
             for z in z_grid:
@@ -335,18 +347,20 @@ class GraspListener():
 
         # Create a batch of translation vectors for each z value (translation only along the z-axis)
         translations = np.zeros((num_samples, 4, 4))
-        translations[:, 3, 3] = z_grid  # Place each z value in the last column of the 4x4 matrix
+        translations[:, 3, 2] = z_grid  # Place each z value in the last column of the 4x4 matrix
+        translations[:,:3, :3] = np.eye(3)
+        translations[:, 3, 3] = 1
 
         # Apply the transformations in one batch
         X_WGs = X_WG.GetAsMatrix4() @ translations.transpose(0, 2, 1)  # Apply the transformation in batch
         dists = self.compute_sdf_batch(pcd, X_WGs, use_extra_buffer=use_extra_buffer) # n x num_samples x 3
 
-        threshold_met = np.any(dists < thre, axis=-1)
+        threshold_met = dists < thre
         valid_indices = np.where(threshold_met)[0]
 
         if len(valid_indices) > 0:
             first_index = valid_indices[0]
-            return X_WGs[first_index], dists[first_index]
+            return dists[first_index], RigidTransform(X_WGs[first_index])
         
         # If no valid index is found, return np.nan and None
         return np.nan, None
@@ -1186,6 +1200,7 @@ class GraspListener():
         voxel_radius=0.005,
         ground_z = 0.06,
         use_extra_buffer=False,
+        check_backwards=False
     ):
         """
         Compute sorted candidate grasps.
@@ -1510,11 +1525,11 @@ class GraspListener():
                                             use_extra_buffer=use_extra_buffer
                                         )
                                     else:
-                                        # distance, X_WPnew = self.find_minimum_distance_batch(
                                         distance, X_WPnew = self.find_minimum_distance(
                                             merged_pcd, 
                                             X_WPnew, 
                                             use_extra_buffer=use_extra_buffer,
+                                            backwards=check_backwards
                                         )
                                     # If distance cannot be found, go over to the next iteration
                                     if np.isnan(distance):
@@ -1687,8 +1702,7 @@ class GraspListener():
             candidate_lst_by_grasp_origin_pt = np.array(candidate_lst_by_grasp_origin_pt)
             candidate_costs = np.array(candidate_costs)
             sorted_candidate_inds = np.argsort(candidate_costs)[:len(candidate_costs)]
-            print(sorted_candidate_inds)
-            # sorted_candidate_inds = np.argsort(candidate_costs)[:num_samples]
+            
             candidates_filtered = candidate_lst[sorted_candidate_inds]
             candidates_grasp_origin_filtered = candidate_lst_by_grasp_origin_pt[sorted_candidate_inds]
             candidate_costs_filtered = candidate_costs[sorted_candidate_inds]
@@ -1748,6 +1762,7 @@ class GraspListener():
             print("pair selection time:", time.time()-start)
             # List of grasp pairs
             self.grasp_candidates: List[Tuple[np.ndarray]] = pair_lst_sorted
+            self.sorted_costs = [pair_costs[i] for i in sorted_pair_indices]
 
             if VISUALIZE_SORTED_WITH_COSTS:
                 sorted_costs = [pair_costs[i] for i in sorted_pair_indices]
@@ -1796,6 +1811,7 @@ class GraspListener():
             candidate_lst_sorted = [candidate_lst[idx] for idx in sorted_indices]
 
             self.grasp_candidates: List[np.ndarray] = candidate_lst_sorted
+            self.sorted_costs = [candidate_costs[i] for i in sorted_indices]
 
             if VISUALIZE_SORTED_WITH_COSTS:
                 manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
@@ -1831,5 +1847,5 @@ class GraspListener():
     def get_best_grasps(self, candidate_num=-1) -> List[Tuple[np.ndarray]]:
         """Returns a list of the `candidate_num` grasps with the lowest cost."""
         if candidate_num == -1:
-            return self.grasp_candidates
-        return self.grasp_candidates[:candidate_num]
+            return self.grasp_candidates, self.sorted_costs
+        return self.grasp_candidates[:candidate_num], self.sorted_costs[:candidate_num]

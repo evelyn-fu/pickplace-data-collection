@@ -5,6 +5,7 @@ import datetime
 import time
 import open3d as o3d
 import os
+import copy
 from scipy.spatial.transform import Rotation as R
 from perception.teaser import icp  
 from perception.pcd_util import compute_principal_minor_components, crop_connected_points
@@ -1738,7 +1739,7 @@ class TwoGraspPlanner(LeafSystem):
             self.current_manipuland_pcd,
             pcd_with_background,
             candidate_num=1,
-            num_samples=50,
+            num_samples=30,
             random_seed=np.random.randint(1000),
             grasp_type=GraspType.PAIR,
             split_ratio_threshold=0.15,
@@ -1747,7 +1748,31 @@ class TwoGraspPlanner(LeafSystem):
             use_extra_buffer=True
         )
 
-        grasp_pairs = self.grasp_node.get_best_grasps()
+        grasp_pairs, grasp_costs = self.grasp_node.get_best_grasps()
+        grasp_pairs = copy.deepcopy(grasp_pairs)
+        grasp_costs = copy.deepcopy(grasp_costs)
+        while len(grasp_pairs) < 10:
+            print("not enough pairs, sampling more points")
+            self.grasp_node.compute_candidate_grasps(
+                self.current_manipuland_pcd,
+                pcd_with_background,
+                candidate_num=1,
+                num_samples=30,
+                random_seed=np.random.randint(1000),
+                grasp_type=GraspType.PAIR,
+                split_ratio_threshold=0.15,
+                ground_z=platform_height,
+                # is_manual=True,
+                use_extra_buffer=True,
+            )
+            new_grasp_pairs, new_grasp_costs = self.grasp_node.get_best_grasps()
+            print("num new grasps:", len(new_grasp_pairs))
+            grasp_pairs += new_grasp_pairs
+            grasp_costs += new_grasp_costs
+
+            new_sorted_inds = np.argsort(np.array(grasp_costs))
+            grasp_pairs = [grasp_pairs[idx] for idx in new_sorted_inds]
+
         print("grasp pairs:", len(grasp_pairs))
         q = self.get_input_port(self._iiwa_position_index).Eval(context)
         for i in range(len(grasp_pairs)):
