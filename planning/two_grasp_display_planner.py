@@ -564,17 +564,28 @@ yaw_display_traj.append(
 
 q_home = [0.3, 0.4, 0.0, -1.2, 0.0, 1.0, -1.57]
 
-x, y = np.meshgrid(np.arange(0.0, 1.02, 0.02), np.arange(-0.4, 0.42, 0.02))
-ceiling_vox = np.vstack((x.flatten(), y.flatten(), np.zeros_like(x.flatten())))
-ceiling_vox += np.array([0.4, 0.0, 0.9])[:, np.newaxis]
-
-x, y = np.meshgrid(np.arange(0.0, 0.075, 0.3), np.arange(0.0, -0.075, -0.3))
-camera_vox = np.vstack((x.flatten(), y.flatten(), np.zeros_like(x.flatten())))
-camera_vox += np.array([0.8, 0.0, 0.3])[:, np.newaxis]
-
-x, y = np.meshgrid(np.arange(-0.2, 0.075, 0.02), np.arange(0.02, -0.075, -0.36))
-bin_cam_vox = np.vstack((x.flatten(), y.flatten(), np.zeros_like(x.flatten())))
-bin_cam_vox += np.array([-0.0338161, 0.62563, 0.360087])[:, np.newaxis]
+def generate_points_in_cube(center, side_lengths, spacing=0.02):
+    # Extract the center and side lengths
+    x, y, z = center
+    x_side, y_side, z_side = side_lengths
+    
+    # Generate the grid of points along each axis
+    x_points = np.linspace(x - x_side/2, x + x_side/2, int(x_side / spacing) + 1)
+    y_points = np.linspace(y - y_side/2, y + y_side/2, int(y_side / spacing) + 1)
+    z_points = np.linspace(z - z_side/2, z + z_side/2, int(z_side / spacing) + 1)
+    
+    # Create the 3D grid of points
+    grid_x, grid_y, grid_z = np.meshgrid(x_points, y_points, z_points)
+    
+    # Reshape the grid into a Nx3 array
+    points = np.vstack([grid_x.ravel(), grid_y.ravel(), grid_z.ravel()])
+    
+    return points
+    
+ceiling_vox = generate_points_in_cube((0.4, 0.0, 0.9), (0.4, 0.5, 0.001))
+camera_vox = generate_points_in_cube((0.8, 0.0, 0.3), (0.0, 0.15, 0.6))
+bin_cam_vox = generate_points_in_cube((-0.0338161, 0.84, 0.2), (0.02, 0.10, 0.4))
+bin_cam_pole_vox = generate_points_in_cube((-0.07, 0.44, 0.21), (0.04, 0.08, 0.42))
 
 def generate_rectangle_points(corner1, corner2, corner3, corner4, separation, z_offset=0):
     # Function to generate points along an edge
@@ -595,7 +606,7 @@ def generate_rectangle_points(corner1, corner2, corner3, corner4, separation, z_
     
     return rectangle_points
 
-corner1, corner2, corner3, corner4 = (-0.06, 0.42, 0.13), (-0.06, 0.77, 0.13), (0.155, 0.77, 0.13), (0.155, 0.42, 0.13)
+corner1, corner2, corner3, corner4 = (-0.04, 0.42, 0.13), (-0.04, 0.77, 0.13), (0.155, 0.77, 0.13), (0.155, 0.42, 0.13)
 bin_sides_components = []
 for z_offset in np.linspace(0, -0.1, int(0.1/0.005)):
     bin_sides_components.append(generate_rectangle_points(corner1, corner2, corner3, corner4, 0.005, z_offset))
@@ -843,7 +854,7 @@ class TwoGraspPlanner(LeafSystem):
             if context.get_time() > traj_q.end_time() + start_time:
                 state.get_mutable_abstract_state(
                     int(self._mode_index)
-                ).set_value(PlannerState.SCANNING1)
+                ).set_value(PlannerState.PLAN_PICK)
             return
         if mode == PlannerState.PLAN_PICK:
             self.PlanBinPick(context, state, PlannerState.GO_TO_PICK_PREGRASP)
@@ -1114,6 +1125,18 @@ class TwoGraspPlanner(LeafSystem):
         
         self.meshcat.SetObject("bin_cloud", scene_pcd, point_size=0.001, rgba=Rgba(0,1,0,1))
         self.meshcat.SetObject("bin_contents_cloud", bin_pcd, point_size=0.001, rgba=Rgba(1,0,1,1))
+        bin_cam_pcd = PointCloud(bin_cam_vox.shape[1])
+        bin_cam_pcd.mutable_xyzs()[:] = bin_cam_vox
+        self.meshcat.SetObject("bin_cam", bin_cam_pcd, point_size=0.001, rgba=Rgba(1,1,1,1))
+        bin_cam_pole_pcd = PointCloud(bin_cam_pole_vox.shape[1])
+        bin_cam_pole_pcd.mutable_xyzs()[:] = bin_cam_pole_vox
+        self.meshcat.SetObject("bin_cam_pole", bin_cam_pole_pcd, point_size=0.001, rgba=Rgba(1,1,1,1))
+        ceiling_pcd = PointCloud(ceiling_vox.shape[1])
+        ceiling_pcd.mutable_xyzs()[:] = ceiling_vox
+        self.meshcat.SetObject("ceiling_pcd", ceiling_pcd, point_size=0.001, rgba=Rgba(1,1,1,1))
+        camera_pcd = PointCloud(camera_vox.shape[1])
+        camera_pcd.mutable_xyzs()[:] = camera_vox
+        self.meshcat.SetObject("camera_pcd", camera_pcd, point_size=0.001, rgba=Rgba(1,1,1,1))
         self.bin_points = scene_pcd.xyzs()
 
         # get end effector pose from grasp pose
@@ -1150,7 +1173,37 @@ class TwoGraspPlanner(LeafSystem):
             voxel_radius=ONLINE_VOXEL_RADIUS
         )
 
-        grasps = self.grasp_node.get_best_grasps()
+        grasps, grasp_costs = self.grasp_node.get_best_grasps()
+        grasps = copy.deepcopy(grasps)
+        grasp_costs = copy.deepcopy(grasp_costs)
+        while len(grasps) < 5:
+            print(f"not enough grasps ({len(grasps)}), sampling more points")
+            self.grasp_node.compute_candidate_grasps(
+                bin_pcd,
+                scene_pcd,
+                candidate_num=1,
+                num_samples=30,
+                random_seed=np.random.randint(1000),
+                grasp_type=GraspType.TOP,
+                roll_min = 0.0,
+                roll_max = 0.0,
+                num_roll_samples=1,
+                pitch_min = 0.0,
+                pitch_max = 0.0,
+                num_pitch_samples=1,
+                num_yaw_samples=20,
+                point_up=True,
+                split_ratio_threshold=0.0,
+                voxel_radius=ONLINE_VOXEL_RADIUS
+            )
+            new_grasps, new_grasp_costs = self.grasp_node.get_best_grasps()
+            print("num new grasps:", len(new_grasps))
+            grasps += new_grasps
+            grasp_costs += new_grasp_costs
+
+            new_sorted_inds = np.argsort(np.array(grasp_costs))
+            grasps = [grasps[idx] for idx in new_sorted_inds]
+
         print("bin grasps:", len(grasps))
         q = self.get_input_port(self._iiwa_position_index).Eval(context)
         for i in range(len(grasps)):
@@ -1210,14 +1263,14 @@ class TwoGraspPlanner(LeafSystem):
         eff_perpendicular_vec = rot_mat.dot(np.array([1, 0, 0]))
         eff_parallel_vec = rot_mat.dot(np.array([0, 1, 0]))
         perpendicular_score = np.abs(eff_perpendicular_vec @ principal_component)
-        parallel_score = np.abs(eff_parallel_vec @ principal_component)
+        parallel_score = np.abs(eff_parallel_vec @ secondary_component) # idk why the secondary axis is lining up...
         
         if perpendicular_score > parallel_score:
-            print("Using stage_center90")
-            stage_center = stage_center90
-        else:
             print("Using stage_center0")
             stage_center = stage_center0
+        else:
+            print("Using stage_center90")
+            stage_center = stage_center90
 
         manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(bin_pcd.xyzs().T))
         manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
@@ -1284,7 +1337,6 @@ class TwoGraspPlanner(LeafSystem):
                                         cci.Voxels(self.current_manipuland_pcd.xyzs()), 
                                         ONLINE_VOXEL_RADIUS)
         
-        # Planning first grasping trajectory
         self.grasp_node.compute_candidate_grasps(
             self.current_manipuland_pcd,
             pcd_with_background,
@@ -1295,7 +1347,28 @@ class TwoGraspPlanner(LeafSystem):
             split_ratio_threshold=0.65
         )
 
-        grasps = self.grasp_node.get_best_grasps()
+        grasps, grasp_costs = self.grasp_node.get_best_grasps()
+        grasps = copy.deepcopy(grasps)
+        grasp_costs = copy.deepcopy(grasp_costs)
+        while len(grasps) < 5:
+            print(f"not enough grasps ({len(grasps)}), sampling more points")
+            self.grasp_node.compute_candidate_grasps(
+                self.current_manipuland_pcd,
+                pcd_with_background,
+                candidate_num=1,
+                num_samples=30,
+                random_seed=np.random.randint(1000),
+                grasp_type=GraspType.STABLE,
+                split_ratio_threshold=0.65
+            )
+            new_grasps, new_grasp_costs = self.grasp_node.get_best_grasps()
+            print("num new grasps:", len(new_grasps))
+            grasps += new_grasps
+            grasp_costs += new_grasp_costs
+
+            new_sorted_inds = np.argsort(np.array(grasp_costs))
+            grasps = [grasps[idx] for idx in new_sorted_inds]
+
         print("grasps:", len(grasps))
         q = self.get_input_port(self._iiwa_position_index).Eval(context)
         for i in range(len(grasps)):
@@ -1612,7 +1685,7 @@ class TwoGraspPlanner(LeafSystem):
         q_goal = context.get_discrete_state(self._q0_index).get_value().copy() # initial pose
 
         try:
-            obstacles_vox = np.hstack([ceiling_vox, camera_vox, bin_cam_vox, self.current_manipuland_pcd.xyzs()])
+            obstacles_vox = np.hstack([camera_vox, bin_cam_vox, bin_cam_pole_vox, self.current_manipuland_pcd.xyzs()])
 
             traj = scs_trajopt(
                 q, 
@@ -1657,16 +1730,16 @@ class TwoGraspPlanner(LeafSystem):
         q = self.get_input_port(self._iiwa_position_index).Eval(context)
         if mode == PlannerState.SCANNING1:
             q_goal = self.q_pregrasp1
-            obstacles_vox = np.hstack([ceiling_vox, camera_vox, bin_cam_vox, self.current_manipuland_pcd.xyzs()])
+            obstacles_vox = np.hstack([camera_vox, bin_cam_vox, bin_cam_pole_vox, self.current_manipuland_pcd.xyzs()])
         if mode == PlannerState.SCANNING2:
             q_goal = self.q_pregrasp2
-            obstacles_vox = np.hstack([ceiling_vox, camera_vox, bin_cam_vox, self.current_manipuland_pcd.xyzs()])
+            obstacles_vox = np.hstack([camera_vox, bin_cam_vox, bin_cam_pole_vox, self.current_manipuland_pcd.xyzs()])
         if mode == PlannerState.PLAN_PICK:
             q_goal = self.q_bin_pregrasp
-            obstacles_vox = np.hstack([ceiling_vox, camera_vox, bin_cam_vox, self.current_manipuland_pcd.xyzs(), self.bin_points])
+            obstacles_vox = np.hstack([camera_vox, bin_cam_vox, bin_cam_pole_vox, self.current_manipuland_pcd.xyzs(), self.bin_points])
         if mode == PlannerState.PLAN_SYS_ID:
             q_goal = self.q_sys_id_pregrasp
-            obstacles_vox = np.hstack([ceiling_vox, camera_vox, bin_cam_vox, self.current_manipuland_pcd.xyzs()])
+            obstacles_vox = np.hstack([camera_vox, bin_cam_vox, bin_cam_pole_vox, self.current_manipuland_pcd.xyzs()])
 
         try:
             traj = scs_trajopt(
@@ -2032,7 +2105,7 @@ class TwoGraspPlanner(LeafSystem):
             if not self.place_flipped2:
                 self.q_postgrasp2 = q
         
-        obstacles_vox = np.hstack([ceiling_vox, camera_vox, bin_cam_vox])
+        obstacles_vox = np.hstack([ceiling_vox, camera_vox, bin_cam_vox, bin_cam_pole_vox])
 
         traj = scs_trajopt(
             q, 
@@ -2095,7 +2168,7 @@ class TwoGraspPlanner(LeafSystem):
         q_goal = self.excitation_traj_start_q
         
         # traj = PiecewisePolynomial.FirstOrderHold([0.0, 4.0], np.array([q, q_goal]).T)
-        obstacles_vox = np.hstack([camera_vox, bin_cam_vox])
+        obstacles_vox = np.hstack([camera_vox, bin_cam_vox, bin_cam_pole_vox])
 
         traj = scs_trajopt(
             q, 
@@ -2150,9 +2223,9 @@ class TwoGraspPlanner(LeafSystem):
         
         if mode == PlannerState.SYS_ID_GRASP:
             print("going to bin place")
-            obstacles_vox = np.hstack([camera_vox, bin_cam_vox])
+            obstacles_vox = np.hstack([camera_vox, bin_cam_vox, bin_cam_pole_vox])
         else:
-            obstacles_vox = np.hstack([ceiling_vox, camera_vox, bin_cam_vox])
+            obstacles_vox = np.hstack([ceiling_vox, camera_vox, bin_cam_vox, bin_cam_pole_vox])
         traj = scs_trajopt(
             q, 
             q_goal, 

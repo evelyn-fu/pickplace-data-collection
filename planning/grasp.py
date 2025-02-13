@@ -830,10 +830,6 @@ class GraspListener():
         split_axes = np.full((num_points, 3, 3), np.nan)  # Store split axes per point
         lengths = np.full((num_points), np.nan)  # Store lengths per point
         
-        pcd =  o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd_points))
-        pcd.paint_uniform_color([0.0, 0.0, 1.0]) # Gray
-        o3d.visualization.draw_plotly([pcd])
-        
         while not np.all(accounted_for):
             # Select an unaccounted point as center
             unaccounted_indices = np.where(~accounted_for)[0]
