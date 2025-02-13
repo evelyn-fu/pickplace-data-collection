@@ -719,11 +719,16 @@ class TwoGraspPlanner(LeafSystem):
             self.GetCurrentJointPositionTrajectory,
         )
 
-        # output state (for image saving)
+        # output state (for data saving)
         self.DeclareAbstractOutputPort(
             "planner_state", 
             lambda: AbstractValue.Make(PlannerState.START),
             self.GetState
+        )
+        self.DeclareAbstractOutputPort(
+            "pick_state", 
+            lambda: AbstractValue.Make(PickState.IDLE),
+            self.GetPickState
         )
 
         # To get iiwa position
@@ -2209,6 +2214,10 @@ class TwoGraspPlanner(LeafSystem):
     
     def GetState(self, context, output):
         state = context.get_abstract_state(int(self._mode_index)).get_value()
+        output.set_value(state)
+
+    def GetPickState(self, context, output):
+        state = context.get_abstract_state(int(self._pick_mode_index)).get_value()
         output.set_value(state)
 
     def CalcControlMode(self, context, output):

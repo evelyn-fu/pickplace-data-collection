@@ -11,7 +11,7 @@ from pydrake.geometry import (
     RenderLabel,
     Role,
 )
-from pydrake.all import ConstantVectorSource
+from pydrake.all import ConstantVectorSource, VectorLogSink
 from pydrake.systems.analysis import Simulator
 from pydrake.systems.framework import DiagramBuilder
 from pydrake.systems.sensors import CameraInfo
@@ -38,8 +38,10 @@ from pydrake.math import (
     RotationMatrix,
     RollPitchYaw,
 )
+from pathlib import Path
+from planning.two_grasp_display_planner import PlannerState, PickState
 from pydrake.solvers import MosekSolver, GurobiSolver
-
+from pydrake.all import LeafSystem, Value, Context, InputPort
 from planning.two_grasp_display_planner import TwoGraspPlanner
 from planning.turntable_planner import TurntablePlanner
 from perception.image_saver import ImageSaver
@@ -87,6 +89,85 @@ def get_regions_static(scenario_path, dirstr):
     else:
         print("No solvers available")
 
+class SystemIDDataSaver(LeafSystem):
+    def __init__(
+            self, output_dir: str
+        ):
+        super().__init__()
+        self.output_dir = Path(output_dir)
+        self.output_dir.mkdir(exist_ok=True, parents=True)
+
+        # Each array has shape (7,)
+        self.measured_positions: list[np.ndarray] = []
+        self.measured_torques: list[np.ndarray] = []
+        self.measured_times: list[float] = []
+        self.current_start_time = None
+        self.object_saved = False
+
+        self._planner_state_input_port = self.DeclareAbstractInputPort(
+            "planner_state", model_value=Value(PlannerState.START))
+        self._pick_state_input_port = self.DeclareAbstractInputPort(
+            "pick_state", model_value=Value(PickState.IDLE))
+
+        self._iiwa_position_input_port = self.DeclareVectorInputPort(
+            "iiwa.position_measured", size=7
+        )
+        self._iiwa_torque_input_port = self.DeclareVectorInputPort(
+            "iiwa.torque_measured", size=7
+        )
+
+        self.DeclarePerStepPublishEvent(self.save_logs)
+
+        
+    def save_logs(self, context: Context):
+        mode = self._planner_state_input_port.Eval(context)
+        pick_mode = self._pick_state_input_port.Eval(context)
+        if mode == PlannerState.RESET and not self.object_saved:
+            self.save_to_disk()
+            self.measured_positions = []
+            self.measured_torques = []
+            self.measured_times = []
+            self.object_saved = True
+            self.current_start_time = None
+        elif mode == PlannerState.START:
+            self.object_saved = False
+        elif mode == PlannerState.SYS_ID_GRASP and pick_mode == PickState.DISPLAY:
+            # Store current positions and torques.
+            positions = self._iiwa_position_input_port.Eval(context)
+            torques = self._iiwa_torque_input_port.Eval(context)
+            time = context.get_time()
+            if self.current_start_time is None:
+                self.current_start_time = time
+            traj_time = time - self.current_start_time # Want trajectory data to start at zero time
+            
+            self.measured_positions.append(positions)
+            self.measured_torques.append(torques)
+            self.measured_times.append(traj_time)
+
+    def save_to_disk(self):
+        print("Saving system ID data to disk.")
+
+        # Convert to numpy arrays.
+        measured_position_data = np.concatenate(self.measured_positions)
+        measured_torque_data = np.concatenate(self.measured_torques)
+        sample_times_s = np.array(self.measured_times)
+
+        # Remove duplicated samples.
+        _, unique_indices = np.unique(sample_times_s, return_index=True)
+        measured_position_data = measured_position_data[unique_indices]
+        measured_torque_data = measured_torque_data[unique_indices]
+        sample_times_s = sample_times_s[unique_indices]
+        if len(unique_indices) < len(sample_times_s):
+            print(f"{len(unique_indices)} out of {len(sample_times_s)} data points are unique!")
+
+        # Save to disk.
+        np.save(self.output_dir / "joint_positions.npy", measured_position_data)
+        np.save(self.output_dir / "joint_torques.npy", measured_torque_data)
+        np.save(self.output_dir / "sample_times_s.npy", sample_times_s)
+
+        print("Saved system id data to", self.output_dir)
+
+
 def start_scenario(
         dirstr = "temp", 
         scenario_path="scenario_data_grasping.yml", 
@@ -114,6 +195,7 @@ def start_scenario(
     # )
     station = builder.AddSystem(MakeHardwareStation(scenario, meshcat, hardware=False))
     if use_hardware:
+        scenario.plant_config.time_step = 5e-3 # Controller frequency
         external_station = builder.AddSystem(MakeHardwareStation(scenario, meshcat, hardware=True))
     plant = station.GetSubsystemByName("plant")
     # plant = station.get_plant()
@@ -154,6 +236,7 @@ def start_scenario(
             builder.Connect(station.GetOutputPort("camera0.depth_image"), img_saver.GetInputPort("depth_in"))
             builder.Connect(station.GetOutputPort("body_poses"), img_saver.GetInputPort("body_poses"))
 
+    sys_id_saver = builder.AddSystem(SystemIDDataSaver(output_dir=os.path.join(dirstr, "system_id_data")))
 
     # initialize point cloud output ports and save camera instrinsics
     if not use_hardware:
@@ -305,6 +388,18 @@ def start_scenario(
     if save_imgs:
         builder.Connect(planner.GetOutputPort("planner_state"), img_saver.GetInputPort("planner_state"))
 
+    # Connect system ID data saver ports.
+    builder.Connect(planner.GetOutputPort("planner_state"), sys_id_saver.GetInputPort("planner_state"))
+    builder.Connect(planner.GetOutputPort("pick_state"), sys_id_saver.GetInputPort("pick_state"))
+    builder.Connect(
+        external_station.GetOutputPort("iiwa.position_measured"),
+        sys_id_saver.GetInputPort("iiwa.position_measured"),
+    )
+    builder.Connect(
+        external_station.GetOutputPort("iiwa.torque_measured"),
+        sys_id_saver.GetInputPort("iiwa.torque_measured"),
+    )
+
     if use_hardware:
         # Connect the output of external station to the input of internal station
         builder.Connect(
@@ -374,6 +469,25 @@ def start_scenario(
     )
     builder.Connect(
         wsg_force_source.get_output_port(), station.GetInputPort("wsg.force_limit")
+    )
+
+    # Set up logging for system ID.
+    num_positions = 7
+    measured_position_logger: VectorLogSink = builder.AddNamedSystem(
+        "measured_position_logger",
+        VectorLogSink(num_positions, publish_period=scenario.plant_config.time_step),
+    )
+    builder.Connect(
+        station.GetOutputPort("iiwa.position_measured"),
+        measured_position_logger.get_input_port(),
+    )
+    measured_torque_logger: VectorLogSink = builder.AddNamedSystem(
+        "measured_torque_logger",
+        VectorLogSink(num_positions, publish_period=scenario.plant_config.time_step),
+    )
+    builder.Connect(
+        station.GetOutputPort("iiwa.torque_measured"),
+        measured_torque_logger.get_input_port(),
     )
 
     # Set up differential inverse kinematics.
@@ -475,7 +589,7 @@ def start_scenario(
     meshcat.AddButton("Stop Simulation", "Escape")
     print("Press Escape to stop the simulation")
     while meshcat.GetButtonClicks("Stop Simulation") < 1 and not planner.done:
-        simulator.AdvanceTo(simulator.get_context().get_time() + 60.0)
+        simulator.AdvanceTo(simulator.get_context().get_time() + 5000.0)
 
     meshcat.DeleteButton("Stop Simulation")
 

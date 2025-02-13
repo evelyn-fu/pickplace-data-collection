@@ -15,13 +15,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--model_url",
-        default="file://./home/real2sim/src/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_buffer.sdf",
+        default="file://./home/real2sim/src/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_large_buffer.sdf",
         help="url to object model file",
         nargs='?',
     )
     parser.add_argument(
         "--pkl_file",
-        default="gripper_sdf.pkl",
+        default="large_gripper_sdf.pkl",
         help="pkl file path to save sdf to",
         nargs='?',
     )
