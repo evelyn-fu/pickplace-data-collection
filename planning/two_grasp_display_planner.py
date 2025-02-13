@@ -720,11 +720,16 @@ class TwoGraspPlanner(LeafSystem):
             self.GetCurrentJointPositionTrajectory,
         )
 
-        # output state (for image saving)
+        # output state (for data saving)
         self.DeclareAbstractOutputPort(
             "planner_state", 
             lambda: AbstractValue.Make(PlannerState.START),
             self.GetState
+        )
+        self.DeclareAbstractOutputPort(
+            "pick_state", 
+            lambda: AbstractValue.Make(PickState.IDLE),
+            self.GetPickState
         )
 
         # To get iiwa position
@@ -789,6 +794,7 @@ class TwoGraspPlanner(LeafSystem):
 
         self.models_path = models_path
         self.savedir = dirstr
+        self.system_id_savedir = os.path.join(dirstr, "system_id_data")
         self.done = False
 
         self.pcd0 = None
@@ -1312,6 +1318,19 @@ class TwoGraspPlanner(LeafSystem):
             X_WG_sys_id = RigidTransform(X_WG)
             break
 
+        X_WE = X_WG_sys_id.multiply(X_GE) # E = link 7 frame
+        X_EW = X_WE.inverse()
+
+        # Save manipuland pcd and grasp for system ID alignment.
+        # TODO: Express manipuland_cloud_points in link 7 frame
+        manipuland_cloud_points = self.current_manipuland_pcd.xyzs() # X_WP, Shape (3, N)
+        manipuland_cloud_points_link7_frame = X_EW @ manipuland_cloud_points # X_EP, Shape (3, N)
+        manipuland_cloud_points_link7_frame = manipuland_cloud_points_link7_frame.T # Shape (N,3)
+        np.save(
+            os.path.join(self.system_id_savedir, "manipuland_cloud_link7_frame.npy"),
+            manipuland_cloud_points_link7_frame,
+        )
+
         manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(self.current_manipuland_pcd.xyzs().T))
         manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
 
@@ -1328,7 +1347,6 @@ class TwoGraspPlanner(LeafSystem):
         input("press enter to execute pick")
 
         # Solve for pick trajectory before moving
-        X_WE = X_WG_sys_id.multiply(X_GE)
         X_G = {
             "pick": X_WE,
             "prepick": X_WE @ X_GgraspGpregrasp,
@@ -2234,6 +2252,10 @@ class TwoGraspPlanner(LeafSystem):
     
     def GetState(self, context, output):
         state = context.get_abstract_state(int(self._mode_index)).get_value()
+        output.set_value(state)
+
+    def GetPickState(self, context, output):
+        state = context.get_abstract_state(int(self._pick_mode_index)).get_value()
         output.set_value(state)
 
     def CalcControlMode(self, context, output):

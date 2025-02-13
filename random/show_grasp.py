@@ -35,9 +35,9 @@ builder = DiagramBuilder()
 plant, scene_graph = AddMultibodyPlantSceneGraph(builder, time_step=0.0005)
 parser = Parser(plant)
 ConfigureParser(parser)
-parser.AddModelsFromUrl("file://./home/real2sim/src/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_buffer.sdf")
+parser.AddModelsFromUrl("file://./home/real2sim/src/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_large_buffer.sdf")
 # parser.AddModelsFromUrl("file://./home/real2sim/src/Real2SimObjectManipulation/models/box_2.sdf")
-parser.AddModelsFromUrl("file://./home/real2sim/src/Real2SimObjectManipulation/models/box.sdf")
+# parser.AddModelsFromUrl("file://./home/real2sim/src/Real2SimObjectManipulation/models/box.sdf")
 # parser.AddModelsFromUrl("package://drake_models/ycb/006_mustard_bottle.sdf")
 plant.Finalize()
 
@@ -105,36 +105,36 @@ rot_to_axes, _ = R.align_vectors(
     np.array([z_axis, x_axis]), np.stack([eff_vertical_vec, eff_horizontal_vec])
 )
 
-# align eff_vertical_vec is blue, eff_horizontal_vec is red
-AddMeshcatTriad(meshcat, "eff_vec", X_PT=RigidTransform(RotationMatrix(rot_to_axes.as_matrix().T),
-                        t))
+# # align eff_vertical_vec is blue, eff_horizontal_vec is red
+# AddMeshcatTriad(meshcat, "eff_vec", X_PT=RigidTransform(RotationMatrix(rot_to_axes.as_matrix().T),
+#                         t))
 
-align_grasp_axis = [4.396e-02, 9.990e-01, 4.446e-04]
-align_minor_axis = [-0.999,  0.044 , 0.002]
-z_axis, x_axis = [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]
-rot_to_axes, _ = R.align_vectors(
-    np.array([z_axis, x_axis]), np.stack([align_grasp_axis, align_minor_axis])
-)
-# align grasp axis is blue, align minor axis is red
-AddMeshcatTriad(meshcat, "align_grasp_axis", X_PT=RigidTransform(RotationMatrix(rot_to_axes.as_matrix().T),
-                        [0.6, 0.0, 0.12]))
+# align_grasp_axis = [4.396e-02, 9.990e-01, 4.446e-04]
+# align_minor_axis = [-0.999,  0.044 , 0.002]
+# z_axis, x_axis = [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]
+# rot_to_axes, _ = R.align_vectors(
+#     np.array([z_axis, x_axis]), np.stack([align_grasp_axis, align_minor_axis])
+# )
+# # align grasp axis is blue, align minor axis is red
+# AddMeshcatTriad(meshcat, "align_grasp_axis", X_PT=RigidTransform(RotationMatrix(rot_to_axes.as_matrix().T),
+#                         [0.6, 0.0, 0.12]))
 
-gripper_axis_alignment_cost = -np.abs(eff_vertical_vec @ align_grasp_axis)  # want vertical axis of gripper to face towards desired axis, larger worse
-gripper_minor_alignment_cost = -np.abs(eff_horizontal_vec @ align_minor_axis)
+# gripper_axis_alignment_cost = -np.abs(eff_vertical_vec @ align_grasp_axis)  # want vertical axis of gripper to face towards desired axis, larger worse
+# gripper_minor_alignment_cost = -np.abs(eff_horizontal_vec @ align_minor_axis)
 
-print(gripper_axis_alignment_cost, gripper_minor_alignment_cost)
+# print(gripper_axis_alignment_cost, gripper_minor_alignment_cost)
 
-# X_mustard = RigidTransform(RotationMatrix(RollPitchYaw(-np.pi/2, 0, np.pi/2)), [0.4, 0.0, 0.16])
-# X_WGfix = RigidTransform(RotationMatrix(RollPitchYaw(np.pi/2, 0, np.pi/2)))
-# rot_180 = RigidTransform(RotationMatrix(RollPitchYaw(0, np.pi, 0)))
+# # X_mustard = RigidTransform(RotationMatrix(RollPitchYaw(-np.pi/2, 0, np.pi/2)), [0.4, 0.0, 0.16])
+# # X_WGfix = RigidTransform(RotationMatrix(RollPitchYaw(np.pi/2, 0, np.pi/2)))
+# # rot_180 = RigidTransform(RotationMatrix(RollPitchYaw(0, np.pi, 0)))
 context = diagram.CreateDefaultContext()
-plant_context = plant.GetMyContextFromRoot(context)
-plant.SetFreeBodyPose(plant_context, plant.GetBodyByName("body"), X_G)
-# plant.SetFreeBodyPose(plant_context, plant.GetBodyByName("base_link_mustard"), X_mustard)
-# X_box2 = RigidTransform(RotationMatrix(), [0.4, 0.0, 0.07])
-# plant.SetFreeBodyPose(plant_context, plant.GetBodyByName("box2_body"), X_box2)
-X_box = RigidTransform(RotationMatrix(), [0.4, 0.0, 0.0])
-plant.SetFreeBodyPose(plant_context, plant.GetBodyByName("box_body"), X_box)
+# plant_context = plant.GetMyContextFromRoot(context)
+# plant.SetFreeBodyPose(plant_context, plant.GetBodyByName("body"), X_G)
+# # plant.SetFreeBodyPose(plant_context, plant.GetBodyByName("base_link_mustard"), X_mustard)
+# # X_box2 = RigidTransform(RotationMatrix(), [0.4, 0.0, 0.07])
+# # plant.SetFreeBodyPose(plant_context, plant.GetBodyByName("box2_body"), X_box2)
+# X_box = RigidTransform(RotationMatrix(), [0.4, 0.0, 0.0])
+# plant.SetFreeBodyPose(plant_context, plant.GetBodyByName("box_body"), X_box)
 
 diagram.ForcedPublish(context)
 
