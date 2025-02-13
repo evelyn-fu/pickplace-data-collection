@@ -1,3 +1,17 @@
+"""
+This script collects joint position and torque data at multiple gripper openings. The
+data is collected multiple times at each gripper opening.
+
+The output is saved to a directory with the gripper position as the subdirectory name
+with the following format:
+
+<save_data_path>/gripper_position_<gripper_position>/
+    run_<run_idx>/
+        joint_positions.npy
+        joint_torques.npy
+        sample_times_s.npy
+"""
+
 import argparse
 import logging
 import os
@@ -17,6 +31,7 @@ from pydrake.all import (
     VectorLogSink,
     StartMeshcat,
 )
+from tqdm import tqdm
 
 from robot_payload_id.control.trajectory import FourierSeriesTrajectory
 from robot_payload_id.utils import FourierSeriesTrajectoryAttributes
@@ -178,6 +193,12 @@ def main():
         help="The number of gripper openings to collect data at.",
     )
     parser.add_argument(
+        "--num_runs",
+        type=int,
+        default=10,
+        help="The number of times to collect data at each gripper opening.",
+    )
+    parser.add_argument(
         "--log_level",
         type=str,
         default="INFO",
@@ -192,6 +213,7 @@ def main():
     use_hardware = args.use_hardware
     time_horizon = args.time_horizon
     num_gripper_openings = args.num_gripper_openings
+    num_runs = args.num_runs
 
     builder = DiagramBuilder()
     scenario = LoadScenario(filename=scenario_path)
@@ -279,85 +301,93 @@ def main():
     gripper_open = 0.1
     gripper_positions = np.linspace(gripper_closed, gripper_open, num_gripper_openings)
 
-    for gripper_position in gripper_positions:
-        # Move to starting position
-        simulator = Simulator(diagram)
-        ApplySimulatorConfig(scenario.simulator_config, simulator)
-        simulator.set_target_realtime_rate(1.0)
-        simulator.Initialize()
-        current_positions = station.GetOutputPort("iiwa.position_measured").Eval(
-            simulator.get_context()
-        )
-        traj = scs_trajopt(
-            start=current_positions,
-            goal=start_positions,
-            drm_planner=drm_planner,
-            cci_obj=cci_objects,
-            edge_inflator=edge_inflator,
-            vox=cci.Voxels(),
-            vel_limits=np.ones(num_positions),
-            acc_limits=np.ones(num_positions),
-        )
-        traj_source.UpdateTrajectory(traj)
-        simulator.AdvanceTo(traj.end_time() + 1.0)
-
-        # Excecute system ID trajectory
-        simulator = Simulator(diagram)
-        ApplySimulatorConfig(scenario.simulator_config, simulator)
-        simulator.set_target_realtime_rate(1.0)
-        simulator.Initialize()
-        traj_source.UpdateTrajectory(excitation_traj)
-        simulator.AdvanceTo(excitation_traj.end_time() + 1.0)
-
-        # Save data
-        measured_position_data = (
-            measured_position_logger.FindLog(simulator.get_context()).data().T
-        )
-        measured_torque_data = (
-            measured_torque_logger.FindLog(simulator.get_context()).data().T
-        )
-        sample_times_s = measured_position_logger.FindLog(
-            simulator.get_context()
-        ).sample_times()
-
-        # Only keep data during excitation trajectory execution
-        data_start_time = 0.0
-        excitation_traj_end_time = excitation_traj.end_time()
-        excitation_traj_start_idx = np.argmax(sample_times_s >= data_start_time)
-        excitation_traj_end_idx = np.argmax(sample_times_s >= excitation_traj_end_time)
-        measured_position_data = measured_position_data[
-            excitation_traj_start_idx:excitation_traj_end_idx
-        ]
-        measured_torque_data = measured_torque_data[
-            excitation_traj_start_idx:excitation_traj_end_idx
-        ]
-        sample_times_s = sample_times_s[
-            excitation_traj_start_idx:excitation_traj_end_idx
-        ]
-        # Shift sample times to start at 0
-        sample_times_s -= sample_times_s[0]
-
-        # Remove duplicated samples
-        _, unique_indices = np.unique(sample_times_s, return_index=True)
-        if len(unique_indices) < len(sample_times_s):
-            print(
-                f"{len(unique_indices)} out of {len(sample_times_s)} data points "
-                "are unique!"
+    for gripper_position in tqdm(gripper_positions):
+        for run_idx in range(num_runs):
+            # Move to starting position
+            simulator = Simulator(diagram)
+            ApplySimulatorConfig(scenario.simulator_config, simulator)
+            simulator.set_target_realtime_rate(1.0)
+            simulator.Initialize()
+            current_positions = station.GetOutputPort("iiwa.position_measured").Eval(
+                simulator.get_context()
             )
-            measured_position_data = measured_position_data[unique_indices]
-            measured_torque_data = measured_torque_data[unique_indices]
-            sample_times_s = sample_times_s[unique_indices]
+            traj = scs_trajopt(
+                start=current_positions,
+                goal=start_positions,
+                drm_planner=drm_planner,
+                cci_obj=cci_objects,
+                edge_inflator=edge_inflator,
+                vox=cci.Voxels(),
+                vel_limits=np.ones(num_positions),
+                acc_limits=np.ones(num_positions),
+            )
+            traj_source.UpdateTrajectory(traj)
+            simulator.AdvanceTo(traj.end_time() + 1.0)
 
-        # Save data
-        output_dir = save_data_path / f"gripper_position_{gripper_position:.2f}"
-        np.save(output_dir / "joint_positions.npy", measured_position_data)
-        np.save(output_dir / "joint_torques.npy", measured_torque_data)
-        np.save(output_dir / "sample_times_s.npy", sample_times_s)
+            # Excecute system ID trajectory
+            simulator = Simulator(diagram)
+            ApplySimulatorConfig(scenario.simulator_config, simulator)
+            simulator.set_target_realtime_rate(1.0)
+            simulator.Initialize()
+            traj_source.UpdateTrajectory(excitation_traj)
+            simulator.AdvanceTo(excitation_traj.end_time() + 1.0)
 
-        print(
-            f"Collected {len(sample_times_s)} data samples at gripper position "
-            f"{gripper_position:.2f}."
-        )
+            # Save data
+            measured_position_data = (
+                measured_position_logger.FindLog(simulator.get_context()).data().T
+            )
+            measured_torque_data = (
+                measured_torque_logger.FindLog(simulator.get_context()).data().T
+            )
+            sample_times_s = measured_position_logger.FindLog(
+                simulator.get_context()
+            ).sample_times()
+
+            # Only keep data during excitation trajectory execution
+            data_start_time = 0.0
+            excitation_traj_end_time = excitation_traj.end_time()
+            excitation_traj_start_idx = np.argmax(sample_times_s >= data_start_time)
+            excitation_traj_end_idx = np.argmax(
+                sample_times_s >= excitation_traj_end_time
+            )
+            measured_position_data = measured_position_data[
+                excitation_traj_start_idx:excitation_traj_end_idx
+            ]
+            measured_torque_data = measured_torque_data[
+                excitation_traj_start_idx:excitation_traj_end_idx
+            ]
+            sample_times_s = sample_times_s[
+                excitation_traj_start_idx:excitation_traj_end_idx
+            ]
+            # Shift sample times to start at 0
+            sample_times_s -= sample_times_s[0]
+
+            # Remove duplicated samples
+            _, unique_indices = np.unique(sample_times_s, return_index=True)
+            if len(unique_indices) < len(sample_times_s):
+                print(
+                    f"{len(unique_indices)} out of {len(sample_times_s)} data points "
+                    "are unique!"
+                )
+                measured_position_data = measured_position_data[unique_indices]
+                measured_torque_data = measured_torque_data[unique_indices]
+                sample_times_s = sample_times_s[unique_indices]
+
+            # Save data
+            output_dir = (
+                save_data_path
+                / f"gripper_position_{gripper_position:.2f}"
+                / f"run_{run_idx}"
+            )
+            output_dir.mkdir(parents=True, exist_ok=True)
+            np.save(output_dir / "joint_positions.npy", measured_position_data)
+            np.save(output_dir / "joint_torques.npy", measured_torque_data)
+            np.save(output_dir / "sample_times_s.npy", sample_times_s)
+
+            print(
+                f"Collected {len(sample_times_s)} data samples at gripper position "
+                f"{gripper_position:.2f} and run {run_idx}."
+            )
 
 
 if __name__ == "__main__":
