@@ -601,8 +601,8 @@ for z_offset in np.linspace(0, -0.1, int(0.1/0.005)):
 bin_sides_vox = np.concatenate(bin_sides_components, axis=0).T
 
 # Stage center transforms are used for placing the object onto the workspace after bin picking.
-stage_center0 = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi/2)), [0.5, 0.0, 0.1])
-stage_center90 = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0.0)), [0.5, 0.0, 0.0])
+stage_center0 = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi/2)), [0.45, 0.0, 0.1])
+stage_center90 = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0.0)), [0.45, 0.0, 0.0])
 
 bin_depth = 0.08
 platform_height = 0.070 # use value a bit higher than it is to reduce pcd noise
@@ -836,7 +836,7 @@ class TwoGraspPlanner(LeafSystem):
             if context.get_time() > traj_q.end_time() + start_time:
                 state.get_mutable_abstract_state(
                     int(self._mode_index)
-                ).set_value(PlannerState.PLAN_PICK)
+                ).set_value(PlannerState.SCANNING1)
             return
         if mode == PlannerState.PLAN_PICK:
             self.PlanBinPick(context, state, PlannerState.GO_TO_PICK_PREGRASP)
@@ -1128,7 +1128,7 @@ class TwoGraspPlanner(LeafSystem):
             bin_pcd,
             scene_pcd,
             candidate_num=1,
-            num_samples=50,
+            num_samples=15,
             random_seed=np.random.randint(1000),
             grasp_type=GraspType.TOP,
             roll_min = 0.0,
@@ -1182,7 +1182,11 @@ class TwoGraspPlanner(LeafSystem):
         self.meshcat.SetObject("cropped_cloud", cropped_cloud, point_size=0.001, rgba=Rgba(0,0,1,1))
 
         flattened_cloud = np.copy(cropped_cloud.xyzs())
-        flattened_cloud[:,2] = np.mean(flattened_cloud[:,2])
+        flattened_cloud[2,:] = np.clip(
+            flattened_cloud[2,:],
+            np.max(flattened_cloud[2,:]) - (np.max(flattened_cloud[2,:]) - np.min(flattened_cloud[2,:])) / 10.0,
+            np.max(flattened_cloud[2,:])
+        )
         principal_component, secondary_component, _ = compute_principal_minor_components(cropped_cloud.xyzs().T)
         
         # visualize axes, principal axis is z axis (blue), secondary axis is x axis (red)
@@ -1374,7 +1378,7 @@ class TwoGraspPlanner(LeafSystem):
         start = time.time()
         # Get manipuland pcd 
         cloud0 = self.GetInputPort("cloud_front").Eval(context)
-        X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[-0.017, -0.03, 0.0])
+        X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[-0.017, -0.025, 0.0])
         transformed_xyzs = X_adjust @ cloud0.xyzs()
         cloud0.mutable_xyzs()[:] = transformed_xyzs
         pcd0 = cloud0.Crop(lower_xyz=[0.23, -0.17, platform_height], upper_xyz=[0.7, 0.17, 0.27])
@@ -1382,7 +1386,7 @@ class TwoGraspPlanner(LeafSystem):
         pcd0.FlipNormalsTowardPoint(self._X_WC0.translation())
 
         cloud1 = self.GetInputPort("cloud_back_left").Eval(context)
-        X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[-0.03, -0.005, 0.0])
+        X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[-0.03, 0.0, 0.0])
         transformed_xyzs = X_adjust @ cloud1.xyzs()
         cloud1.mutable_xyzs()[:] = transformed_xyzs
         pcd1 = cloud1.Crop(lower_xyz=[0.23, -0.17, platform_height], upper_xyz=[0.7, 0.17, 0.27])
@@ -1390,7 +1394,7 @@ class TwoGraspPlanner(LeafSystem):
         pcd1.FlipNormalsTowardPoint(self._X_WC2.translation()) # I screwed up the cameras somewhere so the left anf right are flipped, need to fix
 
         cloud2 = self.GetInputPort("cloud_back_right").Eval(context)
-        X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[0.0, 0.0, 0.0])
+        X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[0.0, 0.005, 0.0])
         transformed_xyzs = X_adjust @ cloud2.xyzs()
         cloud2.mutable_xyzs()[:] = transformed_xyzs
         pcd2 = cloud2.Crop(lower_xyz=[0.23, -0.17, platform_height], upper_xyz=[0.7, 0.17, 0.27])
@@ -1491,10 +1495,10 @@ class TwoGraspPlanner(LeafSystem):
             )
             gripper2_cloud.paint_uniform_color([0.0, 1.0, 0.0])
 
-            viz_geoms = [old_manipuland_cloud, old_gripper2_cloud, manipuland_cloud, gripper2_cloud]
-            o3d.visualization.draw_plotly(viz_geoms)
-            viz_geoms = [old_manipuland_cloud, transformed_manipuland_cloud, manipuland_cloud, numpy_transformed_manipuland_cloud]
-            o3d.visualization.draw_plotly(viz_geoms)
+            # viz_geoms = [old_manipuland_cloud, old_gripper2_cloud, manipuland_cloud, gripper2_cloud]
+            # o3d.visualization.draw_plotly(viz_geoms)
+            # viz_geoms = [old_manipuland_cloud, transformed_manipuland_cloud, manipuland_cloud, numpy_transformed_manipuland_cloud]
+            # o3d.visualization.draw_plotly(viz_geoms)
 
             if translation_magnitude > 0.01 or rotation_magnitude > np.pi * 10.0/180.0:
                 print("Transformation is too large, realigning grasp 2")
@@ -1739,7 +1743,8 @@ class TwoGraspPlanner(LeafSystem):
             grasp_type=GraspType.PAIR,
             split_ratio_threshold=0.15,
             ground_z=platform_height,
-            # is_manual=True
+            # is_manual=True,
+            use_extra_buffer=True
         )
 
         grasp_pairs = self.grasp_node.get_best_grasps()
@@ -1794,13 +1799,13 @@ class TwoGraspPlanner(LeafSystem):
         manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(self.current_manipuland_pcd.xyzs().T))
         manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
 
-        gripper1_xyzs = self.grasp_node.hand_collision_model.to_pcd()
+        gripper1_xyzs = self.grasp_node.hand_extra_buffer_collision_model.to_pcd()
         gripper1_cloud = o3d.geometry.PointCloud(
             o3d.utility.Vector3dVector(gripper1_xyzs)).voxel_down_sample(ONLINE_VOXEL_RADIUS).transform(
                 (X_WG1 @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0]).GetAsMatrix4()))
         gripper1_cloud.paint_uniform_color([1.0, 0.0, 0.0])
 
-        gripper2_xyzs = self.grasp_node.hand_collision_model.to_pcd()
+        gripper2_xyzs = self.grasp_node.hand_extra_buffer_collision_model.to_pcd()
         gripper2_cloud = o3d.geometry.PointCloud(
             o3d.utility.Vector3dVector(gripper2_xyzs)).voxel_down_sample(ONLINE_VOXEL_RADIUS).transform(
                 (X_WG2 @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0]).GetAsMatrix4()))

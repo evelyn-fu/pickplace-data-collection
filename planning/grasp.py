@@ -45,12 +45,17 @@ class GraspType(Enum):
 class GraspListener():
     """The class responsible for computing and evaluation grasp candidates."""
 
-    def __init__(self, hand_finger_path=None, gripper_model_path=None):
+    def __init__(self, hand_finger_path=None, hand_finger_extra_buffer_path=None, gripper_model_path=None):
         if hand_finger_path == None:
             hand_finger_path = os.path.abspath(
                 os.path.join(os.path.dirname( __file__ ), '..', 'scenario_datas', 'gripper_sdf.pkl'))
+        if hand_finger_extra_buffer_path == None:
+            hand_finger_extra_buffer_path = os.path.abspath(
+                os.path.join(os.path.dirname( __file__ ), '..', 'scenario_datas', 'large_gripper_sdf.pkl'))
         print("Loading hand collision model from ", hand_finger_path)
         self.hand_collision_model = SignedDensityField.from_pkl(hand_finger_path)
+        print("Loading extra buffer hand collision model from ", hand_finger_extra_buffer_path)
+        self.hand_extra_buffer_collision_model = SignedDensityField.from_pkl(hand_finger_extra_buffer_path)
         # self.hand_collision_model.visualize()
 
         builder = DiagramBuilder()
@@ -72,10 +77,10 @@ class GraspListener():
         gui.Application.instance.initialize()
 
 
-    def check_collision(self, pcd, X_G, visualize=False):
+    def check_collision(self, pcd, X_G, use_extra_buffer=False, visualize=False):
         """Returns true if not in collision and false otherwise."""
         thre = 0.0
-        sdf = self.compute_sdf_fast(pcd, X_G, visualize)
+        sdf = self.compute_sdf_fast(pcd, X_G, use_extra_buffer, visualize)
         return sdf > thre
 
     def compute_darboux_frame(self, point, normal, pcd, kdtree, ball_radius=0.002, max_nn=50):
@@ -170,20 +175,26 @@ class GraspListener():
 
         return pcd_sdf
 
-    def compute_sdf_fast(self, pcd, X_G, visualize=False):
+    def compute_sdf_fast(self, pcd, X_G, use_extra_buffer=False, visualize=False):
         """A lookup to the pre-computed sdf of the hand collision model."""
         pcd_W_np = pcd.xyzs()
         # RollPitchYaw(np.pi/2, 0, np.pi/2) is world to wsg specific transform.
         # WSG y axis needs to be aligned with world -z.
         X_GW = (X_G @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0])).inverse()
         pcd_G_np = X_GW.multiply(pcd_W_np)
-        dist = self.hand_collision_model.get_distance(pcd_G_np.T)
+        if use_extra_buffer:
+            dist = self.hand_extra_buffer_collision_model.get_distance(pcd_G_np.T)
+        else:
+            dist = self.hand_collision_model.get_distance(pcd_G_np.T)
 
         if visualize:
             manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd_G_np.T))
             manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
 
-            gripper_xyzs = self.hand_collision_model.to_pcd()
+            if use_extra_buffer:
+                gripper_xyzs = self.hand_extra_buffer_collision_model.to_pcd()
+            else:
+                gripper_xyzs = self.hand_collision_model.to_pcd()
             gripper_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(gripper_xyzs)).voxel_down_sample(0.005)
             gripper_cloud.paint_uniform_color([1.0, 0.0, 0.0])
 
@@ -198,18 +209,31 @@ class GraspListener():
         sdf = self.compute_sdf_batch(pcd, X_G, visualize)
         return sdf > thre
 
-    def compute_sdf_batch(self, pcd_W_np: np.ndarray, X_Gs: np.ndarray, visualize=False):
+    def compute_sdf_batch(self, pcd_W_np: np.ndarray, X_Gs: np.ndarray, use_extra_buffer=False, visualize=False):
         """A lookup to the pre-computed sdf of the hand collision model.
         parallelize over the transforms
         :param X_Gs: n x 4 x 4
         :param pcd_W_np: n x m x 3
         """
-        pcd_G_np = X_Gs[:, :3, :3] @ pcd_W_np + X_Gs[:, :3, [3]]
+        R = RotationMatrix(RollPitchYaw(np.pi/2, 0, np.pi/2)).matrix()
+
+        # Convert R to a 4x4 transformation matrix (embedding the rotation in a 4x4 matrix)
+        R_4x4 = np.eye(4)
+        R_4x4[:3, :3] = R
+
+        # Perform the operation on all matrices in the batch
+        print(X_Gs @ R_4x4)
+        X_GWs = np.linalg.inv(X_Gs @ R_4x4)
+
+        pcd_G_np = X_GWs[:, :3, :3] @ pcd_W_np + X_GWs[:, :3, [3]]
         # get_distance only requires the last dimension to be 3: ... x 3 -> ... x 1
-        dist = self.hand_collision_model.get_distance(pcd_G_np.transpose(0, 2, 1))
+        if use_extra_buffer:
+            dist = self.hand_extra_buffer_collision_model.get_distance(pcd_G_np.transpose(0, 2, 1))
+        else:
+            dist = self.hand_collision_model.get_distance(pcd_G_np.transpose(0, 2, 1))
         return dist.reshape(len(dist), -1).min(axis=-1)
 
-    def find_minimum_distance(self, pcd, X_WG, thre=0.0, min_range=-0.11, max_range=-0.01, num_samples=10, viz=False):
+    def find_minimum_distance(self, pcd, X_WG, thre=0.0, min_range=-0.11, max_range=-0.01, num_samples=10, use_extra_buffer=False, viz=False):
         """
         By doing line search, compute the maximum allowable distance along the z axis before penetration.
         Return the maximum distance, as well as the new transform. Returns (np.nan, None) if nothing is returned after
@@ -221,34 +245,28 @@ class GraspListener():
         signed_distance = -np.inf
         X_WGnew = RigidTransform()
 
+        always_crosses = False
         X_WGlast = None
         last_signed_distance = np.nan
         for z in z_grid:
             # Compute new values.
             X_WGnew = X_WG.multiply(RigidTransform([0.0, 0.0, z]))
-            # print(z, X_WGnew)
 
-            # manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
-            # manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
-            # viz_geoms = [manipuland_cloud]
-            # viz_geoms.append(self.make_gripper_line_set(X_WGnew.GetAsMatrix4(), [0.0, 1.0, 0.0]))
-
-            signed_distance = self.compute_sdf_fast(pcd, X_WGnew)
-
-            # visualize 
-            # o3d.visualization.draw_plotly(viz_geoms)
+            signed_distance = self.compute_sdf_fast(pcd, X_WGnew, use_extra_buffer=use_extra_buffer)
 
             # If the value crossed for the first time, return.
             if signed_distance < thre:
                 if X_WGlast is None:
-                    # input("no bueno, always crosses")
-                    return last_signed_distance, X_WGlast
+                    always_crosses = True
+                    break
 
                 if viz:
                     manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
                     manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
-
+    
                     gripper_xyzs = self.hand_collision_model.to_pcd()
+                    if use_extra_buffer:
+                        gripper_xyzs = self.hand_extra_buffer_collision_model.to_pcd()
                     gripper_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(gripper_xyzs)).voxel_down_sample(
                         0.005).transform((X_WGlast @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0])).GetAsMatrix4())
                     gripper_cloud.paint_uniform_color([1.0, 0.0, 0.0])
@@ -259,23 +277,53 @@ class GraspListener():
 
                     viz_geoms = [manipuland_cloud, gripper_cloud, gripper_next_cloud]
                     o3d.visualization.draw_plotly(viz_geoms)
-                    # input(f"Found grasp {last_signed_distance}, {signed_distance}, {X_WGlast}")
+                    input(f"Found grasp {last_signed_distance}, {signed_distance}, {X_WGlast}")
                 return last_signed_distance, X_WGlast
             
             # Record the computed values using last z.
             last_signed_distance = signed_distance
             X_WGlast = X_WGnew
 
+        if always_crosses and use_extra_buffer: # only do for dual grasp for now to prevent long grasp plan times
+            z_grid = np.linspace(min_range, min_range - (max_range-min_range), num_samples)
+            X_WGlast = None
+            last_signed_distance = np.nan
+            for z in z_grid:
+                # Compute new values.
+                X_WGnew = X_WG.multiply(RigidTransform([0.0, 0.0, z]))
+
+                signed_distance = self.compute_sdf_fast(pcd, X_WGnew, use_extra_buffer=use_extra_buffer)
+
+                # If the value crossed for the first time, return.
+                if signed_distance > thre:
+                    if viz:
+                        manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
+                        manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
+
+                        gripper_xyzs = self.hand_collision_model.to_pcd()
+                        if use_extra_buffer:
+                            gripper_xyzs = self.hand_extra_buffer_collision_model.to_pcd()
+                        gripper_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(gripper_xyzs)).voxel_down_sample(
+                            0.005).transform((X_WGlast @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0])).GetAsMatrix4())
+                        gripper_cloud.paint_uniform_color([1.0, 0.0, 0.0])
+                        
+                        gripper_next_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(gripper_xyzs)).voxel_down_sample(
+                            0.005).transform((X_WGnew @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0])).GetAsMatrix4())
+                        gripper_next_cloud.paint_uniform_color([0.0, 1.0, 0.0])
+
+                        viz_geoms = [manipuland_cloud, gripper_cloud, gripper_next_cloud]
+                        o3d.visualization.draw_plotly(viz_geoms)
+                        input(f"Found grasp going backwards {last_signed_distance}, {signed_distance}, {X_WGlast}")
+                    return signed_distance, X_WGnew
+                
+                # Record the computed values using last z.
+                last_signed_distance = signed_distance
+                X_WGlast = X_WGnew
+
         # If nothing is returned after line search, discard the sample by sending None.
-        # manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
-        # manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
-        # viz_geoms = [manipuland_cloud]
-        # viz_geoms.append(self.make_gripper_line_set(X_WG.GetAsMatrix4(), [0.0, 1.0, 0.0]))
-        # o3d.visualization.draw_plotly(viz_geoms)
-        # input("no bueno, never crosses")
         return np.nan, None
 
-    def find_minimum_distance_batch(self, pcds, X_WGs):
+    def find_minimum_distance_batch(self, pcd, X_WG, thre=0.0, min_range=-0.11, max_range=0.11, num_samples=20, use_extra_buffer=False, viz=False):
         """
         By doing line search, compute the maximum allowable distance along the z axis before penetration.
         Return the maximum distance, as well as the new transform. Returns (np.nan, None) if nothing is returned after
@@ -283,39 +331,25 @@ class GraspListener():
 
         NOTE: This does not consider the collision scene (e.g. table) but only the object point cloud.
         """
-        num_z_samples = 10  # NOTE: The size of this affects the grasp computation time significantly
+        z_grid = np.linspace(min_range, max_range, num_samples)
 
-        z_grid = np.linspace(-0.05, 0.05, num_z_samples)
-        signed_distances = -np.inf * np.ones(len(X_WGs))
+        # Create a batch of translation vectors for each z value (translation only along the z-axis)
+        translations = np.zeros((num_samples, 4, 4))
+        translations[:, 3, 3] = z_grid  # Place each z value in the last column of the 4x4 matrix
 
-        # Mask is true for poses that finished updating
-        finished_mask = np.zeros(len(X_WGs), dtype=bool)
+        # Apply the transformations in one batch
+        X_WGs = X_WG.GetAsMatrix4() @ translations.transpose(0, 2, 1)  # Apply the transformation in batch
+        dists = self.compute_sdf_batch(pcd, X_WGs, use_extra_buffer=use_extra_buffer) # n x num_samples x 3
 
-        X_WGnew = np.tile(np.eye(4), (len(X_WGs), 1, 1))
-        translation_transform = np.tile(np.eye(4), (len(X_WGs), 1, 1))
-        for z in z_grid:
-            # Record the computed values using last z.
-            last_signed_distances = signed_distances
-            X_WGlast = X_WGnew
+        threshold_met = np.any(dists < thre, axis=-1)
+        valid_indices = np.where(threshold_met)[0]
 
-            # Compute new values.
-            translation_transform[:, 2, 3] = z
-            # Only compute for not finished ones
-            not_finished_mask = np.bitwise_not(finished_mask)
-            X_WGnew[not_finished_mask] = X_WGs[not_finished_mask] @ translation_transform[not_finished_mask]
-            signed_distances[not_finished_mask] = self.compute_sdf_batch(pcds, X_WGnew[not_finished_mask])
-
-            # If the value crossed for the first time, finish updating
-            thre = 0.0
-            finished_mask = np.bitwise_or(
-                finished_mask, np.bitwise_and(last_signed_distances > thre, signed_distances < thre)
-            )
-
-            # Check if all finished
-            if np.all(finished_mask):
-                break
-
-        return last_signed_distances, X_WGlast
+        if len(valid_indices) > 0:
+            first_index = valid_indices[0]
+            return X_WGs[first_index], dists[first_index]
+        
+        # If no valid index is found, return np.nan and None
+        return np.nan, None
 
     def check_nonempty_batch(self, pcd_W_np, pcd_W_normals, X_WGs, visualize=False):
         """
@@ -562,6 +596,7 @@ class GraspListener():
             X_WG: RigidTransform, 
             within_box_pt_normals: np.ndarray, 
             split_ratios: float,
+            split_axes: np.ndarray,
             proportion_enclosed: float,
         ) -> tuple[float, dict]:
         """
@@ -579,6 +614,7 @@ class GraspListener():
         eff_vertical_vec = R.dot(np.array([0, 0, 1]))
         eff_x_vec = R.dot(np.array([1, 0, 0]))
         eff_y_vec = R.dot(np.array([0, 1, 0]))
+        gripper_x_axis_alignment_cost = np.abs(eff_x_vec @ split_axes)
 
         antipodal_cost = -np.sum(
             within_box_pt_normals[1, :] ** 2
@@ -594,12 +630,13 @@ class GraspListener():
         cost_dict = {
             # Antipodal doesn't make sense for partial point clouds
             "antipodal_cost": 0 * antipodal_cost,
-            "gripper_vertical_alignment_cost": 100.0 * gripper_vertical_alignment_cost,
+            "gripper_vertical_alignment_cost": 50.0 * gripper_vertical_alignment_cost,
             # Alignment scores are in range [-1,0] where -1 indicates perfect alignment with one of the axes. 
-            "xy_alignment_cost": -100.0 * max(gripper_x_alignment_cost, gripper_y_alignment_cost),
+            # "xy_alignment_cost": -50.0 * max(gripper_x_alignment_cost, gripper_y_alignment_cost),
+            "x_principal_alignment_cost": -100.0 * gripper_x_axis_alignment_cost[0],
             "grasp_height_cost": grasp_height_cost,
             # Split ratio is currently computed on the entire scene point cloud which doesn't make sense
-            "split_ratio_minor_axis_cost": 50*split_ratio_minor_axis_cost, # This is world x-axis
+            "split_ratio_minor_axis_cost": 0*split_ratio_minor_axis_cost, # This is world x-axis
             "split_ratio_major_axis_cost": 0*split_ratio_major_axis_cost,
             # proportion_enclosed is the propertion of total pcd points that are within the fingers
             "proportion_enclosed_cost": 100.0 * proportion_enclosed_cost
@@ -739,7 +776,7 @@ class GraspListener():
         return cost
 
     @staticmethod
-    def compute_pcd_split_ratio_xy(
+    def compute_pcd_split_ratio_cropped(
         pcd_points: np.ndarray,
         radius: float = 0.1,
         voxel_radius: float = 0.005,
@@ -775,7 +812,9 @@ class GraspListener():
         """
         num_points = pcd_points.shape[0]
         accounted_for = np.zeros(num_points, dtype=bool)  # Track accounted points
-        split_ratios = np.full((num_points, 2), np.nan)  # Store split ratios per point
+        split_ratios = np.full((num_points, 3), np.nan)  # Store split ratios per point
+        split_axes = np.full((num_points, 3, 3), np.nan)  # Store split axes per point
+        lengths = np.full((num_points), np.nan)  # Store lengths per point
         
         pcd =  o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd_points))
         pcd.paint_uniform_color([0.0, 0.0, 1.0]) # Gray
@@ -799,27 +838,41 @@ class GraspListener():
             # Mark these points as accounted for
             accounted_for[subset_mask] = True
             
-            # Min/max bounds for split ratio (only for x and y)
-            min_vals = np.min(subset[:, :2], axis=0)  # (2,)
-            max_vals = np.max(subset[:, :2], axis=0)  # (2,)
-            
-            # Compute center and half-range
-            center_xy = (max_vals + min_vals) / 2
-            half_range = (max_vals - min_vals) / 2
+            cov = np.cov(subset.T)
+            eigval, eigvec = np.linalg.eig(cov)
 
-            # Compute split ratio (normalized distance from center)
-            split_ratio = 1 - np.abs((pcd_points[:, :2] - center_xy) / half_range)
+            order = eigval.argsort()
+            minor_component = eigvec[:, order[0]]
+            secondary_component = eigvec[:, order[1]]
+            principal_component = eigvec[:, order[2]]
 
-            # Handle edge case: if max == min (avoid division by zero)
-            split_ratio = np.where(half_range > 0, split_ratio, 1.0)
+            # Rotate point cloud to align the principal component with the z-axis and the minor component with the x-axis
+            z_axis, x_axis = [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]
+            rot_principal_component_to_axes, _ = R.align_vectors(
+                np.array([z_axis, x_axis]), np.stack([principal_component, minor_component])
+            )
 
-            # Ensure values are within [0,1] (handle floating point issues)
-            split_ratio = np.clip(split_ratio, 0, 1)
-            
-            # Store split ratios in the correct positions
+            pcd_points_axis_aligned = pcd_points @ rot_principal_component_to_axes.as_matrix().T
+
+            # Min/max bounds for split ratio
+            min_point_vals = np.min(pcd_points_axis_aligned, axis=0)
+            max_point_vals = np.max(pcd_points_axis_aligned, axis=0)
+            center = (max_point_vals + min_point_vals) / 2
+            half_range = (max_point_vals - min_point_vals) / 2
+
+            decay_rate = 2.0
+            normalized_distance = np.abs((pcd_points_axis_aligned - center) / half_range)
+            normalized_distance = np.clip(normalized_distance, 0, 1)
+            split_ratio = np.exp(-decay_rate * normalized_distance) - np.exp(-decay_rate)
             split_ratios[subset_mask] = split_ratio[subset_mask]
+
+            # return split axes
+            axes = np.stack([principal_component, secondary_component, minor_component])
+            split_axes[subset_mask, :, :] = axes
+            length = np.linalg.norm(max_point_vals - min_point_vals)
+            lengths[subset_mask] = length
         
-        return split_ratios
+        return split_ratios, split_axes, lengths
 
     @staticmethod
     def compute_pcd_split_ratio(pcd_points: np.ndarray, viz_split_ratio_axes: bool = False) -> np.ndarray:
@@ -1132,6 +1185,7 @@ class GraspListener():
         is_manual=False,
         voxel_radius=0.005,
         ground_z = 0.06,
+        use_extra_buffer=False,
     ):
         """
         Compute sorted candidate grasps.
@@ -1195,7 +1249,11 @@ class GraspListener():
                 X_WGs_collision_free = []
                 for i, X_WG in enumerate(X_WGs):
                     print(origin)
-                    distance, X_WPnew = self.find_minimum_distance(merged_pcd, RigidTransform(X_WG))
+                    distance, X_WPnew = self.find_minimum_distance(
+                        merged_pcd, 
+                        RigidTransform(X_WG), 
+                        use_extra_buffer=use_extra_buffer,
+                    )
                     if np.isnan(distance):
                         print(f"Frame {i} in collision")
                         continue
@@ -1271,18 +1329,39 @@ class GraspListener():
         downsampled_pcd_points = downsampled_pcd.xyzs().T
         pcd_points = pcd.xyzs().T
 
+        flattened_cloud_xyzs = np.copy(pcd.xyzs())
+        flattened_cloud_xyzs[2,:] = np.clip(
+            flattened_cloud_xyzs[2,:],
+            np.max(flattened_cloud_xyzs[2,:]) - (np.max(flattened_cloud_xyzs[2,:]) - np.min(flattened_cloud_xyzs[2,:])) / 10.0,
+            np.max(flattened_cloud_xyzs[2,:])
+        )
+        flattened_cloud = PointCloud(flattened_cloud_xyzs.shape[1])
+        flattened_cloud.mutable_xyzs()[:] = flattened_cloud_xyzs
+        flattened_cloud = flattened_cloud.VoxelizedDownSample(voxel_size=0.005)
+        flattened_cloud.EstimateNormals(radius=0.1, num_closest=30)
+        flattened_cloud.FlipNormalsTowardPoint([-0.0338161, 0.62563, 0.360087])
+        pcd_flattened_points = flattened_cloud.xyzs().T
+
         # Filter pcd based on split ratio
         if grasp_type == GraspType.TOP:
-            split_ratios = self.compute_pcd_split_ratio_xy(downsampled_pcd_points, 0.1, voxel_radius, VISUALIZE_CLUSTERS)
-            split_axes = np.array([[1,0,0], [0,1,0]])
-            length = None
+            # split_ratios = self.compute_pcd_split_ratio_xy(downsampled_pcd_points, 0.1, voxel_radius, VISUALIZE_CLUSTERS)
+            # split_axes = np.array([[1,0,0], [0,1,0]])
+            # length = None
+            split_ratios, all_split_axes, lengths = self.compute_pcd_split_ratio_cropped(pcd_flattened_points)
+            length = np.max(lengths)
+
+            # Allow points where at least 2 out of 3 split ratios exceed the threshold
+            mask = np.sum(split_ratios > split_ratio_threshold, axis=1) >= 2
+            split_ratio_filtered_points = pcd_flattened_points[mask]
+            split_ratio_filtered_normals = flattened_cloud.normals()[:, mask].T
         else:
             split_ratios, split_axes, length = self.compute_pcd_split_ratio(downsampled_pcd_points)
+            all_split_axes = np.tile(split_axes, (split_ratios.shape[0], 1, 1))
 
-        # Allow points where at least 2 out of 3 split ratios exceed the threshold
-        mask = np.sum(split_ratios > split_ratio_threshold, axis=1) >= 2
-        split_ratio_filtered_points = downsampled_pcd_points[mask]
-        split_ratio_filtered_normals = downsampled_pcd.normals()[:, mask].T
+            # Allow points where at least 2 out of 3 split ratios exceed the threshold
+            mask = np.sum(split_ratios > split_ratio_threshold, axis=1) >= 2
+            split_ratio_filtered_points = downsampled_pcd_points[mask]
+            split_ratio_filtered_normals = downsampled_pcd.normals()[:, mask].T
 
         if VISUALIZE_FILTERED_CLOUDS:
             manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
@@ -1295,7 +1374,10 @@ class GraspListener():
             ], window_name="points after split ratio filtering")
 
         # Kdtree based on unfiltered points for better normal queries
-        kdtree = KDTree(downsampled_pcd_points)
+        if grasp_type == GraspType.TOP: 
+            kdtree = KDTree(pcd_flattened_points)
+        else:
+            kdtree = KDTree(downsampled_pcd_points)
 
         # Sample random points to compute darboux frames for
         num_split_ratio_filtered_points = len(split_ratio_filtered_points)
@@ -1335,7 +1417,7 @@ class GraspListener():
         viz_geoms = [manipuland_cloud]
 
         if VISUALIZE_ORIG:
-            from pydrake.all import StartMeshcat, PointCloud
+            from pydrake.all import StartMeshcat
             from manipulation.meshcat_utils import AddMeshcatTriad
             meshcat = StartMeshcat()
             meshcat.SetObject("cloud", pcd)
@@ -1373,7 +1455,7 @@ class GraspListener():
             candidate_lst_by_grasp_origin_pt: List[np.ndarray] = []
             candidate_costs: List[float] = []
             candidiate_cost_dicts: list[dict] = []
-            for X_WP, split_ratio in zip(X_WPs, split_ratios[darboux_frame_sample_indices]):
+            for X_WP, split_ratio, split_axes in zip(X_WPs, split_ratios[darboux_frame_sample_indices], all_split_axes[darboux_frame_sample_indices]):
                 color = np.random.rand(3)
                 color /= np.linalg.norm(color)
                 color = tuple(color)# NOTE: The best variations to sample/ search over is situation/ grasp environment dependent (e.g. bin vs table)
@@ -1425,9 +1507,15 @@ class GraspListener():
                                             min_range=-0.1,
                                             max_range=0.4,
                                             num_samples=100,
+                                            use_extra_buffer=use_extra_buffer
                                         )
                                     else:
-                                        distance, X_WPnew = self.find_minimum_distance(merged_pcd, X_WPnew)
+                                        # distance, X_WPnew = self.find_minimum_distance_batch(
+                                        distance, X_WPnew = self.find_minimum_distance(
+                                            merged_pcd, 
+                                            X_WPnew, 
+                                            use_extra_buffer=use_extra_buffer,
+                                        )
                                     # If distance cannot be found, go over to the next iteration
                                     if np.isnan(distance):
                                         continue
@@ -1458,10 +1546,12 @@ class GraspListener():
                                                     align_minor_axis
                                                 )
                                         elif grasp_type == GraspType.TOP:
+                                            _, _, proportion_enclosed = self.check_nonempty(flattened_cloud, X_WPnew)
                                             cost, cost_dict = self.compute_costs_top(
                                                     X_WPnew, 
                                                     within_box_pt_normals, 
                                                     split_ratio,
+                                                    split_axes,
                                                     proportion_enclosed,
                                                 )
                                         elif grasp_type == GraspType.STABLE:
@@ -1491,6 +1581,8 @@ class GraspListener():
                         print(candidiate_cost_dicts[-1])
                         manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
                         manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
+                        manipuland_top_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(flattened_cloud.xyzs().T))
+                        manipuland_top_cloud.paint_uniform_color([0.0, 1.0, 0.0])
 
                         gripper_xyzs = self.hand_collision_model.to_pcd()
                         # RollPitchYaw(np.pi/2, 0, np.pi/2) is world to wsg specific transform.
@@ -1502,7 +1594,21 @@ class GraspListener():
                         ).GetAsMatrix4())
                         gripper_cloud.paint_uniform_color([1.0, 0.0, 0.0])
 
-                        viz_geoms = [manipuland_cloud, gripper_cloud]
+
+                        # visualize axes, principal axis is z axis (blue), minor axis is x axis (red)
+                        z_axis, x_axis = [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]
+                        rot_principal_component_to_axes, _ = R.align_vectors(
+                            np.array([z_axis, x_axis]), np.stack([split_axes[0], split_axes[2]])
+                        )
+                        rot = RotationMatrix(rot_principal_component_to_axes.as_matrix().T)
+
+                        T = np.eye(4)
+                        T[:3,:3] = rot.matrix()
+                        T[:3, 3] = X_WP.translation()
+                        pca = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
+                        pca.transform(T)
+
+                        viz_geoms = [manipuland_cloud, manipuland_top_cloud, gripper_cloud, pca]
                         o3d.visualization.draw_geometries(viz_geoms)
 
             print("sequential antipodal grasp time: {:.3f}".format(time.time() - start_time))
@@ -1720,7 +1826,7 @@ class GraspListener():
                     )
 
                     viz_geoms = [manipuland_cloud, gripper_cloud, world_frame, grasp_frame]
-                    o3d.visualization.draw_plotly(viz_geoms)
+                    o3d.visualization.draw_geometries(viz_geoms)
 
     def get_best_grasps(self, candidate_num=-1) -> List[Tuple[np.ndarray]]:
         """Returns a list of the `candidate_num` grasps with the lowest cost."""
