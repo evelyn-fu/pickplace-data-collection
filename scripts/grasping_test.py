@@ -101,6 +101,7 @@ class SystemIDDataSaver(LeafSystem):
         self.measured_positions: list[np.ndarray] = []
         self.measured_torques: list[np.ndarray] = []
         self.measured_times: list[float] = []
+        self.measured_wsg_positions: list[float] = []
         self.current_start_time = None
         self.object_saved = False
 
@@ -114,6 +115,9 @@ class SystemIDDataSaver(LeafSystem):
         )
         self._iiwa_torque_input_port = self.DeclareVectorInputPort(
             "iiwa.torque_measured", size=7
+        )
+        self._wsg_position_input_port = self.DeclareVectorInputPort(
+            "wsg.position_measured", size=1
         )
 
         self.DeclarePerStepPublishEvent(self.save_logs)
@@ -135,6 +139,8 @@ class SystemIDDataSaver(LeafSystem):
             # Store current positions and torques.
             positions = self._iiwa_position_input_port.Eval(context)
             torques = self._iiwa_torque_input_port.Eval(context)
+            wsg_position = self._wsg_position_input_port.Eval(context)
+
             time = context.get_time()
             if self.current_start_time is None:
                 self.current_start_time = time
@@ -143,27 +149,31 @@ class SystemIDDataSaver(LeafSystem):
             self.measured_positions.append(positions)
             self.measured_torques.append(torques)
             self.measured_times.append(traj_time)
+            self.measured_wsg_positions.append(wsg_position)
 
     def save_to_disk(self):
         print("Saving system ID data to disk.")
 
         # Convert to numpy arrays.
-        measured_position_data = np.stack(self.measured_positions)
-        measured_torque_data = np.stack(self.measured_torques)
-        sample_times_s = np.array(self.measured_times)
+        measured_position_data = np.stack(self.measured_positions) # Shape (T, 7)
+        measured_torque_data = np.stack(self.measured_torques) # Shape (T, 7)
+        sample_times_s = np.array(self.measured_times) # Shape (T,)
+        measured_wsg_positions = np.array(self.measured_wsg_positions).squeeze(1) # Shape (T,)
 
         # Remove duplicated samples.
         _, unique_indices = np.unique(sample_times_s, return_index=True)
-        measured_position_data = measured_position_data[unique_indices]
-        measured_torque_data = measured_torque_data[unique_indices]
-        sample_times_s = sample_times_s[unique_indices]
         if len(unique_indices) < len(sample_times_s):
             print(f"{len(unique_indices)} out of {len(sample_times_s)} data points are unique!")
+            measured_position_data = measured_position_data[unique_indices]
+            measured_torque_data = measured_torque_data[unique_indices]
+            sample_times_s = sample_times_s[unique_indices]
+            measured_wsg_positions = measured_wsg_positions[unique_indices]
 
         # Save to disk.
         np.save(self.output_dir / "joint_positions.npy", measured_position_data)
         np.save(self.output_dir / "joint_torques.npy", measured_torque_data)
         np.save(self.output_dir / "sample_times_s.npy", sample_times_s)
+        np.save(self.output_dir / "wsg_positions.npy", measured_wsg_positions)
 
         print("Saved system id data to", self.output_dir)
 
@@ -388,6 +398,23 @@ def start_scenario(
     if save_imgs:
         builder.Connect(planner.GetOutputPort("planner_state"), img_saver.GetInputPort("planner_state"))
 
+    wsg_state_demux: Demultiplexer = builder.AddSystem(Demultiplexer(2, 1))
+    if use_hardware:
+        # Connect the output of external station to the input of internal station
+        builder.Connect(
+            external_station.GetOutputPort("iiwa.position_measured"),
+            station.GetInputPort("iiwa.position"),
+        )
+
+        builder.Connect(
+            external_station.GetOutputPort("wsg.state_measured"),
+            wsg_state_demux.get_input_port(),
+        )
+        builder.Connect(
+            wsg_state_demux.get_output_port(0),
+            station.GetInputPort("wsg.position"),
+        )
+
     # Connect system ID data saver ports.
     builder.Connect(planner.GetOutputPort("planner_state"), sys_id_saver.GetInputPort("planner_state"))
     builder.Connect(planner.GetOutputPort("pick_state"), sys_id_saver.GetInputPort("pick_state"))
@@ -399,23 +426,10 @@ def start_scenario(
         external_station.GetOutputPort("iiwa.torque_measured"),
         sys_id_saver.GetInputPort("iiwa.torque_measured"),
     )
-
-    if use_hardware:
-        # Connect the output of external station to the input of internal station
-        builder.Connect(
-            external_station.GetOutputPort("iiwa.position_measured"),
-            station.GetInputPort("iiwa.position"),
-        )
-
-        wsg_state_demux: Demultiplexer = builder.AddSystem(Demultiplexer(2, 1))
-        builder.Connect(
-            external_station.GetOutputPort("wsg.state_measured"),
-            wsg_state_demux.get_input_port(),
-        )
-        builder.Connect(
-            wsg_state_demux.get_output_port(0),
-            station.GetInputPort("wsg.position"),
-        )
+    builder.Connect(
+        wsg_state_demux.get_output_port(0),
+        sys_id_saver.GetInputPort("wsg.position_measured"),
+    )
     
     if not use_hardware:
         builder.Connect(
