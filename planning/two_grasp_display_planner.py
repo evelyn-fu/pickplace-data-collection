@@ -538,7 +538,7 @@ class PickState(Enum):
 
 scanning_traj_robot_to_workspace_dist = 0.4
 scanning_traj_height = 0.45
-lift_for_display_height = 0.05
+lift_for_display_height = 0.1
 yaw_display_traj = []
 yaw_display_traj.append(
     RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0)),
@@ -606,7 +606,7 @@ def generate_rectangle_points(corner1, corner2, corner3, corner4, separation, z_
     
     return rectangle_points
 
-corner1, corner2, corner3, corner4 = (-0.04, 0.42, 0.13), (-0.04, 0.77, 0.13), (0.155, 0.77, 0.13), (0.155, 0.42, 0.13)
+corner1, corner2, corner3, corner4 = (-0.04, 0.42, 0.05), (-0.04, 0.77, 0.05), (0.155, 0.77, 0.05), (0.155, 0.42, 0.05)
 bin_sides_components = []
 for z_offset in np.linspace(0, -0.1, int(0.1/0.005)):
     bin_sides_components.append(generate_rectangle_points(corner1, corner2, corner3, corner4, 0.005, z_offset))
@@ -617,7 +617,17 @@ stage_center0 = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi/2)
 stage_center90 = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0.0)), [0.45, 0.0, 0.0])
 
 bin_depth = 0.08
-platform_height = 0.070 # use value a bit higher than it is to reduce pcd noise
+x_points = np.linspace(corner1[0], corner3[0])
+y_points = np.linspace(corner1[1], corner3[1])
+
+# Create the grid of points
+x, y = np.meshgrid(x_points, y_points)
+
+# Reshape the grid into a Nx3 array
+bin_bottom_box = np.vstack((x.flatten(), y.flatten(), np.zeros_like(x.flatten())))
+bin_bottom_box += np.array([0.0, 0.0, -bin_depth])[:, np.newaxis]
+
+platform_height = 0.06 # use value a bit higher than it is to reduce pcd noise
 
 # Pose of the 2nd bin to place the object into.
 end_bin = RigidTransform(RotationMatrix(RollPitchYaw(0.0, np.pi/2, np.pi)), [0.30, -0.55, 0.2])
@@ -1084,7 +1094,7 @@ class TwoGraspPlanner(LeafSystem):
     def PlanBinPick(self, context, state, after_scan_state):
         # Get pcd 
         cloud = self.GetInputPort("cloud_bin").Eval(context)
-        X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[0.02, 0.0, 0.0])
+        X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[0.01, 0.0, 0.0])
         transformed_xyzs = X_adjust @ cloud.xyzs()
         cloud.mutable_xyzs()[:] = transformed_xyzs
         bin_pcd = cloud.Crop(lower_xyz=[-0.03, 0.44, -bin_depth], upper_xyz=[0.145, 0.75, 0.16])
@@ -1094,14 +1104,14 @@ class TwoGraspPlanner(LeafSystem):
 
         # Get background pcd 
         cloud = self.GetInputPort("cloud_bin").Eval(context)
-        X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[0.02, 0.0, 0.0])
+        X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[0.01, 0.0, 0.0])
         transformed_xyzs = X_adjust @ cloud.xyzs()
         cloud.mutable_xyzs()[:] = transformed_xyzs
         scene_pcd = cloud.Crop(lower_xyz=[-0.05, 0.42, -bin_depth-0.1], upper_xyz=[0.165, 0.77, 0.16])
         scene_pcd.EstimateNormals(radius=0.1, num_closest=30)
         scene_pcd.FlipNormalsTowardPoint(self._X_WC_bin.translation())
         scene_pcd = bin_pcd.VoxelizedDownSample(voxel_size=ONLINE_VOXEL_RADIUS)
-        new_scene_pts = np.concatenate([scene_pcd.xyzs(), bin_sides_vox], axis=1)
+        new_scene_pts = np.concatenate([scene_pcd.xyzs(), bin_sides_vox, bin_bottom_box], axis=1)
         scene_pcd.resize(new_scene_pts.shape[1])
         scene_pcd.mutable_xyzs()[:] = new_scene_pts
         
@@ -1182,7 +1192,7 @@ class TwoGraspPlanner(LeafSystem):
                 bin_pcd,
                 scene_pcd,
                 candidate_num=1,
-                num_samples=30,
+                num_samples=15,
                 random_seed=np.random.randint(1000),
                 grasp_type=GraspType.TOP,
                 roll_min = 0.0,
@@ -1262,7 +1272,7 @@ class TwoGraspPlanner(LeafSystem):
         rot_mat = X_WG_bin.GetAsMatrix4()[:3,:3]
         eff_perpendicular_vec = rot_mat.dot(np.array([1, 0, 0]))
         eff_parallel_vec = rot_mat.dot(np.array([0, 1, 0]))
-        perpendicular_score = np.abs(eff_perpendicular_vec @ principal_component)
+        perpendicular_score = np.abs(eff_perpendicular_vec @ secondary_component)
         parallel_score = np.abs(eff_parallel_vec @ secondary_component) # idk why the secondary axis is lining up...
         
         if perpendicular_score > parallel_score:
@@ -1478,7 +1488,7 @@ class TwoGraspPlanner(LeafSystem):
         pcd0.FlipNormalsTowardPoint(self._X_WC0.translation())
 
         cloud1 = self.GetInputPort("cloud_back_left").Eval(context)
-        X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[-0.03, 0.0, 0.0])
+        X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[-0.03, 0.0, -0.02])
         transformed_xyzs = X_adjust @ cloud1.xyzs()
         cloud1.mutable_xyzs()[:] = transformed_xyzs
         pcd1 = cloud1.Crop(lower_xyz=[0.23, -0.17, platform_height], upper_xyz=[0.7, 0.17, 0.27])
@@ -1630,16 +1640,25 @@ class TwoGraspPlanner(LeafSystem):
         start = time.time()
         # Get table pcd 
         cloud0 = self.GetInputPort("cloud_front").Eval(context)
+        X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[-0.017, -0.025, -0.02])
+        transformed_xyzs = X_adjust @ cloud0.xyzs()
+        cloud0.mutable_xyzs()[:] = transformed_xyzs
         pcd0 = cloud0.Crop(lower_xyz=[0.1, -0.3, 0.0], upper_xyz=[0.85, 0.3, 0.07]).VoxelizedDownSample(voxel_size=0.01)
         pcd0.EstimateNormals(radius=0.1, num_closest=30)
         pcd0.FlipNormalsTowardPoint(self._X_WC0.translation())
 
         cloud1 = self.GetInputPort("cloud_back_left").Eval(context)
+        X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[-0.03, 0.0, 0.0])
+        transformed_xyzs = X_adjust @ cloud1.xyzs()
+        cloud1.mutable_xyzs()[:] = transformed_xyzs
         pcd1 = cloud1.Crop(lower_xyz=[0.1, -0.3, 0.0], upper_xyz=[0.85, 0.3, 0.07]).VoxelizedDownSample(voxel_size=0.01)
         pcd1.EstimateNormals(radius=0.1, num_closest=30)
         pcd1.FlipNormalsTowardPoint(self._X_WC1.translation())
 
         cloud2 = self.GetInputPort("cloud_back_right").Eval(context)
+        X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[0.0, 0.005, 0.0])
+        transformed_xyzs = X_adjust @ cloud2.xyzs()
+        cloud2.mutable_xyzs()[:] = transformed_xyzs
         pcd2 = cloud2.Crop(lower_xyz=[0.1, -0.3, 0.0], upper_xyz=[0.85, 0.3, 0.07]).VoxelizedDownSample(voxel_size=0.01)
         pcd2.EstimateNormals(radius=0.1, num_closest=30)
         pcd2.FlipNormalsTowardPoint(self._X_WC2.translation())

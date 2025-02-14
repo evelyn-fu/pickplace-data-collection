@@ -58,7 +58,7 @@ def MakePickAndDisplayGripperFrames(
     # put down where it was picked up, if place_flipped is true, rotate 180 to show other side
     X_G["place"] = X_G["pick"]
     if place_flipped:
-        t_gripper_center = X_G["pick_gripper_frame"] @ [0, 0, gripper_length/4] # assuming picking with only end half of gripper
+        t_gripper_center = X_G["pick_gripper_frame"] @ [0, 0, 3*gripper_length/4] # assuming picking with only end half of gripper
         
         # Calculate rotation matrix for 180 degrees around z-axis
         R_z180 = np.array([

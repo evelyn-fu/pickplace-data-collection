@@ -97,7 +97,7 @@ def solve_via_analytic_IK(pose: RigidTransform,
                           checker: CollisionCheckerBase):
     
     analytic_ik = Analytic_IK_7DoF(iiwa_alpha, iiwa_d, iiwa_limits_lower, iiwa_limits_upper)
-    N_configs = 1000
+    N_configs = 2000
     configs = []
     for _ in range(N_configs):
         GC2, GC4, GC6, psi = sample_ik_params()
@@ -122,7 +122,7 @@ def solve_via_analytic_IK_with_retries(pose: RigidTransform,
                           current_config : np.ndarray,
                           ik_domain: HPolyhedron,
                           checker: CollisionCheckerBase,
-                          retries: int = 10):
+                          retries: int = 1):
     result = solve_via_analytic_IK(pose, current_config, ik_domain, checker)
     if result is not None:
         return result

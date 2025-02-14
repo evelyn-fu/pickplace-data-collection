@@ -51,7 +51,7 @@ class GraspListener():
                 os.path.join(os.path.dirname( __file__ ), '..', 'scenario_datas', 'gripper_sdf.pkl'))
         if hand_finger_extra_buffer_path == None:
             hand_finger_extra_buffer_path = os.path.abspath(
-                os.path.join(os.path.dirname( __file__ ), '..', 'scenario_datas', 'large_gripper_sdf.pkl'))
+                os.path.join(os.path.dirname( __file__ ), '..', 'scenario_datas', 'gripper_sdf.pkl'))
         print("Loading hand collision model from ", hand_finger_path)
         self.hand_collision_model = SignedDensityField.from_pkl(hand_finger_path)
         print("Loading extra buffer hand collision model from ", hand_finger_extra_buffer_path)
@@ -539,11 +539,12 @@ class GraspListener():
         proportion_enclosed_cost = 1e3 if proportion_enclosed < 0.05 else 0
         proportion_good_enclosed = good_normals_within_grasp/num_pcd_pts
         proportion_good_enclosed_cost = 1e3 if proportion_good_enclosed < 0.01 else 0
+
         cost_dict = {
-            "antipodal_cost": 50.0 * antipodal_cost,
+            "antipodal_cost": 100.0 * antipodal_cost,
             "antipodal_within_grasp_cost": 100.0 * antipodal_within_grasp_cost,
-            "gripper_vertical_axis_alignment_cost_z": 10.0 * gripper_vertical_axis_alignment_cost[2],
-            "gripper_vertical_axis_alignment_cost_y": 5.0 * gripper_vertical_axis_alignment_cost[1],
+            "gripper_vertical_axis_alignment_cost_principal": -10.0 * gripper_vertical_axis_alignment_cost[0],
+            "gripper_vertical_axis_alignment_cost_secondary": -5.0 * gripper_vertical_axis_alignment_cost[1],
             "higher_up_cost": 50.0 * higher_up_cost,
             "proportion_enclosed": proportion_enclosed,
             "proportion_enclosed_cost": proportion_enclosed_cost,
@@ -555,9 +556,8 @@ class GraspListener():
         }
 
         considered_costs = [
+            cost_dict["antipodal_cost"],
             cost_dict["antipodal_within_grasp_cost"],
-            cost_dict["gripper_vertical_axis_alignment_cost_z"],
-            cost_dict["gripper_vertical_axis_alignment_cost_y"],
             cost_dict["higher_up_cost"],
             cost_dict["proportion_enclosed_cost"],
             cost_dict["proportion_good_enclosed_cost"],
@@ -1738,8 +1738,8 @@ class GraspListener():
                         "grasp1_quality": candidate_costs_filtered[i],
                         "grasp2_quality": candidate_costs_filtered[j],
                         "grasps_quality": grasps_quality[i, j],
-                        "translation_cost": 0.3 * best_quality * translation_cost[i, j],
-                        "rotation_cost": 0.4 * best_quality * rotation_cost[i, j]
+                        "translation_cost": 0.1 * best_quality * translation_cost[i, j],
+                        "rotation_cost": 0.2 * best_quality * rotation_cost[i, j]
                     })
 
             pair_costs = np.array([
