@@ -19,6 +19,9 @@ import os
 from pathlib import Path
 
 import numpy as np
+import sys
+PYCUCI_ROOT = os.path.dirname(__file__) + "/../../" + "cuciv0" 
+sys.path.append(PYCUCI_ROOT+'/bazel-bin/cuci/src/pybind/pycuci')
 import pycuci as cci
 
 from manipulation.station import LoadScenario
@@ -30,9 +33,10 @@ from pydrake.all import (
     TrajectorySource,
     VectorLogSink,
     StartMeshcat,
+    LeafSystem,CompositeTrajectory,PathParameterizedTrajectory
 )
 from tqdm import tqdm
-
+import shutil
 from robot_payload_id.control.trajectory import FourierSeriesTrajectory
 from robot_payload_id.utils import FourierSeriesTrajectoryAttributes
 from manipulation.station import MakeHardwareStation, RobotDiagram
@@ -43,7 +47,7 @@ from mmt_gcs.planning.region_generation import CCI_inflate_edges_given_pwl_path
 PETE_ASSETS = os.path.dirname(__file__) + "/../pete_assets/"
 MMT_GCS_ROOT = os.path.abspath(os.path.join(__file__, "../../../mmt_gcs/"))
 ONLINE_VOXEL_RADIUS = 0.005
-
+SYS_ID_TRAJ_PARAMETER_PATH = Path(os.path.abspath(os.path.join(__file__ ,"../../traj_feb8")))
 
 def get_cci_edge_inflator(verbose=False):
     cci_parser = cci.URDFParser()
@@ -110,7 +114,7 @@ def get_drm_planner(cci_obj, vox=None):
 def scs_trajopt(
     start, goal, drm_planner, cci_obj, edge_inflator, vox, vel_limits, acc_limits
 ):
-    online_voxel_observation = cci.Voxels(vox)
+    online_voxel_observation = cci.Voxels(vox) if vox is not None else cci.Voxels()
 
     success, pwl_plan = drm_planner.Plan(
         start, goal, online_voxel_observation, ONLINE_VOXEL_RADIUS
@@ -150,20 +154,91 @@ def scs_trajopt(
 
     return traj
 
+class TrajSourceInitializer(LeafSystem):
+    """Prevents the robot from falling down uppon simulator creation."""
+
+    def __init__(self, excitation_traj):
+        super().__init__()
+        self._excitation_traj = excitation_traj
+
+        self._traj_source: TrajectorySource = None
+        self._initialized = False
+
+        self._iiwa_position_measured_input_port = self.DeclareVectorInputPort(
+            "iiwa.position_measured", 7
+        )
+
+         # Create cci planner.
+        self._edge_inflator, self._cci_objects = get_cci_edge_inflator()
+        self._drm_planner = get_drm_planner(self._cci_objects)
+
+        self.DeclareInitializationDiscreteUpdateEvent(self._init)
+
+    def set_traj_source(self, traj_source):
+        self._traj_source = traj_source
+
+    def _init(self, context, discrete_values):
+        if self._initialized:
+            return
+
+        assert self._traj_source is not None
+
+        q_current = self._iiwa_position_measured_input_port.Eval(context)
+
+        q_start = self._excitation_traj.value(0.0)
+        to_start_traj = scs_trajopt(
+            start=q_current,
+            goal=q_start,
+            drm_planner=self._drm_planner,
+            cci_obj=self._cci_objects,
+            edge_inflator=self._edge_inflator,
+            vox=None,
+            vel_limits=np.ones(7)*0.5,
+            acc_limits=np.ones(7)*0.5,
+        )
+
+        wait_at_start_traj = PiecewisePolynomial.ZeroOrderHold(
+            breaks=[
+                to_start_traj.end_time(),
+                to_start_traj.end_time() + 2.0,
+            ],
+            samples=np.stack([q_start, q_start], axis=1),
+        )
+
+        excitation_traj_time = PiecewisePolynomial().FirstOrderHold(
+            [0.0, self._excitation_traj.end_time()],
+            [[0.0, self._excitation_traj.end_time()]],
+        )
+        excitation_traj_time.shiftRight(wait_at_start_traj.end_time())
+        shifted_excitation_traj = PathParameterizedTrajectory(
+            path=self._excitation_traj, time_scaling=excitation_traj_time
+        )
+
+        self.excitation_traj_start_time = shifted_excitation_traj.start_time()
+        self.excitation_traj_end_time = shifted_excitation_traj.end_time()
+
+        composite_traj = CompositeTrajectory([to_start_traj, wait_at_start_traj, shifted_excitation_traj])
+        self._traj_source.UpdateTrajectory(composite_traj)
+
+        print("Initialized traj source.")
+
+    def reset(self):
+        self._initialized = False
+
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--scenario_path",
         type=str,
-        required=True,
+        default="scenario_datas/scenario_data_grasping_hardware.yml",
         help="Path to the scenario file. This must contain an iiwa model named 'iiwa' "
         "and a gripper model named 'wsg'.",
     )
     parser.add_argument(
         "--traj_parameter_path",
         type=Path,
-        required=True,
+        default=SYS_ID_TRAJ_PARAMETER_PATH,
         help="Path to the trajectory parameter folder. The folder must contain "
         + "'a_value.npy', 'b_value.npy', and 'q0_value.npy' or 'control_points.npy', "
         + "'knots.npy', and 'spline_order.npy'.",
@@ -171,6 +246,7 @@ def main():
     parser.add_argument(
         "--save_data_path",
         type=Path,
+        required=True,
         help="Path to save the data to. Each data collection run will be saved to a "
         + "separate subdirectory of this path.",
     )
@@ -215,11 +291,14 @@ def main():
     num_gripper_openings = args.num_gripper_openings
     num_runs = args.num_runs
 
+    if os.path.exists(save_data_path):
+        input(f"{save_data_path} already exists. Press enter to delete and re-create. Ctr+c to stop.")
+        shutil.rmtree(save_data_path)
+
     builder = DiagramBuilder()
     scenario = LoadScenario(filename=scenario_path)
-    assert (
-        scenario.plant_config.time_step == 5e-3
-    ), "Invalid time-step for position control mode."
+    # Ensure correct timestep for position control mode.
+    scenario.plant_config.time_step == 5e-3
 
     meshcat = StartMeshcat()
 
@@ -228,8 +307,7 @@ def main():
         MakeHardwareStation(
             scenario=scenario,
             meshcat=meshcat,
-            use_hardware=use_hardware,
-            package_xmls=[os.path.abspath("models/package.xml")],
+            hardware=use_hardware,
         ),
     )
 
@@ -258,6 +336,14 @@ def main():
     builder.Connect(
         traj_source.get_output_port(), station.GetInputPort("iiwa.position")
     )
+    initializer: TrajSourceInitializer = builder.AddSystem(
+        TrajSourceInitializer(excitation_traj)
+    )
+    builder.Connect(
+        station.GetOutputPort("iiwa.position_measured"),
+        initializer.get_input_port(),
+    )
+    initializer.set_traj_source(traj_source)
 
     # Add a placeholder traj.
     wsg_traj_source: TrajectorySource = builder.AddNamedSystem(
@@ -293,44 +379,24 @@ def main():
     # Build and setup simulation
     diagram = builder.Build()
 
-    # Create cci planner.
-    edge_inflator, cci_objects = get_cci_edge_inflator()
-    drm_planner = get_drm_planner(cci_objects)
-
     gripper_closed = 0.0
     gripper_open = 0.1
     gripper_positions = np.linspace(gripper_closed, gripper_open, num_gripper_openings)
 
     for gripper_position in tqdm(gripper_positions):
-        for run_idx in range(num_runs):
-            # Move to starting position
-            simulator = Simulator(diagram)
-            ApplySimulatorConfig(scenario.simulator_config, simulator)
-            simulator.set_target_realtime_rate(1.0)
-            simulator.Initialize()
-            current_positions = station.GetOutputPort("iiwa.position_measured").Eval(
-                simulator.get_context()
-            )
-            traj = scs_trajopt(
-                start=current_positions,
-                goal=start_positions,
-                drm_planner=drm_planner,
-                cci_obj=cci_objects,
-                edge_inflator=edge_inflator,
-                vox=cci.Voxels(),
-                vel_limits=np.ones(num_positions),
-                acc_limits=np.ones(num_positions),
-            )
-            traj_source.UpdateTrajectory(traj)
-            simulator.AdvanceTo(traj.end_time() + 1.0)
+        wsg_traj_source.UpdateTrajectory(
+            PiecewisePolynomial.ZeroOrderHold([0.0, 1.0],
+            np.array([[gripper_position, gripper_position]]))
+        )
+        print(f"Set wsg to position {gripper_position}")
 
-            # Excecute system ID trajectory
+        for run_idx in range(num_runs):
+            # Execute trajs.
             simulator = Simulator(diagram)
             ApplySimulatorConfig(scenario.simulator_config, simulator)
-            simulator.set_target_realtime_rate(1.0)
             simulator.Initialize()
-            traj_source.UpdateTrajectory(excitation_traj)
-            simulator.AdvanceTo(excitation_traj.end_time() + 1.0)
+            simulator.set_target_realtime_rate(1.0)
+            simulator.AdvanceTo(initializer.excitation_traj_end_time + 1.0)
 
             # Save data
             measured_position_data = (
@@ -344,8 +410,8 @@ def main():
             ).sample_times()
 
             # Only keep data during excitation trajectory execution
-            data_start_time = 0.0
-            excitation_traj_end_time = excitation_traj.end_time()
+            data_start_time = initializer.excitation_traj_start_time
+            excitation_traj_end_time = initializer.excitation_traj_end_time
             excitation_traj_start_idx = np.argmax(sample_times_s >= data_start_time)
             excitation_traj_end_idx = np.argmax(
                 sample_times_s >= excitation_traj_end_time
@@ -388,6 +454,8 @@ def main():
                 f"Collected {len(sample_times_s)} data samples at gripper position "
                 f"{gripper_position:.2f} and run {run_idx}."
             )
+
+            initializer.reset()
 
 
 if __name__ == "__main__":
