@@ -627,7 +627,7 @@ x, y = np.meshgrid(x_points, y_points)
 bin_bottom_box = np.vstack((x.flatten(), y.flatten(), np.zeros_like(x.flatten())))
 bin_bottom_box += np.array([0.0, 0.0, -bin_depth])[:, np.newaxis]
 
-platform_height = 0.062 # use value a bit higher than it is to reduce pcd noise
+platform_height = 0.065 # use value a bit higher than it is to reduce pcd noise
 
 # Pose of the 2nd bin to place the object into.
 end_bin = RigidTransform(RotationMatrix(RollPitchYaw(0.0, np.pi/2, np.pi)), [0.30, -0.55, 0.2])
@@ -1486,7 +1486,7 @@ class TwoGraspPlanner(LeafSystem):
         start = time.time()
         # Get manipuland pcd 
         cloud0 = self.GetInputPort("cloud_front").Eval(context)
-        X_adjust0 = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[-0.017, -0.025, -0.03])
+        X_adjust0 = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[-0.017, -0.025, -0.015])
         transformed_xyzs = X_adjust0 @ cloud0.xyzs()
         cloud0.mutable_xyzs()[:] = transformed_xyzs
         pcd0 = cloud0.Crop(lower_xyz=[0.23, -0.17, platform_height], upper_xyz=[0.7, 0.17, 0.27])
@@ -1494,7 +1494,7 @@ class TwoGraspPlanner(LeafSystem):
         pcd0.FlipNormalsTowardPoint(self._X_WC0.translation())
 
         cloud1 = self.GetInputPort("cloud_back_left").Eval(context)
-        X_adjust1 = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[-0.03, 0.0, -0.03])
+        X_adjust1 = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[-0.03, 0.0, -0.015])
         transformed_xyzs = X_adjust1 @ cloud1.xyzs()
         cloud1.mutable_xyzs()[:] = transformed_xyzs
         pcd1 = cloud1.Crop(lower_xyz=[0.23, -0.17, platform_height], upper_xyz=[0.7, 0.17, 0.27])
@@ -1502,7 +1502,7 @@ class TwoGraspPlanner(LeafSystem):
         pcd1.FlipNormalsTowardPoint(self._X_WC2.translation()) # I screwed up the cameras somewhere so the left anf right are flipped, need to fix
 
         cloud2 = self.GetInputPort("cloud_back_right").Eval(context)
-        X_adjust2 = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[0.0, 0.005, -0.01])
+        X_adjust2 = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[0.0, 0.005, 0.005])
         transformed_xyzs = X_adjust2 @ cloud2.xyzs()
         cloud2.mutable_xyzs()[:] = transformed_xyzs
         pcd2 = cloud2.Crop(lower_xyz=[0.23, -0.17, platform_height], upper_xyz=[0.7, 0.17, 0.27])
@@ -1512,6 +1512,19 @@ class TwoGraspPlanner(LeafSystem):
         merged_pcd = Concatenate([pcd0, pcd1, pcd2])
         down_sampled_pcd = merged_pcd.VoxelizedDownSample(voxel_size=ONLINE_VOXEL_RADIUS)
 
+        
+        # remove outliers
+        o3d_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(down_sampled_pcd.xyzs().T))
+        try:
+            cl, ind = o3d_cloud.remove_statistical_outlier(
+                nb_neighbors=int(down_sampled_pcd.xyzs().shape[1] // 10), 
+                std_ratio=2.0)
+            filtered_pts = np.asarray(o3d_cloud.points)[ind]
+            down_sampled_pcd.resize(filtered_pts.shape[0])
+            down_sampled_pcd.mutable_xyzs()[:] = filtered_pts.T
+        except:
+            pass
+        
         VISUALIZE_MERGED_PCD = True
         if VISUALIZE_MERGED_PCD:
             pcd = down_sampled_pcd.xyzs().T # Shape (N,3)
@@ -1520,18 +1533,6 @@ class TwoGraspPlanner(LeafSystem):
             o3d_pcd.paint_uniform_color([0,0,1])
             o3d_pcd.normals = o3d.utility.Vector3dVector(pcd_normals)
             o3d.visualization.draw_geometries([o3d_pcd], point_show_normal=True, window_name="merged pcd")
-        
-        # remove outliers
-        o3d_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(down_sampled_pcd.xyzs().T))
-        try:
-            cl, ind = o3d_cloud.remove_statistical_outlier(
-                nb_neighbors=int(down_sampled_pcd.xyzs().shape[1] // 20), 
-                std_ratio=0.8)
-            filtered_pts = np.asarray(o3d_cloud.points)[ind]
-            down_sampled_pcd.resize(filtered_pts.shape[0])
-            down_sampled_pcd.mutable_xyzs()[:] = filtered_pts.T
-        except:
-            pass
         
         mode = context.get_abstract_state(int(self._mode_index)).get_value()
         # Use RANSAC to find transformation from original pose during second grasp
@@ -1671,8 +1672,8 @@ class TwoGraspPlanner(LeafSystem):
         # remove outliers
         o3d_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(merged_pcd.xyzs().T))
         cl, ind = o3d_cloud.remove_statistical_outlier(
-            nb_neighbors=int(merged_pcd.xyzs().shape[1] // 20), 
-            std_ratio=0.8)
+            nb_neighbors=int(merged_pcd.xyzs().shape[1] // 10), 
+            std_ratio=2.0)
         filtered_pts = np.asarray(o3d_cloud.points)[ind]
         merged_pcd.resize(filtered_pts.shape[0])
         merged_pcd.mutable_xyzs()[:] = filtered_pts.T
