@@ -51,7 +51,7 @@ class GraspListener():
                 os.path.join(os.path.dirname( __file__ ), '..', 'scenario_datas', 'gripper_sdf.pkl'))
         if hand_finger_extra_buffer_path == None:
             hand_finger_extra_buffer_path = os.path.abspath(
-                os.path.join(os.path.dirname( __file__ ), '..', 'scenario_datas', 'gripper_sdf.pkl'))
+                os.path.join(os.path.dirname( __file__ ), '..', 'scenario_datas', 'large_gripper_sdf.pkl'))
         print("Loading hand collision model from ", hand_finger_path)
         self.hand_collision_model = SignedDensityField.from_pkl(hand_finger_path)
         print("Loading extra buffer hand collision model from ", hand_finger_extra_buffer_path)
@@ -199,7 +199,7 @@ class GraspListener():
             gripper_cloud.paint_uniform_color([1.0, 0.0, 0.0])
 
             viz_geoms = [manipuland_cloud, gripper_cloud]
-            o3d.visualization.draw_plotly(viz_geoms)
+            o3d.visualization.draw_geometries(viz_geoms)
 
         return dist.min()
 
@@ -539,6 +539,8 @@ class GraspListener():
         proportion_enclosed_cost = 1e3 if proportion_enclosed < 0.05 else 0
         proportion_good_enclosed = good_normals_within_grasp/num_pcd_pts
         proportion_good_enclosed_cost = 1e3 if proportion_good_enclosed < 0.01 else 0
+        proportion_enclosed_good = good_normals_within_grasp/within_box_pt_normals.shape[1]
+        proportion_enclosed_good_cost = 1e3 if proportion_enclosed_good < 0.1 else 0
 
         cost_dict = {
             "antipodal_cost": 100.0 * antipodal_cost,
@@ -550,6 +552,8 @@ class GraspListener():
             "proportion_enclosed_cost": proportion_enclosed_cost,
             "proportion_good_enclosed": proportion_good_enclosed,
             "proportion_good_enclosed_cost": proportion_good_enclosed_cost,
+            "proportion_enclosed_good": proportion_enclosed_good,
+            "proportion_enclosed_good_cost": proportion_enclosed_good_cost,
             "num_pcd_pts": num_pcd_pts,
             "within_box_pt_normals.shape[1]": within_box_pt_normals.shape[1],
             "good_normals_within_grasp": good_normals_within_grasp
@@ -561,6 +565,7 @@ class GraspListener():
             cost_dict["higher_up_cost"],
             cost_dict["proportion_enclosed_cost"],
             cost_dict["proportion_good_enclosed_cost"],
+            cost_dict["proportion_enclosed_good_cost"],
         ]
         cost = sum(considered_costs)
 
@@ -1239,7 +1244,8 @@ class GraspListener():
                 app = FramePlacerApp(manipuland_cloud)
                 gui.Application.instance.run()
                 frames = app.frames
-                origin = app.frame_origin
+                origins = app.frame_origins
+                buffers = app.buffers
                 del app
                 print(f"Got {len(frames)} frames")
                 if grasp_type == GraspType.PAIR and len(frames) < 2:
@@ -1248,31 +1254,38 @@ class GraspListener():
                 elif len(frames) < 1:
                     print("Need at least 1 frame. Retrying.")
                     return get_frames()
-                return frames, origin
+                return frames, origins, buffers
             
             num_repeats = 1 # Increase for grasp cost debugging. Keep at 1 otherwise.
             for _ in range(num_repeats):
-                X_WGs, origin = get_frames()
+                X_WGs, origins, buffers = get_frames()
                 if len(X_WGs) == 0:
                     continue
 
                 # Move up to prevent collisions.
                 X_WGs_collision_free = []
                 for i, X_WG in enumerate(X_WGs):
-                    print(origin)
+                    buffer = buffers[i]
+                    transformed_pcd_xyzs = merged_pcd.xyzs() - (buffer * X_WG[:3, 2])[:, np.newaxis]
+                    transformed_pcd = PointCloud(transformed_pcd_xyzs.shape[1])
+                    transformed_pcd.mutable_xyzs()[:] = transformed_pcd_xyzs
+                    
                     distance, X_WPnew = self.find_minimum_distance(
-                        merged_pcd, 
+                        transformed_pcd, 
                         RigidTransform(X_WG), 
+                        # min_range=-0.11 - buffer,
+                        # max_range=-0.01 - buffer,
                         use_extra_buffer=use_extra_buffer,
+                        viz=True
                     )
                     if np.isnan(distance):
                         print(f"Frame {i} in collision")
                         continue
                     X_WGs_collision_free.append(X_WPnew.GetAsMatrix4())
 
-                    # Calculate scores
+                    # Calculate scores (for debugging)
                     pcd_points = pcd.xyzs().T
-                    split_ratio, split_axes, length = self.compute_pcd_split_ratio_at_point(pcd_points, origin)
+                    split_ratio, split_axes, length = self.compute_pcd_split_ratio_at_point(pcd_points, origins[i])
                     is_nonempty, within_box_pt_normals, proportion_enclosed = self.check_nonempty(pcd, X_WPnew)
                     cost, cost_dict = self.compute_costs(
                                     X_WPnew, 
@@ -1307,6 +1320,7 @@ class GraspListener():
                 ]
             else:
                 self.grasp_candidates: List[np.ndarray] = X_WGs_collision_free
+            self.sorted_costs = [0.0 for _ in range(len(self.grasp_candidates))]
             return
 
 
@@ -1332,7 +1346,7 @@ class GraspListener():
         VISUALIZE_EACH = False
         VISUALIZE_ALL = False # Heat map of good to bad grasps but too messy for fine detail
         VISUALIZE_ORIG = False
-        VISUALIZE_SORTED_WITH_COSTS = False
+        VISUALIZE_SORTED_WITH_COSTS = True
 
         np.random.seed(random_seed)
 
@@ -1375,12 +1389,12 @@ class GraspListener():
             split_ratio_filtered_normals = downsampled_pcd.normals()[:, mask].T
 
         if VISUALIZE_FILTERED_CLOUDS:
-            manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
+            manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(downsampled_pcd_points))
             manipuland_cloud.paint_uniform_color([0.7, 0.7, 0.7])
             filtered_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(split_ratio_filtered_points))
             filtered_cloud.paint_uniform_color([1,0,0])
 
-            o3d.visualization.draw_plotly([
+            o3d.visualization.draw_geometries([
                 manipuland_cloud, filtered_cloud
             ], window_name="points after split ratio filtering")
 
@@ -1408,7 +1422,7 @@ class GraspListener():
                 o3d.utility.Vector3dVector(split_ratio_filtered_points[darboux_frame_sample_indices]))
             filtered_cloud.paint_uniform_color([1,0,0])
 
-            o3d.visualization.draw_plotly([
+            o3d.visualization.draw_geometries([
                 manipuland_cloud, filtered_cloud
             ], window_name="sampled points for grasp computation")
 
@@ -1803,6 +1817,47 @@ class GraspListener():
                     ]
                     o3d.visualization.draw_geometries(viz_geoms)
         else:
+            if grasp_type == GraspType.STABLE:
+                candidate_lst_temp = []
+                for X_WG in candidate_lst:
+                    X_GW = (RigidTransform(X_WG) @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0])).inverse()
+                    pcd_G_np = X_GW.multiply(pcd.xyzs())
+
+                    # get points in closing region
+                    crop_min = [-0.0125, -0.053, 0.03]
+                    crop_max = [0.0125, 0.053, 0.03+0.14] # finray is ~14cm long
+
+                    # Check if there are any points within the cropped region.
+                    pcd_enclosed_check = RigidTransform(X_WG).inverse().multiply(pcd.xyzs())
+                    mask = (
+                        (crop_min[0] <= pcd_enclosed_check[0, :])
+                        * (pcd_enclosed_check[0, :] <= crop_max[0])
+                        * (crop_min[1] <= pcd_enclosed_check[1, :])
+                        * (pcd_enclosed_check[1, :] <= crop_max[1])
+                        * (crop_min[2] <= pcd_enclosed_check[2, :])
+                        * (pcd_enclosed_check[2, :] <= crop_max[2])
+                    )
+                    indices = np.nonzero(mask)[0]
+                    pcd_enclosed = pcd_G_np[:, indices]
+
+                    manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd_G_np.T))
+                    manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
+                    enclosed_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd_enclosed.T))
+                    enclosed_cloud.paint_uniform_color([0.0, 1.0, 0.0])
+
+                    gripper_xyzs = self.hand_collision_model.to_pcd()
+                    # RollPitchYaw(np.pi/2, 0, np.pi/2) is world to wsg specific transform.
+                    # WSG y axis needs to be aligned with world -z.
+                    gripper_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(gripper_xyzs)).voxel_down_sample(0.005)
+                    gripper_cloud.paint_uniform_color([1.0, 0.0, 0.0])
+                    viz_geoms = [manipuland_cloud, enclosed_cloud, gripper_cloud]
+
+                    x_mid = (np.max(pcd_enclosed[0, :]) + np.min(pcd_enclosed[0, :])) / 2
+                    X_WG_new = np.copy(X_WG)
+                    X_WG_new[:3, 3] += x_mid * X_WG[1, :3]
+                    candidate_lst_temp.append(X_WG_new)
+                candidate_lst = candidate_lst_temp
+
             sorted_indices = np.argsort(candidate_costs)
             candidate_lst_sorted = [candidate_lst[idx] for idx in sorted_indices]
 

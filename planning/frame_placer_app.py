@@ -7,9 +7,10 @@ class FramePlacerApp:
     def __init__(self, pcd):
         self.pcd = pcd
         self.frames = []         # List to store finalized 4x4 transformation matrices.
+        self.frame_origins = []  # List to store finalized (3,) frame origin points
+        self.buffers = []        # List to store finalized grasp buffers
         self.temp_origin = None  # The origin (3D point) chosen for the temporary frame.
-        self.frame_origin = None # The origin (3D point) chosen for the previous confirmed frame
-        self.temp_angles = [0.0, 0.0, 0.0]  # [roll, pitch, yaw] in degrees.
+        self.temp_angles = [0.0, 0.0, 0.0, 0.0]  # [roll, pitch, yaw, buffer] in degrees/m.
         self.is_placing = False  # Whether we are waiting for a click to place a frame.
         self.temp_frame_name = "TempFrame"
 
@@ -52,6 +53,13 @@ class FramePlacerApp:
         self.yaw_slider.double_value = 0.0
         self.yaw_slider.set_on_value_changed(self.on_angle_changed)
         self.panel.add_child(self.yaw_slider)
+        # Add buffer slider.
+        self.panel.add_child(gui.Label("Buffer (m)"))
+        self.buffer_slider = gui.Slider(gui.Slider.DOUBLE)
+        self.buffer_slider.set_limits(0.0, 0.12)
+        self.buffer_slider.double_value = 0.0
+        self.buffer_slider.set_on_value_changed(self.on_angle_changed)
+        self.panel.add_child(self.buffer_slider)
         # Add Confirm Frame button.
         self.confirm_button = gui.Button("Confirm Frame")
         self.confirm_button.horizontal_padding_em = 0.5
@@ -109,7 +117,7 @@ class FramePlacerApp:
         print("Entering placement mode: click on the point cloud to set frame origin.")
         self.is_placing = True
         self.temp_origin = None
-        self.temp_angles = [0.0, 0.0, 0.0]
+        self.temp_angles = [0.0, 0.0, 0.0, 0.0]
         self.roll_slider.double_value = 0.0
         self.pitch_slider.double_value = 0.0
         self.yaw_slider.double_value = 0.0
@@ -126,6 +134,7 @@ class FramePlacerApp:
             self.roll_slider.double_value,
             self.pitch_slider.double_value,
             self.yaw_slider.double_value,
+            self.buffer_slider.double_value,
         ]
         T = self.compute_transformation(self.temp_origin, self.temp_angles)
         try:
@@ -143,12 +152,13 @@ class FramePlacerApp:
             return
         T = self.compute_transformation(self.temp_origin, self.temp_angles)
         self.frames.append(T)
+        self.frame_origins.append(self.temp_origin)
+        self.buffers.append(self.buffer_slider.double_value)
         name = f"Frame_{len(self.frames)}"
         frame_geom = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
         frame_geom.transform(T)
         self.scene.scene.add_geometry(name, frame_geom, rendering.MaterialRecord())
         print(f"Frame confirmed: {T}")
-        self.frame_origin = self.temp_origin
         self.temp_origin = None
         self.is_placing = False
         try:
@@ -169,7 +179,8 @@ class FramePlacerApp:
         self.scene.force_redraw()
 
     def compute_transformation(self, origin, angles):
-        roll, pitch, yaw = np.radians(angles)
+        buffer = angles[3]
+        roll, pitch, yaw, _ = np.radians(angles)
         Rz = np.array([
             [np.cos(yaw), -np.sin(yaw), 0],
             [np.sin(yaw),  np.cos(yaw), 0],
@@ -188,7 +199,7 @@ class FramePlacerApp:
         R = Rz @ Ry @ Rx
         T = np.eye(4)
         T[:3, :3] = R
-        T[:3, 3] = origin
+        T[:3, 3] = origin - (buffer * R[:, 2])
         return T
 
     def pick_point_from_click(self, x, y, threshold=10.0):

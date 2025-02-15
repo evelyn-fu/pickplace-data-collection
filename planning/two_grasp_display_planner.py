@@ -627,7 +627,7 @@ x, y = np.meshgrid(x_points, y_points)
 bin_bottom_box = np.vstack((x.flatten(), y.flatten(), np.zeros_like(x.flatten())))
 bin_bottom_box += np.array([0.0, 0.0, -bin_depth])[:, np.newaxis]
 
-platform_height = 0.06 # use value a bit higher than it is to reduce pcd noise
+platform_height = 0.062 # use value a bit higher than it is to reduce pcd noise
 
 # Pose of the 2nd bin to place the object into.
 end_bin = RigidTransform(RotationMatrix(RollPitchYaw(0.0, np.pi/2, np.pi)), [0.30, -0.55, 0.2])
@@ -864,7 +864,7 @@ class TwoGraspPlanner(LeafSystem):
             if context.get_time() > traj_q.end_time() + start_time:
                 state.get_mutable_abstract_state(
                     int(self._mode_index)
-                ).set_value(PlannerState.PLAN_PICK)
+                ).set_value(PlannerState.PLAN_SYS_ID)
             return
         if mode == PlannerState.PLAN_PICK:
             self.PlanBinPick(context, state, PlannerState.GO_TO_PICK_PREGRASP)
@@ -1164,6 +1164,7 @@ class TwoGraspPlanner(LeafSystem):
                                         ONLINE_VOXEL_RADIUS)
         
         # Planning first grasping trajectory
+        is_manual = False
         self.grasp_node.compute_candidate_grasps(
             bin_pcd,
             scene_pcd,
@@ -1180,39 +1181,41 @@ class TwoGraspPlanner(LeafSystem):
             num_yaw_samples=20,
             point_up=True,
             split_ratio_threshold=0.15,
-            voxel_radius=ONLINE_VOXEL_RADIUS
+            voxel_radius=ONLINE_VOXEL_RADIUS,
+            is_manual=is_manual
         )
 
         grasps, grasp_costs = self.grasp_node.get_best_grasps()
-        grasps = copy.deepcopy(grasps)
-        grasp_costs = copy.deepcopy(grasp_costs)
-        while len(grasps) < 5:
-            print(f"not enough grasps ({len(grasps)}), sampling more points")
-            self.grasp_node.compute_candidate_grasps(
-                bin_pcd,
-                scene_pcd,
-                candidate_num=1,
-                num_samples=15,
-                random_seed=np.random.randint(1000),
-                grasp_type=GraspType.TOP,
-                roll_min = 0.0,
-                roll_max = 0.0,
-                num_roll_samples=1,
-                pitch_min = 0.0,
-                pitch_max = 0.0,
-                num_pitch_samples=1,
-                num_yaw_samples=20,
-                point_up=True,
-                split_ratio_threshold=0.0,
-                voxel_radius=ONLINE_VOXEL_RADIUS
-            )
-            new_grasps, new_grasp_costs = self.grasp_node.get_best_grasps()
-            print("num new grasps:", len(new_grasps))
-            grasps += new_grasps
-            grasp_costs += new_grasp_costs
+        if not is_manual:
+            grasps = copy.deepcopy(grasps)
+            grasp_costs = copy.deepcopy(grasp_costs)
+            while len(grasps) < 5:
+                print(f"not enough grasps ({len(grasps)}), sampling more points")
+                self.grasp_node.compute_candidate_grasps(
+                    bin_pcd,
+                    scene_pcd,
+                    candidate_num=1,
+                    num_samples=15,
+                    random_seed=np.random.randint(1000),
+                    grasp_type=GraspType.TOP,
+                    roll_min = 0.0,
+                    roll_max = 0.0,
+                    num_roll_samples=1,
+                    pitch_min = 0.0,
+                    pitch_max = 0.0,
+                    num_pitch_samples=1,
+                    num_yaw_samples=20,
+                    point_up=True,
+                    split_ratio_threshold=0.0,
+                    voxel_radius=ONLINE_VOXEL_RADIUS
+                )
+                new_grasps, new_grasp_costs = self.grasp_node.get_best_grasps()
+                print("num new grasps:", len(new_grasps))
+                grasps += new_grasps
+                grasp_costs += new_grasp_costs
 
-            new_sorted_inds = np.argsort(np.array(grasp_costs))
-            grasps = [grasps[idx] for idx in new_sorted_inds]
+                new_sorted_inds = np.argsort(np.array(grasp_costs))
+                grasps = [grasps[idx] for idx in new_sorted_inds]
 
         print("bin grasps:", len(grasps))
         q = self.get_input_port(self._iiwa_position_index).Eval(context)
@@ -1254,7 +1257,7 @@ class TwoGraspPlanner(LeafSystem):
         flattened_cloud = np.copy(cropped_cloud.xyzs())
         flattened_cloud[2,:] = np.clip(
             flattened_cloud[2,:],
-            np.max(flattened_cloud[2,:]) - (np.max(flattened_cloud[2,:]) - np.min(flattened_cloud[2,:])) / 10.0,
+            np.max(flattened_cloud[2,:]) - 0.001,
             np.max(flattened_cloud[2,:])
         )
         principal_component, secondary_component, _ = compute_principal_minor_components(cropped_cloud.xyzs().T)
@@ -1272,8 +1275,8 @@ class TwoGraspPlanner(LeafSystem):
         rot_mat = X_WG_bin.GetAsMatrix4()[:3,:3]
         eff_perpendicular_vec = rot_mat.dot(np.array([1, 0, 0]))
         eff_parallel_vec = rot_mat.dot(np.array([0, 1, 0]))
-        perpendicular_score = np.abs(eff_perpendicular_vec @ secondary_component)
-        parallel_score = np.abs(eff_parallel_vec @ secondary_component) # idk why the secondary axis is lining up...
+        perpendicular_score = np.abs(eff_perpendicular_vec @ principal_component)
+        parallel_score = np.abs(eff_parallel_vec @ principal_component) # idk why the secondary axis is lining up...
         
         if perpendicular_score > parallel_score:
             print("Using stage_center0")
@@ -1347,6 +1350,7 @@ class TwoGraspPlanner(LeafSystem):
                                         cci.Voxels(self.current_manipuland_pcd.xyzs()), 
                                         ONLINE_VOXEL_RADIUS)
         
+        is_manual = False
         self.grasp_node.compute_candidate_grasps(
             self.current_manipuland_pcd,
             pcd_with_background,
@@ -1354,30 +1358,32 @@ class TwoGraspPlanner(LeafSystem):
             num_samples=30,
             random_seed=np.random.randint(1000),
             grasp_type=GraspType.STABLE,
-            split_ratio_threshold=0.65
+            split_ratio_threshold=0.5,
+            is_manual=is_manual
         )
 
         grasps, grasp_costs = self.grasp_node.get_best_grasps()
-        grasps = copy.deepcopy(grasps)
-        grasp_costs = copy.deepcopy(grasp_costs)
-        while len(grasps) < 5:
-            print(f"not enough grasps ({len(grasps)}), sampling more points")
-            self.grasp_node.compute_candidate_grasps(
-                self.current_manipuland_pcd,
-                pcd_with_background,
-                candidate_num=1,
-                num_samples=30,
-                random_seed=np.random.randint(1000),
-                grasp_type=GraspType.STABLE,
-                split_ratio_threshold=0.65
-            )
-            new_grasps, new_grasp_costs = self.grasp_node.get_best_grasps()
-            print("num new grasps:", len(new_grasps))
-            grasps += new_grasps
-            grasp_costs += new_grasp_costs
+        if not is_manual:
+            grasps = copy.deepcopy(grasps)
+            grasp_costs = copy.deepcopy(grasp_costs)
+            while len(grasps) < 5:
+                print(f"not enough grasps ({len(grasps)}), sampling more points")
+                self.grasp_node.compute_candidate_grasps(
+                    self.current_manipuland_pcd,
+                    pcd_with_background,
+                    candidate_num=1,
+                    num_samples=30,
+                    random_seed=np.random.randint(1000),
+                    grasp_type=GraspType.STABLE,
+                    split_ratio_threshold=0.65
+                )
+                new_grasps, new_grasp_costs = self.grasp_node.get_best_grasps()
+                print("num new grasps:", len(new_grasps))
+                grasps += new_grasps
+                grasp_costs += new_grasp_costs
 
-            new_sorted_inds = np.argsort(np.array(grasp_costs))
-            grasps = [grasps[idx] for idx in new_sorted_inds]
+                new_sorted_inds = np.argsort(np.array(grasp_costs))
+                grasps = [grasps[idx] for idx in new_sorted_inds]
 
         print("grasps:", len(grasps))
         q = self.get_input_port(self._iiwa_position_index).Eval(context)
@@ -1480,24 +1486,24 @@ class TwoGraspPlanner(LeafSystem):
         start = time.time()
         # Get manipuland pcd 
         cloud0 = self.GetInputPort("cloud_front").Eval(context)
-        X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[-0.017, -0.025, 0.0])
-        transformed_xyzs = X_adjust @ cloud0.xyzs()
+        X_adjust0 = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[-0.017, -0.025, -0.03])
+        transformed_xyzs = X_adjust0 @ cloud0.xyzs()
         cloud0.mutable_xyzs()[:] = transformed_xyzs
         pcd0 = cloud0.Crop(lower_xyz=[0.23, -0.17, platform_height], upper_xyz=[0.7, 0.17, 0.27])
         pcd0.EstimateNormals(radius=0.1, num_closest=30)
         pcd0.FlipNormalsTowardPoint(self._X_WC0.translation())
 
         cloud1 = self.GetInputPort("cloud_back_left").Eval(context)
-        X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[-0.03, 0.0, -0.02])
-        transformed_xyzs = X_adjust @ cloud1.xyzs()
+        X_adjust1 = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[-0.03, 0.0, -0.03])
+        transformed_xyzs = X_adjust1 @ cloud1.xyzs()
         cloud1.mutable_xyzs()[:] = transformed_xyzs
         pcd1 = cloud1.Crop(lower_xyz=[0.23, -0.17, platform_height], upper_xyz=[0.7, 0.17, 0.27])
         pcd1.EstimateNormals(radius=0.1, num_closest=30)
         pcd1.FlipNormalsTowardPoint(self._X_WC2.translation()) # I screwed up the cameras somewhere so the left anf right are flipped, need to fix
 
         cloud2 = self.GetInputPort("cloud_back_right").Eval(context)
-        X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[0.0, 0.005, 0.0])
-        transformed_xyzs = X_adjust @ cloud2.xyzs()
+        X_adjust2 = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[0.0, 0.005, -0.01])
+        transformed_xyzs = X_adjust2 @ cloud2.xyzs()
         cloud2.mutable_xyzs()[:] = transformed_xyzs
         pcd2 = cloud2.Crop(lower_xyz=[0.23, -0.17, platform_height], upper_xyz=[0.7, 0.17, 0.27])
         pcd2.EstimateNormals(radius=0.1, num_closest=30)
@@ -1506,7 +1512,7 @@ class TwoGraspPlanner(LeafSystem):
         merged_pcd = Concatenate([pcd0, pcd1, pcd2])
         down_sampled_pcd = merged_pcd.VoxelizedDownSample(voxel_size=ONLINE_VOXEL_RADIUS)
 
-        VISUALIZE_MERGED_PCD = False
+        VISUALIZE_MERGED_PCD = True
         if VISUALIZE_MERGED_PCD:
             pcd = down_sampled_pcd.xyzs().T # Shape (N,3)
             pcd_normals = down_sampled_pcd.normals().T # Shape (N,3)
@@ -1640,24 +1646,21 @@ class TwoGraspPlanner(LeafSystem):
         start = time.time()
         # Get table pcd 
         cloud0 = self.GetInputPort("cloud_front").Eval(context)
-        X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[-0.017, -0.025, -0.02])
-        transformed_xyzs = X_adjust @ cloud0.xyzs()
+        transformed_xyzs = X_adjust0 @ cloud0.xyzs()
         cloud0.mutable_xyzs()[:] = transformed_xyzs
         pcd0 = cloud0.Crop(lower_xyz=[0.1, -0.3, 0.0], upper_xyz=[0.85, 0.3, 0.07]).VoxelizedDownSample(voxel_size=0.01)
         pcd0.EstimateNormals(radius=0.1, num_closest=30)
         pcd0.FlipNormalsTowardPoint(self._X_WC0.translation())
 
         cloud1 = self.GetInputPort("cloud_back_left").Eval(context)
-        X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[-0.03, 0.0, 0.0])
-        transformed_xyzs = X_adjust @ cloud1.xyzs()
+        transformed_xyzs = X_adjust1 @ cloud1.xyzs()
         cloud1.mutable_xyzs()[:] = transformed_xyzs
         pcd1 = cloud1.Crop(lower_xyz=[0.1, -0.3, 0.0], upper_xyz=[0.85, 0.3, 0.07]).VoxelizedDownSample(voxel_size=0.01)
         pcd1.EstimateNormals(radius=0.1, num_closest=30)
         pcd1.FlipNormalsTowardPoint(self._X_WC1.translation())
 
         cloud2 = self.GetInputPort("cloud_back_right").Eval(context)
-        X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[0.0, 0.005, 0.0])
-        transformed_xyzs = X_adjust @ cloud2.xyzs()
+        transformed_xyzs = X_adjust2 @ cloud2.xyzs()
         cloud2.mutable_xyzs()[:] = transformed_xyzs
         pcd2 = cloud2.Crop(lower_xyz=[0.1, -0.3, 0.0], upper_xyz=[0.85, 0.3, 0.07]).VoxelizedDownSample(voxel_size=0.01)
         pcd2.EstimateNormals(radius=0.1, num_closest=30)
@@ -1845,6 +1848,7 @@ class TwoGraspPlanner(LeafSystem):
                                         ONLINE_VOXEL_RADIUS)
         # while not grasps_found:
         # Planning first grasping trajectory
+        is_manual = False
         self.grasp_node.compute_candidate_grasps(
             self.current_manipuland_pcd,
             pcd_with_background,
@@ -1854,34 +1858,35 @@ class TwoGraspPlanner(LeafSystem):
             grasp_type=GraspType.PAIR,
             split_ratio_threshold=0.15,
             ground_z=platform_height,
-            # is_manual=True,
-            use_extra_buffer=True
+            is_manual=is_manual,
+            use_extra_buffer=False
         )
 
         grasp_pairs, grasp_costs = self.grasp_node.get_best_grasps()
-        grasp_pairs = copy.deepcopy(grasp_pairs)
-        grasp_costs = copy.deepcopy(grasp_costs)
-        while len(grasp_pairs) < 10:
-            print("not enough pairs, sampling more points")
-            self.grasp_node.compute_candidate_grasps(
-                self.current_manipuland_pcd,
-                pcd_with_background,
-                candidate_num=1,
-                num_samples=30,
-                random_seed=np.random.randint(1000),
-                grasp_type=GraspType.PAIR,
-                split_ratio_threshold=0.15,
-                ground_z=platform_height,
-                # is_manual=True,
-                use_extra_buffer=True,
-            )
-            new_grasp_pairs, new_grasp_costs = self.grasp_node.get_best_grasps()
-            print("num new grasps:", len(new_grasp_pairs))
-            grasp_pairs += new_grasp_pairs
-            grasp_costs += new_grasp_costs
+        if not is_manual:
+            grasp_pairs = copy.deepcopy(grasp_pairs)
+            grasp_costs = copy.deepcopy(grasp_costs)
+            while len(grasp_pairs) < 10:
+                print("not enough pairs, sampling more points")
+                self.grasp_node.compute_candidate_grasps(
+                    self.current_manipuland_pcd,
+                    pcd_with_background,
+                    candidate_num=1,
+                    num_samples=30,
+                    random_seed=np.random.randint(1000),
+                    grasp_type=GraspType.PAIR,
+                    split_ratio_threshold=0.15,
+                    ground_z=platform_height,
+                    # is_manual=True,
+                    use_extra_buffer=False,
+                )
+                new_grasp_pairs, new_grasp_costs = self.grasp_node.get_best_grasps()
+                print("num new grasps:", len(new_grasp_pairs))
+                grasp_pairs += new_grasp_pairs
+                grasp_costs += new_grasp_costs
 
-            new_sorted_inds = np.argsort(np.array(grasp_costs))
-            grasp_pairs = [grasp_pairs[idx] for idx in new_sorted_inds]
+                new_sorted_inds = np.argsort(np.array(grasp_costs))
+                grasp_pairs = [grasp_pairs[idx] for idx in new_sorted_inds]
 
         print("grasp pairs:", len(grasp_pairs))
         q = self.get_input_port(self._iiwa_position_index).Eval(context)
