@@ -120,7 +120,7 @@ class SystemIDDataSaver(LeafSystem):
             "wsg.position_measured", size=1
         )
 
-        self.DeclarePerStepPublishEvent(self.save_logs)
+        self.DeclarePeriodicPublishEvent(5e-3, 0.0, self.save_logs)
 
         
     def save_logs(self, context: Context):
