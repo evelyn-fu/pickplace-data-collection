@@ -289,7 +289,7 @@ class GraspListener():
 
                     viz_geoms = [manipuland_cloud, gripper_cloud, gripper_next_cloud]
                     o3d.visualization.draw_plotly(viz_geoms)
-                    input(f"Found grasp {last_signed_distance}, {signed_distance}, {X_WGlast}")
+                    # input(f"Found grasp {last_signed_distance}, {signed_distance}, {X_WGlast}")
                 return last_signed_distance, X_WGlast
             
             # Record the computed values using last z.
@@ -325,7 +325,7 @@ class GraspListener():
 
                         viz_geoms = [manipuland_cloud, gripper_cloud, gripper_next_cloud]
                         o3d.visualization.draw_plotly(viz_geoms)
-                        input(f"Found grasp going backwards {last_signed_distance}, {signed_distance}, {X_WGlast}")
+                        # input(f"Found grasp going backwards {last_signed_distance}, {signed_distance}, {X_WGlast}")
                     return signed_distance, X_WGnew
                 
                 # Record the computed values using last z.
@@ -1259,7 +1259,7 @@ class GraspListener():
                         # min_range=-0.11 - buffer,
                         # max_range=-0.01 - buffer,
                         use_extra_buffer=use_extra_buffer,
-                        viz=True
+                        viz=False
                     )
                     if np.isnan(distance):
                         print(f"Frame {i} in collision")

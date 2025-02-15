@@ -1255,13 +1255,15 @@ class TwoGraspPlanner(LeafSystem):
         )
         self.meshcat.SetObject("cropped_cloud", cropped_cloud, point_size=0.001, rgba=Rgba(0,0,1,1))
 
+        # Flatten cloud to determine what way to place object after bin picking. We need to place it in a
+        # way such that good scanning grasps are kinematically feasible.
         flattened_cloud = np.copy(cropped_cloud.xyzs())
         flattened_cloud[2,:] = np.clip(
             flattened_cloud[2,:],
             np.max(flattened_cloud[2,:]) - 0.001,
             np.max(flattened_cloud[2,:])
         )
-        principal_component, secondary_component, _ = compute_principal_minor_components(cropped_cloud.xyzs().T)
+        principal_component, secondary_component, _ = compute_principal_minor_components(flattened_cloud.T)
         
         # visualize axes, principal axis is z axis (blue), secondary axis is x axis (red)
         z_axis, x_axis = [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]
