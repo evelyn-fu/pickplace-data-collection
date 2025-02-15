@@ -651,6 +651,7 @@ class TwoGraspPlanner(LeafSystem):
             pregrasp_dist=0.17,
             eef_to_gripper_length=0.16, # 0.16 for the real value,
             num_objs=1,
+            is_manual=False,
         ):
         LeafSystem.__init__(self)
 
@@ -666,6 +667,7 @@ class TwoGraspPlanner(LeafSystem):
         self._X_WC2 = X_WC2
         self._X_WC_bin = X_WC_bin
         self.objs_left = num_objs
+        self.is_manual = is_manual
 
         # for getting current positions
         self._ee_index = plant.GetBodyByName("iiwa_link_7").index()
@@ -864,7 +866,7 @@ class TwoGraspPlanner(LeafSystem):
             if context.get_time() > traj_q.end_time() + start_time:
                 state.get_mutable_abstract_state(
                     int(self._mode_index)
-                ).set_value(PlannerState.PLAN_SYS_ID)
+                ).set_value(PlannerState.PLAN_PICK)
             return
         if mode == PlannerState.PLAN_PICK:
             self.PlanBinPick(context, state, PlannerState.GO_TO_PICK_PREGRASP)
@@ -1164,7 +1166,6 @@ class TwoGraspPlanner(LeafSystem):
                                         ONLINE_VOXEL_RADIUS)
         
         # Planning first grasping trajectory
-        is_manual = False
         self.grasp_node.compute_candidate_grasps(
             bin_pcd,
             scene_pcd,
@@ -1182,11 +1183,11 @@ class TwoGraspPlanner(LeafSystem):
             point_up=True,
             split_ratio_threshold=0.15,
             voxel_radius=ONLINE_VOXEL_RADIUS,
-            is_manual=is_manual
+            is_manual=self.is_manual
         )
 
         grasps, grasp_costs = self.grasp_node.get_best_grasps()
-        if not is_manual:
+        if not self.is_manual:
             grasps = copy.deepcopy(grasps)
             grasp_costs = copy.deepcopy(grasp_costs)
             while len(grasps) < 5:
@@ -1350,7 +1351,6 @@ class TwoGraspPlanner(LeafSystem):
                                         cci.Voxels(self.current_manipuland_pcd.xyzs()), 
                                         ONLINE_VOXEL_RADIUS)
         
-        is_manual = False
         self.grasp_node.compute_candidate_grasps(
             self.current_manipuland_pcd,
             pcd_with_background,
@@ -1359,11 +1359,11 @@ class TwoGraspPlanner(LeafSystem):
             random_seed=np.random.randint(1000),
             grasp_type=GraspType.STABLE,
             split_ratio_threshold=0.5,
-            is_manual=is_manual
+            is_manual=self.is_manual
         )
 
         grasps, grasp_costs = self.grasp_node.get_best_grasps()
-        if not is_manual:
+        if not self.is_manual:
             grasps = copy.deepcopy(grasps)
             grasp_costs = copy.deepcopy(grasp_costs)
             while len(grasps) < 5:
@@ -1525,7 +1525,7 @@ class TwoGraspPlanner(LeafSystem):
         except:
             pass
         
-        VISUALIZE_MERGED_PCD = True
+        VISUALIZE_MERGED_PCD = False
         if VISUALIZE_MERGED_PCD:
             pcd = down_sampled_pcd.xyzs().T # Shape (N,3)
             pcd_normals = down_sampled_pcd.normals().T # Shape (N,3)
@@ -1849,7 +1849,6 @@ class TwoGraspPlanner(LeafSystem):
                                         ONLINE_VOXEL_RADIUS)
         # while not grasps_found:
         # Planning first grasping trajectory
-        is_manual = False
         self.grasp_node.compute_candidate_grasps(
             self.current_manipuland_pcd,
             pcd_with_background,
@@ -1859,12 +1858,12 @@ class TwoGraspPlanner(LeafSystem):
             grasp_type=GraspType.PAIR,
             split_ratio_threshold=0.15,
             ground_z=platform_height,
-            is_manual=is_manual,
+            is_manual=self.is_manual,
             use_extra_buffer=False
         )
 
         grasp_pairs, grasp_costs = self.grasp_node.get_best_grasps()
-        if not is_manual:
+        if not self.is_manual:
             grasp_pairs = copy.deepcopy(grasp_pairs)
             grasp_costs = copy.deepcopy(grasp_costs)
             while len(grasp_pairs) < 10:
@@ -1878,7 +1877,6 @@ class TwoGraspPlanner(LeafSystem):
                     grasp_type=GraspType.PAIR,
                     split_ratio_threshold=0.15,
                     ground_z=platform_height,
-                    # is_manual=True,
                     use_extra_buffer=False,
                 )
                 new_grasp_pairs, new_grasp_costs = self.grasp_node.get_best_grasps()
