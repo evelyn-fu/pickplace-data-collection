@@ -358,7 +358,7 @@ def main():
 
     # Add data loggers
     num_positions = station.GetInputPort("iiwa.position").size()
-    logging_period = scenario.plant_config.time_step
+    logging_period = 1e-3
     measured_position_logger: VectorLogSink = builder.AddNamedSystem(
         "measured_position_logger",
         VectorLogSink(num_positions, publish_period=logging_period),
