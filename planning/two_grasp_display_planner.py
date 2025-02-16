@@ -536,9 +536,9 @@ class PickState(Enum):
     TO_PLACE = 5
     PLACE = 6
 
-scanning_traj_robot_to_workspace_dist = 0.4
-scanning_traj_height = 0.45
-lift_for_display_height = 0.1
+scanning_traj_robot_to_workspace_dist = 0.45
+scanning_traj_height = 0.50
+lift_for_display_height = 0.05
 yaw_display_traj = []
 yaw_display_traj.append(
     RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0)),
