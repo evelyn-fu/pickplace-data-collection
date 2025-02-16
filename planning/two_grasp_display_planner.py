@@ -652,13 +652,15 @@ class TwoGraspPlanner(LeafSystem):
             eef_to_gripper_length=0.16, # 0.16 for the real value,
             num_objs=1,
             is_manual=True,
+            sys_id_grasp_only=False
         ):
         LeafSystem.__init__(self)
 
         # For grasp planner
         self.current_scene_pcd = PointCloud(0)
         self.current_manipuland_pcd = PointCloud(0)
-        self.DeclareAbstractInputPort("cloud_bin", AbstractValue.Make(PointCloud(0)))
+        if not sys_id_grasp_only:
+            self.DeclareAbstractInputPort("cloud_bin", AbstractValue.Make(PointCloud(0)))
         self.DeclareAbstractInputPort("cloud_front", AbstractValue.Make(PointCloud(0)))
         self.DeclareAbstractInputPort("cloud_back_right", AbstractValue.Make(PointCloud(0)))
         self.DeclareAbstractInputPort("cloud_back_left", AbstractValue.Make(PointCloud(0)))
@@ -668,6 +670,7 @@ class TwoGraspPlanner(LeafSystem):
         self._X_WC_bin = X_WC_bin
         self.objs_left = num_objs
         self.is_manual = is_manual
+        self.sys_id_grasp_only = sys_id_grasp_only
 
         # for getting current positions
         self._ee_index = plant.GetBodyByName("iiwa_link_7").index()
@@ -818,7 +821,11 @@ class TwoGraspPlanner(LeafSystem):
         self.models_path = models_path
         self.savedir = dirstr
         self.system_id_savedir = os.path.join(dirstr, "system_id_data")
+        if not os.path.exists(self.system_id_savedir):
+            os.makedirs(self.system_id_savedir)
         self.done = False
+        if sys_id_grasp_only:
+            self.doing_sys_id = False
 
         self.pcd0 = None
         self.pcd1 = None
@@ -864,9 +871,14 @@ class TwoGraspPlanner(LeafSystem):
                 int(self._current_joint_traj_idx)
             ).get_value().start_time_s
             if context.get_time() > traj_q.end_time() + start_time:
-                state.get_mutable_abstract_state(
-                    int(self._mode_index)
-                ).set_value(PlannerState.PLAN_SYS_ID)
+                if not self.sys_id_grasp_only:
+                    state.get_mutable_abstract_state(
+                        int(self._mode_index)
+                    ).set_value(PlannerState.PLAN_PICK)
+                else:
+                    state.get_mutable_abstract_state(
+                        int(self._mode_index)
+                    ).set_value(PlannerState.PLAN_SYS_ID)
             return
         if mode == PlannerState.PLAN_PICK:
             self.PlanBinPick(context, state, PlannerState.GO_TO_PICK_PREGRASP)
@@ -1061,13 +1073,15 @@ class TwoGraspPlanner(LeafSystem):
                     int(self._pick_mode_index)
                 ).set_value(PickState.DISPLAY)
                 if sys_id:
-                    print("Doing sysid")
+                    if self.sys_id_grasp_only:
+                        self.doing_sys_id = True
+                        return
                     self.DoSysID(context, state)
                 else:
                     self.DoDisplay(context, state)
                 # input("Next: DoDisplay (IK + Toppra)") # pause for debugging
         if pick_mode == PickState.DISPLAY:
-            if context.get_time() > traj_q.end_time() + start_time:
+            if (self.sys_id_grasp_only and not self.doing_sys_id) or (context.get_time() > traj_q.end_time() + start_time):
                 state.get_mutable_abstract_state(
                     int(self._pick_mode_index)
                 ).set_value(PickState.TO_PLACE)

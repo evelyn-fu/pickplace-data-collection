@@ -2,16 +2,16 @@ import numpy as np
 
 from pydrake.all import MultibodyPlant, PathParameterizedTrajectory, Toppra, Trajectory, PiecewisePolynomial
 
-def make_pl_traj(path, speed=0.1, startup_time=0.5):
+def make_pl_traj(path, speed=0.1, startup_time=0.5, start_time=0.0):
     cleaned_path = [path[0,:]]
-    t_breaks = [startup_time]
+    t_breaks = [startup_time + start_time]
     movement_between_segment = np.linalg.norm(path[1:,:] - path[:-1,:], axis=1, ord=np.inf)
     for s, next_config in zip(movement_between_segment/speed, path[1:]):
         if s + t_breaks[-1] > t_breaks[-1] + 2.220446049250313e-16:
             t_breaks += [s + t_breaks[-1]]
             cleaned_path.append(next_config)
     if startup_time > 0:
-        t_breaks = [0] + t_breaks + [t_breaks[-1] + startup_time]
+        t_breaks = [start_time] + t_breaks + [t_breaks[-1] + startup_time]
         cleaned_path = [cleaned_path[0]] + cleaned_path + [cleaned_path[-1]]
     
     return PiecewisePolynomial.FirstOrderHold(t_breaks, np.array(cleaned_path).T)
@@ -39,7 +39,8 @@ def reparameterize_with_toppra(
     velocity_limits: np.ndarray,
     acceleration_limits: np.ndarray,
     num_grid_points: int = 1000,
-    is_pl: bool = False
+    is_pl: bool = False,
+    start_time=0.0,
 ) -> PathParameterizedTrajectory:
     """Reparameterize a trajectory/ path with Toppra.
 
@@ -60,7 +61,7 @@ def reparameterize_with_toppra(
     """
     pl_trajectory = trajectory
     if not is_pl:
-        pl_trajectory = make_pl_traj(trajectory)
+        pl_trajectory = make_pl_traj(trajectory, start_time=start_time)
     
     toppra = Toppra(
         path=pl_trajectory,
