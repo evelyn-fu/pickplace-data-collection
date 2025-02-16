@@ -1660,14 +1660,14 @@ class TwoGraspPlanner(LeafSystem):
         cloud1.mutable_xyzs()[:] = transformed_xyzs
         pcd1 = cloud1.Crop(lower_xyz=[0.1, -0.3, 0.0], upper_xyz=[0.85, 0.3, 0.07]).VoxelizedDownSample(voxel_size=0.01)
         pcd1.EstimateNormals(radius=0.1, num_closest=30)
-        pcd1.FlipNormalsTowardPoint(self._X_WC1.translation())
+        pcd1.FlipNormalsTowardPoint(self._X_WC2.translation())
 
         cloud2 = self.GetInputPort("cloud_back_right").Eval(context)
         transformed_xyzs = X_adjust2 @ cloud2.xyzs()
         cloud2.mutable_xyzs()[:] = transformed_xyzs
         pcd2 = cloud2.Crop(lower_xyz=[0.1, -0.3, 0.0], upper_xyz=[0.85, 0.3, 0.07]).VoxelizedDownSample(voxel_size=0.01)
         pcd2.EstimateNormals(radius=0.1, num_closest=30)
-        pcd2.FlipNormalsTowardPoint(self._X_WC2.translation())
+        pcd2.FlipNormalsTowardPoint(self._X_WC1.translation())
 
         merged_pcd = Concatenate([pcd0, pcd1, pcd2])
         
