@@ -651,7 +651,7 @@ class TwoGraspPlanner(LeafSystem):
             pregrasp_dist=0.17,
             eef_to_gripper_length=0.16, # 0.16 for the real value,
             num_objs=1,
-            is_manual=False,
+            is_manual=True,
         ):
         LeafSystem.__init__(self)
 
@@ -776,7 +776,7 @@ class TwoGraspPlanner(LeafSystem):
         self.default_home = default_home
         self.DeclareInitializationDiscreteUpdateEvent(self.Initialize)
 
-        self.DeclarePeriodicUnrestrictedUpdateEvent(0.05, 0.0, self.Update)
+        self.DeclarePeriodicUnrestrictedUpdateEvent(0.1, 0.0, self.Update)
 
         self.grasp_node = GraspListener(gripper_model_path=gripper_model_path)
         self.q_pregrasp1 = None
@@ -866,7 +866,7 @@ class TwoGraspPlanner(LeafSystem):
             if context.get_time() > traj_q.end_time() + start_time:
                 state.get_mutable_abstract_state(
                     int(self._mode_index)
-                ).set_value(PlannerState.PLAN_PICK)
+                ).set_value(PlannerState.PLAN_SYS_ID)
             return
         if mode == PlannerState.PLAN_PICK:
             self.PlanBinPick(context, state, PlannerState.GO_TO_PICK_PREGRASP)

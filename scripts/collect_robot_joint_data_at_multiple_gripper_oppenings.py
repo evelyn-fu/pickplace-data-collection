@@ -383,14 +383,14 @@ def main():
     gripper_open = 0.1
     gripper_positions = np.linspace(gripper_closed, gripper_open, num_gripper_openings)
 
-    for gripper_position in tqdm(gripper_positions):
+    for gripper_position in tqdm([0]):
         wsg_traj_source.UpdateTrajectory(
             PiecewisePolynomial.ZeroOrderHold([0.0, 1.0],
             np.array([[gripper_position, gripper_position]]))
         )
         print(f"Set wsg to position {gripper_position}")
 
-        for run_idx in range(num_runs):
+        for run_idx in range(1):
             # Execute trajs.
             simulator = Simulator(diagram)
             ApplySimulatorConfig(scenario.simulator_config, simulator)
