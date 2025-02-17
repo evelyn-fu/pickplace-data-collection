@@ -508,7 +508,7 @@ def start_scenario(
     )
 
     # Set up differential inverse kinematics.
-    velocity_limits = 0.4 * np.ones(7)
+    velocity_limits = 0.2 * np.ones(7)
     acceleration_limits = 0.1 * np.ones(7)
     diff_ik = AddIiwaDifferentialIK(
         builder, 
