@@ -34,29 +34,29 @@ class FramePlacerApp:
         self.panel.add_child(self.place_button)
         # Add Roll slider.
         self.panel.add_child(gui.Label("Roll (deg)"))
-        self.roll_slider = gui.Slider(gui.Slider.DOUBLE)
-        self.roll_slider.set_limits(-180.0, 180.0)
-        self.roll_slider.double_value = 0.0
+        self.roll_slider = gui.Slider(gui.Slider.INT)
+        self.roll_slider.set_limits(-180, 180)
+        self.roll_slider.int_value = 0
         self.roll_slider.set_on_value_changed(self.on_angle_changed)
         self.panel.add_child(self.roll_slider)
         # Add Pitch slider.
         self.panel.add_child(gui.Label("Pitch (deg)"))
-        self.pitch_slider = gui.Slider(gui.Slider.DOUBLE)
-        self.pitch_slider.set_limits(-180.0, 180.0)
-        self.pitch_slider.double_value = 0.0
+        self.pitch_slider = gui.Slider(gui.Slider.INT)
+        self.pitch_slider.set_limits(-180, 180)
+        self.pitch_slider.int_value = 0
         self.pitch_slider.set_on_value_changed(self.on_angle_changed)
         self.panel.add_child(self.pitch_slider)
         # Add Yaw slider.
         self.panel.add_child(gui.Label("Yaw (deg)"))
-        self.yaw_slider = gui.Slider(gui.Slider.DOUBLE)
-        self.yaw_slider.set_limits(-180.0, 180.0)
-        self.yaw_slider.double_value = 0.0
+        self.yaw_slider = gui.Slider(gui.Slider.INT)
+        self.yaw_slider.set_limits(-180, 180)
+        self.yaw_slider.int_value = 0
         self.yaw_slider.set_on_value_changed(self.on_angle_changed)
         self.panel.add_child(self.yaw_slider)
         # Add buffer slider.
         self.panel.add_child(gui.Label("Buffer (m)"))
         self.buffer_slider = gui.Slider(gui.Slider.DOUBLE)
-        self.buffer_slider.set_limits(0.0, 0.12)
+        self.buffer_slider.set_limits(0.0, 0.075)
         self.buffer_slider.double_value = 0.0
         self.buffer_slider.set_on_value_changed(self.on_angle_changed)
         self.panel.add_child(self.buffer_slider)
@@ -118,9 +118,10 @@ class FramePlacerApp:
         self.is_placing = True
         self.temp_origin = None
         self.temp_angles = [0.0, 0.0, 0.0, 0.0]
-        self.roll_slider.double_value = 0.0
-        self.pitch_slider.double_value = 0.0
-        self.yaw_slider.double_value = 0.0
+        self.roll_slider.int_value = 0
+        self.pitch_slider.int_value = 0
+        self.yaw_slider.int_value = 0
+        self.buffer_slider.double_value = 0
         try:
             self.scene.scene.remove_geometry(self.temp_frame_name)
         except Exception:
@@ -130,10 +131,11 @@ class FramePlacerApp:
     def on_angle_changed(self, value):
         if self.temp_origin is None:
             return
+        # Scale the angle values here to reduce slider sensitivity
         self.temp_angles = [
-            self.roll_slider.double_value,
-            self.pitch_slider.double_value,
-            self.yaw_slider.double_value,
+            self.roll_slider.int_value,
+            self.pitch_slider.int_value,
+            self.yaw_slider.int_value,
             self.buffer_slider.double_value,
         ]
         T = self.compute_transformation(self.temp_origin, self.temp_angles)
