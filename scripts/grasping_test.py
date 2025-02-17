@@ -152,6 +152,9 @@ class SystemIDDataSaver(LeafSystem):
             self.measured_wsg_positions.append(wsg_position)
 
     def save_to_disk(self):
+        if self.current_start_time is None:
+            print("No system ID data to save...")
+            return
         print("Saving system ID data to disk.")
 
         # Convert to numpy arrays.
@@ -506,14 +509,14 @@ def start_scenario(
 
     # Set up differential inverse kinematics.
     velocity_limits = 0.4 * np.ones(7)
-    acceleration_limits = 1.0 * np.ones(7)
+    acceleration_limits = 0.1 * np.ones(7)
     diff_ik = AddIiwaDifferentialIK(
         builder, 
         controller_plant, 
         frame=None,
         velocity_lims=velocity_limits, 
         acceleration_lims=acceleration_limits, # doesn't actually do anything since using this stops the robot from moving???
-        joint_centering_gain=5.0
+        joint_centering_gain=1.0
     )
     builder.Connect(planner.GetOutputPort("X_WG"), diff_ik.get_input_port(0))
     if use_hardware:
