@@ -71,8 +71,6 @@ from mmt_gcs.planning.region_generation import CCI_inflate_edges_given_pwl_path
 
 # from iiwa import IiwaHardwareStationDiagram
 
-SYS_ID_TRAJ_PARAMETER_PATH = Path(os.path.abspath(os.path.join(__file__ ,"../../traj_feb8")))
-
 PETE_ASSETS = os.path.dirname(__file__) + "/../pete_assets/"
 MMT_GCS_ROOT = os.path.abspath(os.path.join(__file__, "../../../mmt_gcs/"))
 ONLINE_VOXEL_RADIUS = 0.005
@@ -589,7 +587,6 @@ def start_scenario(
         )
     else:
         raise ValueError(f"Invalid trajectory type: {traj_parameter_path}")
-    start_positions = excitation_traj.value(0.0)
 
     # Placeholder trajectory
     traj_source: TrajectorySource = builder.AddNamedSystem(
