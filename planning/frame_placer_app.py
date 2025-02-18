@@ -56,7 +56,7 @@ class FramePlacerApp:
         # Add buffer slider.
         self.panel.add_child(gui.Label("Buffer (m)"))
         self.buffer_slider = gui.Slider(gui.Slider.DOUBLE)
-        self.buffer_slider.set_limits(0.0, 0.075)
+        self.buffer_slider.set_limits(0.0, 0.08)
         self.buffer_slider.double_value = 0.0
         self.buffer_slider.set_on_value_changed(self.on_angle_changed)
         self.panel.add_child(self.buffer_slider)
