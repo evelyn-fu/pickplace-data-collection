@@ -587,7 +587,7 @@ def generate_points_in_cube(center, side_lengths, spacing=0.02):
     return points
     
 ceiling_vox = generate_points_in_cube((0.4, 0.0, 0.9), (0.4, 0.5, 0.001))
-camera_vox = generate_points_in_cube((0.8, 0.0, 0.3), (0.0, 0.15, 0.6))
+camera_vox = generate_points_in_cube((0.8, 0.0, 0.3), (0.01, 0.15, 0.6))
 bin_cam_vox = generate_points_in_cube((-0.0338161, 0.84, 0.2), (0.02, 0.10, 0.4))
 bin_cam_pole_vox = generate_points_in_cube((-0.07, 0.44, 0.21), (0.04, 0.08, 0.42))
 
@@ -1740,6 +1740,7 @@ class TwoGraspPlanner(LeafSystem):
                 self.acceleration_limits
             )
         except:
+            input("Press enter to continue with unconstrained plan to home. Else terminate.")
             traj = plan_unconstrained_gcs_path_start_to_goal(
                 plant=self._iiwa_controller_plant, q_start=q, q_goal=q_goal, regions=None, no_obstacles=True
             )
