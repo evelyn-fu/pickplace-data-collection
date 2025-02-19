@@ -1266,34 +1266,36 @@ class GraspListener():
                         continue
                     X_WGs_collision_free.append(X_WPnew.GetAsMatrix4())
 
-                    # Calculate scores (for debugging)
-                    pcd_points = pcd.xyzs().T
-                    split_ratio, split_axes, length = self.compute_pcd_split_ratio_at_point(pcd_points, origins[i])
-                    is_nonempty, within_box_pt_normals, proportion_enclosed = self.check_nonempty(pcd, X_WPnew)
-                    cost, cost_dict = self.compute_costs(
-                                    X_WPnew, 
-                                    within_box_pt_normals,
-                                    split_ratio,
-                                    split_axes,
-                                    ground_z,
-                                    np.max(pcd_points[:, 2]) - np.min(pcd_points[:, 2]),
-                                    pcd_points.shape[0]
-                                )
-                    manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
-                    manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
+                    debug = False
+                    if debug:
+                        # Calculate scores (for debugging)
+                        pcd_points = pcd.xyzs().T
+                        split_ratio, split_axes, length = self.compute_pcd_split_ratio_at_point(pcd_points, origins[i])
+                        is_nonempty, within_box_pt_normals, proportion_enclosed = self.check_nonempty(pcd, X_WPnew)
+                        cost, cost_dict = self.compute_costs(
+                                        X_WPnew, 
+                                        within_box_pt_normals,
+                                        split_ratio,
+                                        split_axes,
+                                        ground_z,
+                                        np.max(pcd_points[:, 2]) - np.min(pcd_points[:, 2]),
+                                        pcd_points.shape[0]
+                                    )
+                        manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
+                        manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
 
-                    gripper_xyzs = self.hand_collision_model.to_pcd()
-                    # RollPitchYaw(np.pi/2, 0, np.pi/2) is world to wsg specific transform.
-                    # WSG y axis needs to be aligned with world -z.
-                    gripper_cloud = o3d.geometry.PointCloud(
-                        o3d.utility.Vector3dVector(gripper_xyzs)
-                    ).voxel_down_sample(0.005).transform(
-                        (X_WPnew @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0])
-                    ).GetAsMatrix4())
-                    gripper_cloud.paint_uniform_color([1.0, 0.0, 0.0])
+                        gripper_xyzs = self.hand_collision_model.to_pcd()
+                        # RollPitchYaw(np.pi/2, 0, np.pi/2) is world to wsg specific transform.
+                        # WSG y axis needs to be aligned with world -z.
+                        gripper_cloud = o3d.geometry.PointCloud(
+                            o3d.utility.Vector3dVector(gripper_xyzs)
+                        ).voxel_down_sample(0.005).transform(
+                            (X_WPnew @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0])
+                        ).GetAsMatrix4())
+                        gripper_cloud.paint_uniform_color([1.0, 0.0, 0.0])
 
-                    viz_geoms = [manipuland_cloud, gripper_cloud]
-                    o3d.visualization.draw_plotly(viz_geoms)
+                        viz_geoms = [manipuland_cloud, gripper_cloud]
+                        o3d.visualization.draw_plotly(viz_geoms)
                 if input == "C":
                     break
             

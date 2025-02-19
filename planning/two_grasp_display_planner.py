@@ -536,33 +536,37 @@ class PickState(Enum):
     TO_PLACE = 5
     PLACE = 6
 
-scanning_traj_robot_to_workspace_dist = 0.45
-scanning_traj_height = 0.50
 lift_for_display_height = 0.05
-yaw_display_traj = []
-yaw_display_traj.append(
-    RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0)),
-                   [scanning_traj_robot_to_workspace_dist, 0.0, scanning_traj_height]))
-yaw_display_traj.append(
-    RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi/4)),
-                   [scanning_traj_robot_to_workspace_dist, 0.0, scanning_traj_height]))
-yaw_display_traj.append(
-    RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi/2)),
-                   [scanning_traj_robot_to_workspace_dist, 0.0, scanning_traj_height]))
-yaw_display_traj.append(
-    RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -3*np.pi/4)),
-                   [scanning_traj_robot_to_workspace_dist, 0.0, scanning_traj_height]))
-yaw_display_traj.append(
-    RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi)),
-                   [scanning_traj_robot_to_workspace_dist, 0.0, scanning_traj_height]))
-yaw_display_traj.append(
-    RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -5*np.pi)),
-                   [scanning_traj_robot_to_workspace_dist, 0.0, scanning_traj_height]))
-yaw_display_traj.append(
-    RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -3*np.pi/2)),
-                   [scanning_traj_robot_to_workspace_dist, 0.0, scanning_traj_height]))
+display_traj_height_buffer = 0.05 # Height between manipuland bottom and floor
 
 q_home = [0.3, 0.4, 0.0, -1.2, 0.0, 1.0, -1.57]
+
+def get_yaw_display_traj(scanning_traj_height=0.50, scanning_traj_robot_to_workspace_dist = 0.45) -> list[RigidTransform]:
+    yaw_display_traj = []
+    yaw_display_traj.append(
+        RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0)),
+                    [scanning_traj_robot_to_workspace_dist, 0.0, scanning_traj_height]))
+    yaw_display_traj.append(
+        RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi/4)),
+                    [scanning_traj_robot_to_workspace_dist, 0.0, scanning_traj_height]))
+    yaw_display_traj.append(
+        RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi/2)),
+                    [scanning_traj_robot_to_workspace_dist, 0.0, scanning_traj_height]))
+    yaw_display_traj.append(
+        RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -3*np.pi/4)),
+                    [scanning_traj_robot_to_workspace_dist, 0.0, scanning_traj_height]))
+    yaw_display_traj.append(
+        RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi)),
+                    [scanning_traj_robot_to_workspace_dist, 0.0, scanning_traj_height]))
+    yaw_display_traj.append(
+        RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -5*np.pi)),
+                    [scanning_traj_robot_to_workspace_dist, 0.0, scanning_traj_height]))
+    yaw_display_traj.append(
+        RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -3*np.pi/2)),
+                    [scanning_traj_robot_to_workspace_dist, 0.0, scanning_traj_height]))
+    
+    return yaw_display_traj
+
 
 def generate_points_in_cube(center, side_lengths, spacing=0.02):
     # Extract the center and side lengths
@@ -1427,7 +1431,6 @@ class TwoGraspPlanner(LeafSystem):
         X_EW = X_WE.inverse()
 
         # Save manipuland pcd and grasp for system ID alignment.
-        # TODO: Express manipuland_cloud_points in link 7 frame
         manipuland_cloud_points = self.current_manipuland_pcd.xyzs() # X_WP, Shape (3, N)
         manipuland_cloud_points_link7_frame = X_EW @ manipuland_cloud_points # X_EP, Shape (3, N)
         manipuland_cloud_points_link7_frame = manipuland_cloud_points_link7_frame.T # Shape (N,3)
@@ -1972,6 +1975,16 @@ class TwoGraspPlanner(LeafSystem):
         # Solve for pick and display trajectories before moving
         self.PlanPickAndDisplay(context, state)
 
+    def CalcLink7ToManipulandEndLength(self, X_WE: RigidTransform) -> float:
+        X_EW = X_WE.inverse()
+        manipuland_cloud_points = self.current_manipuland_pcd.xyzs() # X_WP, Shape (3, N)
+        manipuland_cloud_points_link7_frame = X_EW @ manipuland_cloud_points # X_EP, Shape (3, N)
+        manipuland_cloud_points_link7_frame = manipuland_cloud_points_link7_frame.T # Shape (N,3)
+
+        # The link 7 z-axis points towards the gripper.
+        length = np.max(manipuland_cloud_points_link7_frame, axis=0)[2]
+        return length
+
     def PlanPickAndDisplay(self, context, state, skip_first=False):
         cci_checker = CCICollisionChecker(self.cci_objects['cci_mplant'], 
                                         self.cci_objects['cci_plant'].getRobotGeometryIds(), 
@@ -1991,7 +2004,10 @@ class TwoGraspPlanner(LeafSystem):
                 "prepick": X_WE1 @ X_GgraspGpregrasp
             }
 
-            X_G1["display_traj"] = yaw_display_traj
+            height = max(self.CalcLink7ToManipulandEndLength(X_WE1) + display_traj_height_buffer, 0.35)
+            X_G1["display_traj"] = get_yaw_display_traj(scanning_traj_height=height)
+
+
             X_G1, times1 = MakePickAndDisplayGripperFrames(
                 X_G1, self.gripper_length, self.pregrasp_dist,
                 self.place_flipped1, X_GE, lift_for_display_height
@@ -2039,7 +2055,8 @@ class TwoGraspPlanner(LeafSystem):
                 "pick": X_WE2,
                 "prepick": X_WE2 @ X_GgraspGpregrasp
             }
-            X_G2["display_traj"] = yaw_display_traj
+            height = max(self.CalcLink7ToManipulandEndLength(X_WE2) + display_traj_height_buffer, 0.35)
+            X_G2["display_traj"] = get_yaw_display_traj(scanning_traj_height=height)
             X_G2, times2 = MakePickAndDisplayGripperFrames(
                 X_G2, self.gripper_length, self.pregrasp_dist,
                 self.place_flipped2, X_GE, lift_for_display_height
@@ -2090,7 +2107,7 @@ class TwoGraspPlanner(LeafSystem):
                 manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
 
                 viz_geoms = [manipuland_cloud, pick_gripper_cloud, place_gripper_cloud]
-                o3d.visualization.draw_plotly(viz_geoms)
+                # o3d.visualization.draw_plotly(viz_geoms)
 
             state.get_mutable_abstract_state(int(self._times_index2)).set_value(
                 times2
