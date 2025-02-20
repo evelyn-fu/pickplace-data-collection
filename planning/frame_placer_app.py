@@ -43,14 +43,14 @@ class FramePlacerApp:
         self.panel.add_child(gui.Label("Pitch (deg)"))
         self.pitch_slider = gui.Slider(gui.Slider.INT)
         self.pitch_slider.set_limits(-180, 180)
-        self.pitch_slider.int_value = 0
+        self.pitch_slider.int_value = -90
         self.pitch_slider.set_on_value_changed(self.on_angle_changed)
         self.panel.add_child(self.pitch_slider)
         # Add Yaw slider.
         self.panel.add_child(gui.Label("Yaw (deg)"))
         self.yaw_slider = gui.Slider(gui.Slider.INT)
         self.yaw_slider.set_limits(-180, 180)
-        self.yaw_slider.int_value = 0
+        self.yaw_slider.int_value = -90
         self.yaw_slider.set_on_value_changed(self.on_angle_changed)
         self.panel.add_child(self.yaw_slider)
         # Add buffer slider.
@@ -117,10 +117,10 @@ class FramePlacerApp:
         print("Entering placement mode: click on the point cloud to set frame origin.")
         self.is_placing = True
         self.temp_origin = None
-        self.temp_angles = [0.0, 0.0, 0.0, 0.0]
+        self.temp_angles = [0, -90, -90, 0.0]
         self.roll_slider.int_value = 0
-        self.pitch_slider.int_value = 0
-        self.yaw_slider.int_value = 0
+        self.pitch_slider.int_value = -90
+        self.yaw_slider.int_value = -90
         self.buffer_slider.double_value = 0
         try:
             self.scene.scene.remove_geometry(self.temp_frame_name)
