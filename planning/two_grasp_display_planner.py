@@ -541,7 +541,7 @@ display_traj_height_buffer = 0.05 # Height between manipuland bottom and floor
 
 q_home = [0.3, 0.4, 0.0, -1.2, 0.0, 1.0, -1.57]
 
-def get_yaw_display_traj(scanning_traj_height=0.50, scanning_traj_robot_to_workspace_dist = 0.45) -> list[RigidTransform]:
+def get_yaw_display_traj(scanning_traj_height=0.50, scanning_traj_robot_to_workspace_dist = 0.40) -> list[RigidTransform]:
     yaw_display_traj = []
     yaw_display_traj.append(
         RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0)),
@@ -655,7 +655,8 @@ class TwoGraspPlanner(LeafSystem):
             pregrasp_dist=0.17,
             eef_to_gripper_length=0.16, # 0.16 for the real value,
             num_objs=1,
-            is_manual=True,
+            is_manual=False,
+            is_semimanual=True,
             sys_id_grasp_only=False
         ):
         LeafSystem.__init__(self)
@@ -663,7 +664,7 @@ class TwoGraspPlanner(LeafSystem):
         # For grasp planner
         self.current_scene_pcd = PointCloud(0)
         self.current_manipuland_pcd = PointCloud(0)
-        if not sys_id_grasp_only:
+        if not sys_id_grasp_only:   
             self.DeclareAbstractInputPort("cloud_bin", AbstractValue.Make(PointCloud(0)))
         self.DeclareAbstractInputPort("cloud_front", AbstractValue.Make(PointCloud(0)))
         self.DeclareAbstractInputPort("cloud_back_right", AbstractValue.Make(PointCloud(0)))
@@ -674,6 +675,7 @@ class TwoGraspPlanner(LeafSystem):
         self._X_WC_bin = X_WC_bin
         self.objs_left = num_objs
         self.is_manual = is_manual
+        self.is_semimanual = is_semimanual
         self.sys_id_grasp_only = sys_id_grasp_only
 
         # for getting current positions
@@ -785,7 +787,7 @@ class TwoGraspPlanner(LeafSystem):
 
         self.DeclarePeriodicUnrestrictedUpdateEvent(0.1, 0.0, self.Update)
 
-        self.grasp_node = GraspListener(gripper_model_path=gripper_model_path)
+        self.grasp_node = GraspListener(gripper_length=gripper_length, gripper_model_path=gripper_model_path)
         self.q_pregrasp1 = None
         self.q_pregrasp2 = None
         self.q_bin_pregrasp = None
@@ -1188,7 +1190,7 @@ class TwoGraspPlanner(LeafSystem):
             bin_pcd,
             scene_pcd,
             candidate_num=1,
-            num_samples=15,
+            num_samples=20,
             random_seed=np.random.randint(1000),
             grasp_type=GraspType.TOP,
             roll_min = 0.0,
@@ -1199,7 +1201,7 @@ class TwoGraspPlanner(LeafSystem):
             num_pitch_samples=1,
             num_yaw_samples=20,
             point_up=True,
-            split_ratio_threshold=0.15,
+            split_ratio_threshold=0.5,
             voxel_radius=ONLINE_VOXEL_RADIUS,
             is_manual=self.is_manual
         )
@@ -1225,7 +1227,7 @@ class TwoGraspPlanner(LeafSystem):
                     num_pitch_samples=1,
                     num_yaw_samples=20,
                     point_up=True,
-                    split_ratio_threshold=0.0,
+                    split_ratio_threshold=0.15,
                     voxel_radius=ONLINE_VOXEL_RADIUS
                 )
                 new_grasps, new_grasp_costs = self.grasp_node.get_best_grasps()
@@ -1260,18 +1262,41 @@ class TwoGraspPlanner(LeafSystem):
             
             self.q_bin_pregrasp = q_goal
             X_WG_bin = RigidTransform(X_WG)
-            break
 
-        # Crop point cloud around grasp point
-        grasp_center = X_WG_bin @ RigidTransform([0, 0.0, -self.eef_to_gripper_length/2])
-        closest_idx = np.argmin(np.linalg.norm(bin_pcd.xyzs() - grasp_center.translation()[:, np.newaxis], axis=0))
-        cropped_cloud, _ = crop_connected_points(
-            bin_pcd,
-            bin_pcd.xyzs()[:, closest_idx],
-            radius=0.1,  # 10cm radius
-            voxel_radius=ONLINE_VOXEL_RADIUS
-        )
-        self.meshcat.SetObject("cropped_cloud", cropped_cloud, point_size=0.001, rgba=Rgba(0,0,1,1))
+            # Crop point cloud around grasp point
+            grasp_center = X_WG_bin @ RigidTransform([0, 0.0, self.gripper_length/2])
+            closest_idx = np.argmin(np.linalg.norm(bin_pcd.xyzs() - grasp_center.translation()[:, np.newaxis], axis=0))
+            cropped_cloud, _ = crop_connected_points(
+                bin_pcd,
+                bin_pcd.xyzs()[:, closest_idx],
+                radius=0.05,  # 10cm radius
+                voxel_radius=ONLINE_VOXEL_RADIUS
+            )
+            grasp_center_cloud = PointCloud(1)
+            grasp_center_cloud.mutable_xyzs()[:] = np.array([grasp_center.translation()]).T
+            self.meshcat.SetObject("grasp_center", grasp_center_cloud, point_size=0.01, rgba=Rgba(1,1,0,1))
+            self.meshcat.SetObject("cropped_cloud", cropped_cloud, point_size=0.001, rgba=Rgba(0,0,1,1))
+
+            manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(bin_pcd.xyzs().T))
+            manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
+
+            gripper_xyzs = self.grasp_node.hand_collision_model.to_pcd()
+            gripper_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(gripper_xyzs)).voxel_down_sample(ONLINE_VOXEL_RADIUS).transform(
+                (X_WG @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0]).GetAsMatrix4())
+            )
+            gripper_cloud.paint_uniform_color([1.0, 0.0, 0.0])
+
+            frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1).transform(X_WG)
+
+            viz_geoms = [manipuland_cloud, gripper_cloud, frame]
+            o3d.visualization.draw_plotly(viz_geoms)
+
+            if self.is_semimanual:
+                reject = input("Enter 'N' to reject this grasp, press Enter to continue")
+                if reject != 'N':
+                    break
+            else:
+                break
 
         # Flatten cloud to determine what way to place object after bin picking. We need to place it in a
         # way such that good scanning grasps are kinematically feasible.
@@ -1305,23 +1330,6 @@ class TwoGraspPlanner(LeafSystem):
         else:
             print("Using stage_center90")
             stage_center = stage_center90
-
-        manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(bin_pcd.xyzs().T))
-        manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
-
-        gripper_xyzs = self.grasp_node.hand_collision_model.to_pcd()
-        gripper_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(gripper_xyzs)).voxel_down_sample(ONLINE_VOXEL_RADIUS).transform(
-            (X_WG @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0]).GetAsMatrix4())
-        )
-        gripper_cloud.paint_uniform_color([1.0, 0.0, 0.0])
-
-        frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1).transform(X_WG)
-
-        viz_geoms = [manipuland_cloud, gripper_cloud, frame]
-        o3d.visualization.draw_plotly(viz_geoms)
-
-        # TODO: debug only
-        input("Press enter to execute grasp")
 
         # Solve for pick trajectory before moving
         X_WE = X_WG_bin.multiply(X_GE)
@@ -1425,34 +1433,38 @@ class TwoGraspPlanner(LeafSystem):
             
             self.q_sys_id_pregrasp = q_goal
             X_WG_sys_id = RigidTransform(X_WG)
-            break
 
-        X_WE = X_WG_sys_id.multiply(X_GE) # E = link 7 frame
-        X_EW = X_WE.inverse()
+            X_WE = X_WG_sys_id.multiply(X_GE) # E = link 7 frame
+            X_EW = X_WE.inverse()
 
-        # Save manipuland pcd and grasp for system ID alignment.
-        manipuland_cloud_points = self.current_manipuland_pcd.xyzs() # X_WP, Shape (3, N)
-        manipuland_cloud_points_link7_frame = X_EW @ manipuland_cloud_points # X_EP, Shape (3, N)
-        manipuland_cloud_points_link7_frame = manipuland_cloud_points_link7_frame.T # Shape (N,3)
-        np.save(
-            os.path.join(self.system_id_savedir, "manipuland_cloud_link7_frame.npy"),
-            manipuland_cloud_points_link7_frame,
-        )
+            # Save manipuland pcd and grasp for system ID alignment.
+            manipuland_cloud_points = self.current_manipuland_pcd.xyzs() # X_WP, Shape (3, N)
+            manipuland_cloud_points_link7_frame = X_EW @ manipuland_cloud_points # X_EP, Shape (3, N)
+            manipuland_cloud_points_link7_frame = manipuland_cloud_points_link7_frame.T # Shape (N,3)
+            np.save(
+                os.path.join(self.system_id_savedir, "manipuland_cloud_link7_frame.npy"),
+                manipuland_cloud_points_link7_frame,
+            )
 
-        manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(self.current_manipuland_pcd.xyzs().T))
-        manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
+            manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(self.current_manipuland_pcd.xyzs().T))
+            manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
 
-        gripper_xyzs = self.grasp_node.hand_collision_model.to_pcd()
-        gripper_cloud = o3d.geometry.PointCloud(
-            o3d.utility.Vector3dVector(gripper_xyzs)
-        ).voxel_down_sample(ONLINE_VOXEL_RADIUS).transform(
-            (X_WG @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0]).GetAsMatrix4()))
-        gripper_cloud.paint_uniform_color([1.0, 0.0, 0.0])
+            gripper_xyzs = self.grasp_node.hand_collision_model.to_pcd()
+            gripper_cloud = o3d.geometry.PointCloud(
+                o3d.utility.Vector3dVector(gripper_xyzs)
+            ).voxel_down_sample(ONLINE_VOXEL_RADIUS).transform(
+                (X_WG @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0]).GetAsMatrix4()))
+            gripper_cloud.paint_uniform_color([1.0, 0.0, 0.0])
 
-        viz_geoms = [manipuland_cloud, gripper_cloud]
-        o3d.visualization.draw_plotly(viz_geoms)
+            viz_geoms = [manipuland_cloud, gripper_cloud]
+            o3d.visualization.draw_plotly(viz_geoms)
 
-        input("press enter to execute pick")
+            if self.is_semimanual:
+                reject = input("Enter 'N' to reject this grasp, press Enter to continue")
+                if reject != 'N':
+                    break
+            else:
+                break
 
         # Solve for pick trajectory before moving
         X_G = {
@@ -1779,7 +1791,7 @@ class TwoGraspPlanner(LeafSystem):
             obstacles_vox = np.hstack([camera_vox, bin_cam_vox, bin_cam_pole_vox, self.current_manipuland_pcd.xyzs()])
         if mode == PlannerState.PLAN_PICK:
             q_goal = self.q_bin_pregrasp
-            obstacles_vox = np.hstack([camera_vox, bin_cam_vox, bin_cam_pole_vox, self.current_manipuland_pcd.xyzs(), self.bin_points])
+            obstacles_vox = np.hstack([bin_cam_vox, bin_cam_pole_vox, self.current_manipuland_pcd.xyzs(), self.bin_points])
         if mode == PlannerState.PLAN_SYS_ID:
             q_goal = self.q_sys_id_pregrasp
             obstacles_vox = np.hstack([camera_vox, bin_cam_vox, bin_cam_pole_vox, self.current_manipuland_pcd.xyzs()])
@@ -1882,6 +1894,12 @@ class TwoGraspPlanner(LeafSystem):
             use_extra_buffer=False
         )
 
+        manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(self.current_manipuland_pcd.xyzs().T))
+        manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
+
+        VISUALIZE_FAIL = True
+        VISUALIZE_FLIPPED = True
+
         grasp_pairs, grasp_costs = self.grasp_node.get_best_grasps()
         if not self.is_manual:
             grasp_pairs = copy.deepcopy(grasp_pairs)
@@ -1926,11 +1944,36 @@ class TwoGraspPlanner(LeafSystem):
 
             if q_goal1 is None:
                 print("Failed to find ik for first grasp, trying next pair")
+
+                if VISUALIZE_FAIL:
+                    gripper1_xyzs = self.grasp_node.hand_extra_buffer_collision_model.to_pcd()
+                    gripper1_cloud = o3d.geometry.PointCloud(
+                        o3d.utility.Vector3dVector(gripper1_xyzs)).voxel_down_sample(ONLINE_VOXEL_RADIUS).transform(
+                            (X_WG1 @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0]).GetAsMatrix4()))
+                    gripper1_cloud.paint_uniform_color([1.0, 0.0, 0.0])
+
+                    world_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(
+                        size=0.05, origin=[0, 0, 0])
+                    viz_geoms = [world_frame, manipuland_cloud, gripper1_cloud]
+                    o3d.visualization.draw_plotly(viz_geoms)
                 continue
                 
             # check if configuration is in collision with scene
             if check_configuration_has_collisions(self.models_path, com, rot, dims, q_goal1):
                 print("grasp 1 configuration has collision with scene")
+
+                if VISUALIZE_FAIL:
+                    gripper1_xyzs = self.grasp_node.hand_extra_buffer_collision_model.to_pcd()
+                    gripper1_cloud = o3d.geometry.PointCloud(
+                        o3d.utility.Vector3dVector(gripper1_xyzs)).voxel_down_sample(ONLINE_VOXEL_RADIUS).transform(
+                            (X_WG1 @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0]).GetAsMatrix4()))
+                    gripper1_cloud.paint_uniform_color([1.0, 0.0, 0.0])
+
+                    world_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(
+                        size=0.05, origin=[0, 0, 0])
+                    viz_geoms = [world_frame, manipuland_cloud, gripper1_cloud]
+                    o3d.visualization.draw_plotly(viz_geoms)
+                    
                 continue
 
             q_goal2 = solve_via_analytic_IK_with_retries(
@@ -1942,36 +1985,218 @@ class TwoGraspPlanner(LeafSystem):
 
             if q_goal2 is None:
                 print("Failed to find ik for second grasp, trying next pair")
+
+                if VISUALIZE_FAIL:
+                    gripper1_xyzs = self.grasp_node.hand_extra_buffer_collision_model.to_pcd()
+                    gripper1_cloud = o3d.geometry.PointCloud(
+                        o3d.utility.Vector3dVector(gripper1_xyzs)).voxel_down_sample(ONLINE_VOXEL_RADIUS).transform(
+                            (X_WG2 @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0]).GetAsMatrix4()))
+                    gripper1_cloud.paint_uniform_color([1.0, 0.0, 0.0])
+
+                    world_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(
+                        size=0.05, origin=[0, 0, 0])
+                    viz_geoms = [world_frame, manipuland_cloud, gripper1_cloud]
+                    o3d.visualization.draw_plotly(viz_geoms)
+                    
                 continue
 
             # check if configuration is in collision with scene
             if check_configuration_has_collisions(self.models_path, com, rot, dims, q_goal2):
                 print("grasp 2 configuration has collision with scene")
+
+                if VISUALIZE_FAIL:
+                    gripper1_xyzs = self.grasp_node.hand_extra_buffer_collision_model.to_pcd()
+                    gripper1_cloud = o3d.geometry.PointCloud(
+                        o3d.utility.Vector3dVector(gripper1_xyzs)).voxel_down_sample(ONLINE_VOXEL_RADIUS).transform(
+                            (X_WG2 @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0]).GetAsMatrix4()))
+                    gripper1_cloud.paint_uniform_color([1.0, 0.0, 0.0])
+
+                    world_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(
+                        size=0.05, origin=[0, 0, 0])
+                    viz_geoms = [world_frame, manipuland_cloud, gripper1_cloud]
+                    o3d.visualization.draw_plotly(viz_geoms)
                 continue
-            
+
+            # Check which grasp is more vertical (z component of z axis more negative), swap grasps if first is more vertical
+            if X_WG1[2, 2] < X_WG2[2, 2]:
+                temp_X_WG1 = X_WG1
+                temp_q1 = q_goal1
+                X_WG1 = X_WG2
+                q_goal1 = q_goal2
+                X_WG2 = temp_X_WG1
+                q_goal2 = temp_q1
+
+            if self.place_flipped1:
+                print("Solving for flipped place 1")
+                t_gripper_center = RigidTransform(X_WG1) @ [0, 0, 3*self.gripper_length/4] # assuming picking with only end half of gripper
+                
+                # Calculate rotation matrix for 180 degrees around z-axis
+                R_z180 = np.array([
+                    [-1, 0, 0],
+                    [0, -1, 0], 
+                    [0, 0, 1]
+                ])
+                
+                # Get current rotation and translation
+                R_current = X_WG1[:3, :3]
+                t_current = X_WG1[:3, 3]
+                
+                # Apply rotation around z-axis centered at t_gripper_center
+                t_centered = t_current - t_gripper_center
+                t_rotated = R_z180 @ t_centered
+                t_final = t_rotated + t_gripper_center
+                
+                # Create new rotation matrix combining current rotation with z-axis rotation
+                R_final = R_z180 @ R_current
+                
+                # Set X_G["place"] to the rotated pose
+                X_Gplace = RigidTransform(RotationMatrix(R_final), t_final)
+                X_Eplace = X_Gplace.multiply(X_GE)
+                X_Epreplace = RigidTransform(
+                    X_Eplace.rotation(), X_Eplace.translation() + [0, 0, lift_for_display_height]
+                )
+
+                self.q_postgrasp1 = solve_via_analytic_IK_with_retries(
+                    pose=X_Epreplace,
+                    current_config=q,
+                    ik_domain=self.ik_domain,
+                    checker=cci_checker
+                )
+                if self.q_postgrasp1 is None:
+                    print("failed to solve for place flipped, trying next grasp pair")
+                    continue
+
+                if VISUALIZE_FLIPPED:
+                    pick_gripper_xyzs = self.grasp_node.hand_collision_model.to_pcd()
+                    pick_gripper_cloud = (
+                        o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pick_gripper_xyzs))
+                        .voxel_down_sample(ONLINE_VOXEL_RADIUS)
+                        .transform(
+                            (RigidTransform(X_WG1).multiply(
+                                RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2), [0,0,0])
+                            )).GetAsMatrix4()
+                        )
+                    )
+                    pick_gripper_cloud.paint_uniform_color([0.0, 1.0, 0.0])
+
+                    place_gripper_xyzs = self.grasp_node.hand_collision_model.to_pcd()
+                    place_gripper_cloud = (
+                        o3d.geometry.PointCloud(o3d.utility.Vector3dVector(place_gripper_xyzs))
+                        .voxel_down_sample(ONLINE_VOXEL_RADIUS)
+                        .transform(
+                            (X_Gplace.multiply(
+                                RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2), [0,0,0])
+                            )).GetAsMatrix4()
+                        )
+                    )
+                    place_gripper_cloud.paint_uniform_color([1.0, 0.0, 1.0])
+
+                    manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(self.current_manipuland_pcd.xyzs().T))
+                    manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
+
+                    viz_geoms = [manipuland_cloud, pick_gripper_cloud, place_gripper_cloud]
+                    o3d.visualization.draw_plotly(viz_geoms)
+
+            if self.place_flipped2:
+                print("Solving for flipped place 2")
+                t_gripper_center = RigidTransform(X_WG2) @ [0, 0, 3*self.gripper_length/4] # assuming picking with only end half of gripper
+                
+                # Calculate rotation matrix for 180 degrees around z-axis
+                R_z180 = np.array([
+                    [-1, 0, 0],
+                    [0, -1, 0], 
+                    [0, 0, 1]
+                ])
+                
+                # Get current rotation and translation
+                R_current = X_WG2[:3, :3]
+                t_current = X_WG2[:3, 3]
+                
+                # Apply rotation around z-axis centered at t_gripper_center
+                t_centered = t_current - t_gripper_center
+                t_rotated = R_z180 @ t_centered
+                t_final = t_rotated + t_gripper_center
+                
+                # Create new rotation matrix combining current rotation with z-axis rotation
+                R_final = R_z180 @ R_current
+                
+                # Set X_G["place"] to the rotated pose
+                X_Gplace = RigidTransform(RotationMatrix(R_final), t_final)
+                X_Eplace = X_Gplace.multiply(X_GE)
+                X_Epreplace = RigidTransform(
+                    X_Eplace.rotation(), X_Eplace.translation() + [0, 0, lift_for_display_height]
+                )
+
+                self.q_postgrasp2 = solve_via_analytic_IK_with_retries(
+                    pose=X_Epreplace,
+                    current_config=q,
+                    ik_domain=self.ik_domain,
+                    checker=cci_checker
+                )
+                if self.q_postgrasp2 is None:
+                    print("failed to solve for place flipped, trying next grasp pair")
+                    continue
+
+                if VISUALIZE_FLIPPED:
+                    pick_gripper_xyzs = self.grasp_node.hand_collision_model.to_pcd()
+                    pick_gripper_cloud = (
+                        o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pick_gripper_xyzs))
+                        .voxel_down_sample(ONLINE_VOXEL_RADIUS)
+                        .transform(
+                            (RigidTransform(X_WG2).multiply(
+                                RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2), [0,0,0])
+                            )).GetAsMatrix4()
+                        )
+                    )
+                    pick_gripper_cloud.paint_uniform_color([0.0, 1.0, 0.0])
+
+                    place_gripper_xyzs = self.grasp_node.hand_collision_model.to_pcd()
+                    place_gripper_cloud = (
+                        o3d.geometry.PointCloud(o3d.utility.Vector3dVector(place_gripper_xyzs))
+                        .voxel_down_sample(ONLINE_VOXEL_RADIUS)
+                        .transform(
+                            (X_Gplace.multiply(
+                                RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2), [0,0,0])
+                            )).GetAsMatrix4()
+                        )
+                    )
+                    place_gripper_cloud.paint_uniform_color([1.0, 0.0, 1.0])
+
+                    manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(self.current_manipuland_pcd.xyzs().T))
+                    manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
+
+                    viz_geoms = [manipuland_cloud, pick_gripper_cloud, place_gripper_cloud]
+                    o3d.visualization.draw_plotly(viz_geoms)
+
             self.q_pregrasp1 = q_goal1
             self.q_pregrasp2 = q_goal2
             self.X_WG1 = RigidTransform(X_WG1)
             self.X_WG2 = RigidTransform(X_WG2)
-            break
 
-        manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(self.current_manipuland_pcd.xyzs().T))
-        manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
+            gripper1_xyzs = self.grasp_node.hand_extra_buffer_collision_model.to_pcd()
+            gripper1_cloud = o3d.geometry.PointCloud(
+                o3d.utility.Vector3dVector(gripper1_xyzs)).voxel_down_sample(ONLINE_VOXEL_RADIUS).transform(
+                    (X_WG1 @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0]).GetAsMatrix4()))
+            gripper1_cloud.paint_uniform_color([1.0, 0.0, 0.0])
 
-        gripper1_xyzs = self.grasp_node.hand_extra_buffer_collision_model.to_pcd()
-        gripper1_cloud = o3d.geometry.PointCloud(
-            o3d.utility.Vector3dVector(gripper1_xyzs)).voxel_down_sample(ONLINE_VOXEL_RADIUS).transform(
-                (X_WG1 @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0]).GetAsMatrix4()))
-        gripper1_cloud.paint_uniform_color([1.0, 0.0, 0.0])
+            gripper2_xyzs = self.grasp_node.hand_extra_buffer_collision_model.to_pcd()
+            gripper2_cloud = o3d.geometry.PointCloud(
+                o3d.utility.Vector3dVector(gripper2_xyzs)).voxel_down_sample(ONLINE_VOXEL_RADIUS).transform(
+                    (X_WG2 @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0]).GetAsMatrix4()))
+            gripper2_cloud.paint_uniform_color([0.0, 1.0, 0.0])
 
-        gripper2_xyzs = self.grasp_node.hand_extra_buffer_collision_model.to_pcd()
-        gripper2_cloud = o3d.geometry.PointCloud(
-            o3d.utility.Vector3dVector(gripper2_xyzs)).voxel_down_sample(ONLINE_VOXEL_RADIUS).transform(
-                (X_WG2 @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0]).GetAsMatrix4()))
-        gripper2_cloud.paint_uniform_color([0.0, 1.0, 0.0])
 
-        viz_geoms = [manipuland_cloud, gripper1_cloud, gripper2_cloud]
-        o3d.visualization.draw_plotly(viz_geoms)
+            world_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(
+                size=0.05, origin=[0, 0, 0])
+            viz_geoms = [world_frame, manipuland_cloud, gripper1_cloud, gripper2_cloud]
+            o3d.visualization.draw_plotly(viz_geoms)
+
+            if self.is_semimanual:
+                reject = input("Enter 'N' to reject this grasp, press Enter to continue")
+                if reject != 'N':
+                    break
+            else:
+                break
 
         # Solve for pick and display trajectories before moving
         self.PlanPickAndDisplay(context, state)
@@ -2034,7 +2259,8 @@ class TwoGraspPlanner(LeafSystem):
         # Second Pick
         X_WG2 = self.X_WG2
         X_WE2 = X_WG2.multiply(X_GE)
-        if self.q_postgrasp2 is not None:
+        mode = context.get_abstract_state(int(self._mode_index)).get_value()
+        if mode == PlannerState.SCANNING2:
             print("only updating pick and prepick")
             X_G2 = context.get_abstract_state(int(self._gripper_pose_index2)).get_value()
             X_G2["pick"] = X_WE2
@@ -2069,46 +2295,6 @@ class TwoGraspPlanner(LeafSystem):
                 self.q_pregrasp2,
                 self.ik_domain,
                 cci_checker)
-
-            if self.place_flipped2:
-                print("Solving for flipped place")
-                
-                self.q_postgrasp2 = solve_via_analytic_IK_with_retries(
-                    pose=X_G2["preplace"],
-                    current_config=self.q_display_center2,
-                    ik_domain=self.ik_domain,
-                    checker=cci_checker
-                )
-
-                pick_gripper_xyzs = self.grasp_node.hand_collision_model.to_pcd()
-                pick_gripper_cloud = (
-                    o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pick_gripper_xyzs))
-                    .voxel_down_sample(ONLINE_VOXEL_RADIUS)
-                    .transform(
-                        (X_G2["pick_gripper_frame"].multiply(
-                            RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2), [0,0,0])
-                        )).GetAsMatrix4()
-                    )
-                )
-                pick_gripper_cloud.paint_uniform_color([0.0, 1.0, 0.0])
-
-                place_gripper_xyzs = self.grasp_node.hand_collision_model.to_pcd()
-                place_gripper_cloud = (
-                    o3d.geometry.PointCloud(o3d.utility.Vector3dVector(place_gripper_xyzs))
-                    .voxel_down_sample(ONLINE_VOXEL_RADIUS)
-                    .transform(
-                        (X_G2["place_gripper_frame"].multiply(
-                            RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2), [0,0,0])
-                        )).GetAsMatrix4()
-                    )
-                )
-                place_gripper_cloud.paint_uniform_color([1.0, 0.0, 1.0])
-
-                manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(self.current_manipuland_pcd.xyzs().T))
-                manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
-
-                viz_geoms = [manipuland_cloud, pick_gripper_cloud, place_gripper_cloud]
-                # o3d.visualization.draw_plotly(viz_geoms)
 
             state.get_mutable_abstract_state(int(self._times_index2)).set_value(
                 times2

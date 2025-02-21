@@ -45,7 +45,7 @@ class GraspType(Enum):
 class GraspListener():
     """The class responsible for computing and evaluation grasp candidates."""
 
-    def __init__(self, hand_finger_path=None, hand_finger_extra_buffer_path=None, gripper_model_path=None):
+    def __init__(self, gripper_length=0.145, hand_finger_path=None, hand_finger_extra_buffer_path=None, gripper_model_path=None):
         if hand_finger_path == None:
             hand_finger_path = os.path.abspath(
                 os.path.join(os.path.dirname( __file__ ), '..', 'scenario_datas', 'gripper_sdf.pkl'))
@@ -57,6 +57,8 @@ class GraspListener():
         print("Loading extra buffer hand collision model from ", hand_finger_extra_buffer_path)
         self.hand_extra_buffer_collision_model = SignedDensityField.from_pkl(hand_finger_extra_buffer_path)
         # self.hand_collision_model.visualize()
+
+        self.gripper_length = gripper_length
 
         builder = DiagramBuilder()
         self.plant, self.scene_graph = AddMultibodyPlantSceneGraph(builder, time_step=0.0005)
@@ -498,11 +500,15 @@ class GraspListener():
             self, 
             X_WG: RigidTransform, 
             within_box_pt_normals: np.ndarray,
-            split_ratios: np.ndarray,
             split_axes: np.ndarray,
+            center: np.ndarray,
+            half_range: np.ndarray,
             ground_z: float,
             object_height: float,
-            num_pcd_pts: float
+            num_pcd_pts: float,
+            proportion_enclosed_cost_thresh: float=0.1,
+            proportion_good_enclosed_cost_thresh: float=0.01,
+            proportion_enclosed_good_cost_thresh: float=0.1,
             ) -> tuple[float, dict]:
         """
         Computes a grasp candidate cost based on a weighted sum of:
@@ -515,9 +521,10 @@ class GraspListener():
         :param split_ratios: Array of [minor axis split ratio, major axis split ratio]. Values are in range [0,1] where
             higher indicates a more equal split along the principal object axis.
         """
-        R = X_WG.GetAsMatrix4()[:3, :3]
-        t = X_WG.GetAsMatrix4()[:3, 3]
-        eff_vertical_vec = R.dot(np.array([0, 0, 1])) # vertical axis of gripper (parallel to fingers)
+        grasp_center = (X_WG @ RigidTransform([0, 0.0, self.gripper_length/2])).translation()
+
+        rot = X_WG.GetAsMatrix4()[:3, :3]
+        eff_vertical_vec = rot.dot(np.array([0, 0, 1])) # vertical axis of gripper (parallel to fingers)
         
         antipodal_within_grasp_cost = -np.sum(
             np.exp(within_box_pt_normals[1, :] ** 2)
@@ -533,18 +540,33 @@ class GraspListener():
         # want grasps to avoid alignment with long axes, smaller better
         gripper_vertical_axis_alignment_cost = np.abs(eff_vertical_vec @ split_axes)
         min_high_enough = ground_z + 3*object_height/4
-        higher_up_cost = -min(t[2] - min_high_enough, 0) / min_high_enough 
+        higher_up_cost = -min(grasp_center[2] - min_high_enough, 0) / min_high_enough
+
+        # split ratio cost along long axis at the grasp point, not origin point
+        z_axis, x_axis = [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]
+        rot_principal_component_to_axes, _ = R.align_vectors(
+            np.array([z_axis, x_axis]), np.stack([split_axes[0], split_axes[2]])
+        )
+
+        point_axis_aligned = grasp_center @ rot_principal_component_to_axes.as_matrix().T
+
+        decay_rate = 2.0
+        normalized_distance = np.abs((point_axis_aligned - center) / half_range)
+        normalized_distance = np.clip(normalized_distance, 0, 1)
+        split_ratios = np.exp(-decay_rate * normalized_distance) - np.exp(-decay_rate)
+        ranked_split_ratios = np.sort(split_ratios[0], axis=0)
+        split_ratio_cost = -(ranked_split_ratios[1] + ranked_split_ratios[2])
 
         proportion_enclosed = within_box_pt_normals.shape[1]/num_pcd_pts
-        proportion_enclosed_cost = 1e3 if proportion_enclosed < 0.05 else 0
+        proportion_enclosed_cost = 1e3 if proportion_enclosed < proportion_enclosed_cost_thresh else 0
         proportion_good_enclosed = good_normals_within_grasp/num_pcd_pts
-        proportion_good_enclosed_cost = 1e3 if proportion_good_enclosed < 0.01 else 0
+        proportion_good_enclosed_cost = 1e3 if proportion_good_enclosed < proportion_good_enclosed_cost_thresh else 0
         proportion_enclosed_good = good_normals_within_grasp/within_box_pt_normals.shape[1]
-        proportion_enclosed_good_cost = 1e3 if proportion_enclosed_good < 0.1 else 0
+        proportion_enclosed_good_cost = 1e3 if proportion_enclosed_good < proportion_enclosed_good_cost_thresh else 0
 
         cost_dict = {
-            "antipodal_cost": 100.0 * antipodal_cost,
-            "antipodal_within_grasp_cost": 100.0 * antipodal_within_grasp_cost,
+            "antipodal_cost": 200.0 * antipodal_cost,
+            "antipodal_within_grasp_cost": 50.0 * antipodal_within_grasp_cost,
             "gripper_vertical_axis_alignment_cost_principal": -10.0 * gripper_vertical_axis_alignment_cost[0],
             "gripper_vertical_axis_alignment_cost_secondary": -5.0 * gripper_vertical_axis_alignment_cost[1],
             "higher_up_cost": 50.0 * higher_up_cost,
@@ -556,13 +578,15 @@ class GraspListener():
             "proportion_enclosed_good_cost": proportion_enclosed_good_cost,
             "num_pcd_pts": num_pcd_pts,
             "within_box_pt_normals.shape[1]": within_box_pt_normals.shape[1],
-            "good_normals_within_grasp": good_normals_within_grasp
+            "good_normals_within_grasp": good_normals_within_grasp,
+            "split_ratio_cost": 100 * split_ratio_cost
         }
 
         considered_costs = [
             cost_dict["antipodal_cost"],
             cost_dict["antipodal_within_grasp_cost"],
             cost_dict["higher_up_cost"],
+            cost_dict["split_ratio_cost"],
             cost_dict["proportion_enclosed_cost"],
             cost_dict["proportion_good_enclosed_cost"],
             cost_dict["proportion_enclosed_good_cost"],
@@ -654,11 +678,11 @@ class GraspListener():
             # "xy_alignment_cost": -50.0 * max(gripper_x_alignment_cost, gripper_y_alignment_cost),
             "x_principal_alignment_cost": -100.0 * gripper_x_axis_alignment_cost[0],
             "grasp_height_cost": grasp_height_cost,
-            # Split ratio is currently computed on the entire scene point cloud which doesn't make sense
+            # Split ratio doesn't make sense on partial point clouds
             "split_ratio_minor_axis_cost": 0*split_ratio_minor_axis_cost, # This is world x-axis
             "split_ratio_major_axis_cost": 0*split_ratio_major_axis_cost,
             # proportion_enclosed is the propertion of total pcd points that are within the fingers
-            "proportion_enclosed_cost": 100.0 * proportion_enclosed_cost
+            "proportion_enclosed_cost": 200.0 * proportion_enclosed_cost
         }
         cost = sum(cost_dict.values())
 
@@ -817,6 +841,8 @@ class GraspListener():
         split_ratios = np.full((num_points, 3), np.nan)  # Store split ratios per point
         split_axes = np.full((num_points, 3, 3), np.nan)  # Store split axes per point
         lengths = np.full((num_points), np.nan)  # Store lengths per point
+        centers = np.full((num_points, 3), np.nan)  # Store center of cluster per point
+        half_ranges = np.full((num_points, 3), np.nan)  # Store half ranges of cluster per point
         
         while not np.all(accounted_for):
             # Select an unaccounted point as center
@@ -826,12 +852,6 @@ class GraspListener():
             
             # Crop clustered subset around the center and get mask
             subset, subset_mask = crop_connected_points(pcd_points, center, radius, voxel_radius)
-            if viz:
-                subset_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(subset))
-                subset_pcd.paint_uniform_color([0.7, 0.7, 0.7]) # Gray
-                center_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector([center]))
-                center_pcd.paint_uniform_color([1.0, 0.0, 0.0]) # Red
-                o3d.visualization.draw_plotly([subset_pcd, center_pcd])
             
             # Mark these points as accounted for
             accounted_for[subset_mask] = True
@@ -849,12 +869,26 @@ class GraspListener():
             rot_principal_component_to_axes, _ = R.align_vectors(
                 np.array([z_axis, x_axis]), np.stack([principal_component, minor_component])
             )
+            if viz:
+                subset_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(subset))
+                subset_pcd.paint_uniform_color([0.7, 0.7, 0.7]) # Gray
+                center_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector([center]))
+                center_pcd.paint_uniform_color([1.0, 0.0, 0.0]) # Red
+
+                rot = RotationMatrix(rot_principal_component_to_axes.as_matrix().T)
+                T = np.eye(4)
+                T[:3,:3] = rot.matrix()
+                T[:3, 3] = center
+                pca = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
+                pca.transform(T)
+                
+                o3d.visualization.draw_geometries([subset_pcd, center_pcd, pca])
 
             pcd_points_axis_aligned = pcd_points @ rot_principal_component_to_axes.as_matrix().T
 
             # Min/max bounds for split ratio
-            min_point_vals = np.min(pcd_points_axis_aligned, axis=0)
-            max_point_vals = np.max(pcd_points_axis_aligned, axis=0)
+            min_point_vals = np.min(pcd_points_axis_aligned[subset_mask], axis=0)
+            max_point_vals = np.max(pcd_points_axis_aligned[subset_mask], axis=0)
             center = (max_point_vals + min_point_vals) / 2
             half_range = (max_point_vals - min_point_vals) / 2
 
@@ -870,7 +904,7 @@ class GraspListener():
             length = np.linalg.norm(max_point_vals - min_point_vals)
             lengths[subset_mask] = length
         
-        return split_ratios, split_axes, lengths
+        return split_ratios, split_axes, lengths, centers, half_ranges
 
     @staticmethod
     def compute_pcd_split_ratio(pcd_points: np.ndarray, viz_split_ratio_axes: bool = False) -> np.ndarray:
@@ -956,7 +990,7 @@ class GraspListener():
             world_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.01)
             o3d.visualization.draw_plotly([pcd, sampled_pcd, principle_component_line, world_frame])
 
-        return split_ratio[:, [0, 1, 2]], axes, length
+        return split_ratio[:, [0, 1, 2]], axes, length, center, half_range
     
     @staticmethod
     def compute_pcd_split_ratio_at_point(pcd_points: np.ndarray, point: np.ndarray, viz_split_ratio_axes: bool = False) -> np.ndarray:
@@ -1044,7 +1078,7 @@ class GraspListener():
             world_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.01)
             o3d.visualization.draw_plotly([pcd, sampled_pcd, principle_component_line, world_frame])
 
-        return split_ratio, axes, length
+        return split_ratio, axes, length, center, half_range
 
 
     @staticmethod
@@ -1184,7 +1218,10 @@ class GraspListener():
         voxel_radius=0.005,
         ground_z = 0.06,
         use_extra_buffer=False,
-        check_backwards=False
+        check_backwards=False,
+        proportion_enclosed_cost_thresh: float=0.1,
+        proportion_good_enclosed_cost_thresh: float=0.01,
+        proportion_enclosed_good_cost_thresh: float=0.1,
     ):
         """
         Compute sorted candidate grasps.
@@ -1270,13 +1307,14 @@ class GraspListener():
                     if debug:
                         # Calculate scores (for debugging)
                         pcd_points = pcd.xyzs().T
-                        split_ratio, split_axes, length = self.compute_pcd_split_ratio_at_point(pcd_points, origins[i])
+                        split_ratio, split_axes, length, center, half_range = self.compute_pcd_split_ratio_at_point(pcd_points, origins[i])
                         is_nonempty, within_box_pt_normals, proportion_enclosed = self.check_nonempty(pcd, X_WPnew)
                         cost, cost_dict = self.compute_costs(
                                         X_WPnew, 
                                         within_box_pt_normals,
-                                        split_ratio,
                                         split_axes,
+                                        center,
+                                        half_range,
                                         ground_z,
                                         np.max(pcd_points[:, 2]) - np.min(pcd_points[:, 2]),
                                         pcd_points.shape[0]
@@ -1325,8 +1363,8 @@ class GraspListener():
         # num_yaw_samples = 7
 
         PARALLEL = False # There are bugs in the parallel implementation => Don't use!
-        VISUALIZE_CLUSTERS = False
-        VISUALIZE_FILTERED_CLOUDS = False
+        VISUALIZE_CLUSTERS = True
+        VISUALIZE_FILTERED_CLOUDS = True
         VISUALIZE = False
         VISUALIZE_EACH = False
         VISUALIZE_ALL = False # Heat map of good to bad grasps but too messy for fine detail
@@ -1354,10 +1392,7 @@ class GraspListener():
 
         # Filter pcd based on split ratio
         if grasp_type == GraspType.TOP:
-            # split_ratios = self.compute_pcd_split_ratio_xy(downsampled_pcd_points, 0.1, voxel_radius, VISUALIZE_CLUSTERS)
-            # split_axes = np.array([[1,0,0], [0,1,0]])
-            # length = None
-            split_ratios, all_split_axes, lengths = self.compute_pcd_split_ratio_cropped(pcd_flattened_points)
+            split_ratios, all_split_axes, lengths, all_centers, all_half_ranges = self.compute_pcd_split_ratio_cropped(pcd_flattened_points, viz=VISUALIZE_CLUSTERS)
             length = np.max(lengths)
 
             # Allow points where at least 2 out of 3 split ratios exceed the threshold
@@ -1365,8 +1400,10 @@ class GraspListener():
             split_ratio_filtered_points = pcd_flattened_points[mask]
             split_ratio_filtered_normals = flattened_cloud.normals()[:, mask].T
         else:
-            split_ratios, split_axes, length = self.compute_pcd_split_ratio(downsampled_pcd_points)
+            split_ratios, split_axes, length, center, half_range = self.compute_pcd_split_ratio(downsampled_pcd_points)
             all_split_axes = np.tile(split_axes, (split_ratios.shape[0], 1, 1))
+            all_centers = np.tile(center, (split_ratios.shape[0], 1, 1))
+            all_half_ranges = np.tile(half_range, (split_ratios.shape[0], 1, 1))
 
             # Allow points where at least 2 out of 3 split ratios exceed the threshold
             mask = np.sum(split_ratios > split_ratio_threshold, axis=1) >= 2
@@ -1392,9 +1429,36 @@ class GraspListener():
         # Sample random points to compute darboux frames for
         num_split_ratio_filtered_points = len(split_ratio_filtered_points)
         print("num_split_ratio_filtered_points", num_split_ratio_filtered_points)
+
+        if grasp_type != GraspType.TOP:
+            # filter out pts whose x is past 3/4 of obj
+            x_center = (np.min(pcd_points, axis=0)[0] + np.max(pcd_points, axis=0)[0]) / 2
+            x_width = np.max(pcd_points, axis=0)[0] - np.min(pcd_points, axis=0)[0]
+            x_thresh = x_center + x_width / 4
+            mask = split_ratio_filtered_points[:, 0] < x_thresh
+            filtered_points = split_ratio_filtered_points[mask, :]
+            filtered_normals = split_ratio_filtered_normals[mask, :]
+
+            if VISUALIZE_FILTERED_CLOUDS:
+                manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(downsampled_pcd_points))
+                manipuland_cloud.paint_uniform_color([0.7, 0.7, 0.7])
+                filtered_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(filtered_points))
+                filtered_cloud.paint_uniform_color([1,0,0])
+
+                o3d.visualization.draw_geometries([
+                    manipuland_cloud, filtered_cloud
+                ], window_name="points after x filtering")
+
+            num_filtered_points = len(filtered_points)
+            print("num_x_filtered_points", num_filtered_points)
+        else:
+            filtered_points = split_ratio_filtered_points
+            filtered_normals = split_ratio_filtered_normals
+            num_filtered_points = num_split_ratio_filtered_points
+
         darboux_frame_sample_indices = np.random.choice(
-            np.arange(num_split_ratio_filtered_points),
-            int(min(num_samples, num_split_ratio_filtered_points)),
+            np.arange(num_filtered_points),
+            int(min(num_samples, num_filtered_points)),
             replace=False,
         )
 
@@ -1404,7 +1468,7 @@ class GraspListener():
             manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
             manipuland_cloud.paint_uniform_color([0.7, 0.7, 0.7])
             filtered_cloud = o3d.geometry.PointCloud(
-                o3d.utility.Vector3dVector(split_ratio_filtered_points[darboux_frame_sample_indices]))
+                o3d.utility.Vector3dVector(filtered_points[darboux_frame_sample_indices]))
             filtered_cloud.paint_uniform_color([1,0,0])
 
             o3d.visualization.draw_geometries([
@@ -1413,8 +1477,8 @@ class GraspListener():
 
         # Compute darboux frames at samples
         X_WPs = self.compute_darboux_frames(
-            points=split_ratio_filtered_points[darboux_frame_sample_indices],
-            normals=split_ratio_filtered_normals[darboux_frame_sample_indices],
+            points=filtered_points[darboux_frame_sample_indices],
+            normals=filtered_normals[darboux_frame_sample_indices],
             pcd=downsampled_pcd,
             kdtree=kdtree,
             point_up=point_up
@@ -1465,7 +1529,13 @@ class GraspListener():
             candidate_lst_by_grasp_origin_pt: List[np.ndarray] = []
             candidate_costs: List[float] = []
             candidiate_cost_dicts: list[dict] = []
-            for X_WP, split_ratio, split_axes in zip(X_WPs, split_ratios[darboux_frame_sample_indices], all_split_axes[darboux_frame_sample_indices]):
+            for X_WP, split_ratio, split_axes, center, half_range in zip(
+                X_WPs, 
+                split_ratios[darboux_frame_sample_indices], 
+                all_split_axes[darboux_frame_sample_indices], 
+                all_centers[darboux_frame_sample_indices], 
+                all_half_ranges[darboux_frame_sample_indices],
+            ):
                 color = np.random.rand(3)
                 color /= np.linalg.norm(color)
                 color = tuple(color)# NOTE: The best variations to sample/ search over is situation/ grasp environment dependent (e.g. bin vs table)
@@ -1480,6 +1550,12 @@ class GraspListener():
                                     # TODO: Explore whether it is faster to do this transform in numpy
                                     X_PPnew = RigidTransform(RollPitchYaw(roll, pitch, yaw), np.array([x, y, 0]))
                                     X_WPnew = X_WP.multiply(X_PPnew)
+                                    if X_WPnew.GetAsMatrix4()[0, 2] < 0.:
+                                        # avoid grasps from far side, reach around not feasible
+                                        continue 
+                                    if X_WPnew.GetAsMatrix4()[0, 2] > 0.866: # 60 degree cone
+                                        # avoid grasps from too straight forward, not feasible
+                                        continue 
 
                                     if VISUALIZE:
                                         # visualize
@@ -1538,11 +1614,15 @@ class GraspListener():
                                             cost, cost_dict = self.compute_costs(
                                                     X_WPnew, 
                                                     within_box_pt_normals,
-                                                    split_ratio,
                                                     split_axes,
+                                                    center,
+                                                    half_range,
                                                     ground_z,
                                                     np.max(pcd_points[:, 2]) - np.min(pcd_points[:, 2]),
-                                                    pcd_points.shape[0]
+                                                    pcd_points.shape[0],
+                                                    proportion_enclosed_cost_thresh,
+                                                    proportion_good_enclosed_cost_thresh,
+                                                    proportion_enclosed_good_cost_thresh,
                                                 )
                                         elif grasp_type == GraspType.SIDE:
                                             cost, cost_dict = self.compute_costs_single(
@@ -1712,6 +1792,9 @@ class GraspListener():
             
             # Extract rotations (top-left 3x3 part of each 4x4 matrix)
             rotations = candidates_filtered[:, :3, :3]
+            print(rotations.shape)
+            z_axes = rotations[:, :, 2]
+            print(z_axes.shape)
             
             # Compute pairwise rotational differences
             # R_relative = R2^T @ R1 (for each pair of rotations R1, R2)
@@ -1724,8 +1807,13 @@ class GraspListener():
             rotation_cost = np.exp(np.abs(np.pi / 2 - rotation_diffs))
             # rotation_cost = np.maximum(np.exp(-rotation_diffs/np.pi), np.exp(-(np.pi - rotation_diffs)/np.pi))
 
+            z_axis_dot_product = z_axes @ z_axes.T
+            z_axis_diffs = np.clip(z_axis_dot_product, -1.0, 1.0)
+            z_rotation_cost = (np.exp(np.abs(z_axis_diffs)) - 1) / (np.exp(1) - 1) # TODO: not working halp
+
             grasps_quality = candidate_costs_filtered[:, np.newaxis] + candidate_costs_filtered[np.newaxis, :]
             best_quality = np.abs(np.min(grasps_quality))
+            print("z cost scaling", 0.2 * best_quality)
 
             pair_cost_dicts = []
             N = len(candidates_filtered)
@@ -1738,11 +1826,12 @@ class GraspListener():
                         "grasp2_quality": candidate_costs_filtered[j],
                         "grasps_quality": grasps_quality[i, j],
                         "translation_cost": 0.1 * best_quality * translation_cost[i, j],
-                        "rotation_cost": 0.2 * best_quality * rotation_cost[i, j]
+                        "rotation_cost": 0.2 * best_quality * rotation_cost[i, j],
+                        "z_rotation_cost": 0.5 * best_quality * z_rotation_cost[i, j]
                     })
 
             pair_costs = np.array([
-                d["grasps_quality"] + d["translation_cost"] + d["rotation_cost"]
+                d["grasps_quality"] + d["translation_cost"] + d["z_rotation_cost"]
                 for d in pair_cost_dicts
             ]) # Shape (NxN,)
 
