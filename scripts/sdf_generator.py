@@ -2,12 +2,16 @@ import numpy as np
 import argparse
 import json
 import time
+import os
 from tqdm import tqdm
 from planning.misc.sdf_tools import SignedDensityField
 from pydrake.all import (
     AddMultibodyPlantSceneGraph,
     DiagramBuilder,
     Parser,
+    StartMeshcat,
+    MeshcatVisualizerParams,
+    MeshcatVisualizer,
 )
 from manipulation.utils import ConfigureParser
 
@@ -15,13 +19,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--model_url",
-        default="file://./home/real2sim/src/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_large_buffer.sdf",
+        default="file://./home/real2sim/src/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_buffer.sdf",
         help="url to object model file",
         nargs='?',
     )
     parser.add_argument(
         "--pkl_file",
-        default="large_gripper_sdf.pkl",
+        default="gripper_sdf.pkl",
         help="pkl file path to save sdf to",
         nargs='?',
     )
@@ -76,6 +80,8 @@ if __name__ == "__main__":
     z_max = float(args.z_max)
     delta = float(args.delta)
 
+    meshcat = StartMeshcat()
+
     start = time.time()
     builder = DiagramBuilder()
     plant, scene_graph = AddMultibodyPlantSceneGraph(builder, time_step=0.0005)
@@ -83,8 +89,17 @@ if __name__ == "__main__":
     ConfigureParser(parser)
     parser.AddModelsFromUrl(args.model_url)
     plant.Finalize()
+
+    viz_params = MeshcatVisualizerParams()
+    viz_params.prefix = "planning"
+    visualizer = MeshcatVisualizer.AddToBuilder(
+        builder, scene_graph, meshcat, viz_params
+    )
+
     diagram = builder.Build()
     context = diagram.CreateDefaultContext()
+
+    diagram.ForcedPublish(context)
     scene_graph_context = scene_graph.GetMyContextFromRoot(context)
     
     query_object = scene_graph.get_query_output_port().Eval(scene_graph_context)

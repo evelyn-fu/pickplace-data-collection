@@ -431,8 +431,8 @@ class GraspListener():
         # Bounding box of the closing region written in the coordinate frame of the gripper body.
         # z-axis points from gripper body to fingers, y-axis is the grasping axis.
         # It is recommended to tune this while inspecting the crop_cloud with the visualize option.
-        crop_min = [-0.0125, -0.053, 0.03]
-        crop_max = [0.0125, 0.053, 0.03+0.14] # finray is ~14cm long
+        crop_min = [-0.0125, -0.053, 0.025]
+        crop_max = [0.0125, 0.053, 0.025+0.10] # finray is ~11cm long
 
         # Transform the pointcloud to gripper frame.
         X_GW = X_WG.inverse()
@@ -641,6 +641,8 @@ class GraspListener():
             split_ratios: float,
             split_axes: np.ndarray,
             proportion_enclosed: float,
+            viz = False,
+            pcd=None
         ) -> tuple[float, dict]:
         """
         Computes a grasp candidate cost based on a weighted sum of:
@@ -652,12 +654,31 @@ class GraspListener():
         :param split_ratios: Array of [x split ratio, y split ratio]. Values are in range [0,1] where
             higher indicates a more equal split along the principal object axis.
         """
-        R = X_WG.GetAsMatrix4()[:3, :3]
+        rot = X_WG.GetAsMatrix4()[:3, :3]
         t = X_WG.GetAsMatrix4()[:3, 3]
-        eff_vertical_vec = R.dot(np.array([0, 0, 1]))
-        eff_x_vec = R.dot(np.array([1, 0, 0]))
-        eff_y_vec = R.dot(np.array([0, 1, 0]))
-        gripper_x_axis_alignment_cost = np.abs(eff_x_vec @ split_axes)
+        eff_vertical_vec = rot.dot(np.array([0, 0, 1]))
+        eff_x_vec = rot[:, 0]
+        eff_y_vec = rot.dot(np.array([0, 1, 0]))
+        gripper_x_axis_alignment_cost = (eff_x_vec @ split_axes.T)
+
+        # Rotate point cloud to align the principal component with the z-axis and the minor component with the x-axis
+        z_axis, y_axis = [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]
+        rot_principal_component_to_axes, _ = R.align_vectors(
+            np.array([z_axis, y_axis]), np.stack([split_axes[0], split_axes[1]])
+        )
+        if viz:
+            rot = RotationMatrix(rot_principal_component_to_axes.as_matrix().T)
+            T = np.eye(4)
+            T[:3,:3] = rot.matrix()
+            T[:3, 3] = t - [0, 0, 0.03]
+            pca = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
+            pca.transform(T)
+            grasp_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.05).transform(
+                X_WG.GetAsMatrix4()
+            )
+            pcd_viz = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))
+            print(gripper_x_axis_alignment_cost)
+            o3d.visualization.draw_geometries([pcd_viz, grasp_frame, pca])
 
         antipodal_cost = -np.sum(
             within_box_pt_normals[1, :] ** 2
@@ -891,6 +912,7 @@ class GraspListener():
             max_point_vals = np.max(pcd_points_axis_aligned[subset_mask], axis=0)
             center = (max_point_vals + min_point_vals) / 2
             half_range = (max_point_vals - min_point_vals) / 2
+            half_range[np.where(half_range == 0)] = 1 # avoid div by 0
 
             decay_rate = 2.0
             normalized_distance = np.abs((pcd_points_axis_aligned - center) / half_range)
@@ -1364,7 +1386,7 @@ class GraspListener():
 
         PARALLEL = False # There are bugs in the parallel implementation => Don't use!
         VISUALIZE_CLUSTERS = True
-        VISUALIZE_FILTERED_CLOUDS = True
+        VISUALIZE_FILTERED_CLOUDS = False
         VISUALIZE = False
         VISUALIZE_EACH = False
         VISUALIZE_ALL = False # Heat map of good to bad grasps but too messy for fine detail
@@ -1553,7 +1575,7 @@ class GraspListener():
                                     if X_WPnew.GetAsMatrix4()[0, 2] < 0.:
                                         # avoid grasps from far side, reach around not feasible
                                         continue 
-                                    if X_WPnew.GetAsMatrix4()[0, 2] > 0.866: # 60 degree cone
+                                    if X_WPnew.GetAsMatrix4()[0, 2] > 0.94: # 40 degree cone
                                         # avoid grasps from too straight forward, not feasible
                                         continue 
 
@@ -1590,10 +1612,10 @@ class GraspListener():
                                         distance, X_WPnew = self.find_minimum_distance(
                                             merged_pcd,
                                             X_WPnew,
-                                            min_range=-0.1,
-                                            max_range=0.4,
-                                            num_samples=100,
-                                            use_extra_buffer=use_extra_buffer
+                                            # min_range=-0.1,
+                                            # max_range=0.4,
+                                            # num_samples=100,
+                                            use_extra_buffer=use_extra_buffer,
                                         )
                                     else:
                                         distance, X_WPnew = self.find_minimum_distance(
@@ -1643,6 +1665,7 @@ class GraspListener():
                                                     split_ratio,
                                                     split_axes,
                                                     proportion_enclosed,
+                                                    pcd=flattened_cloud
                                                 )
                                         elif grasp_type == GraspType.STABLE:
                                             cost, cost_dict = self.compute_costs_stable(
@@ -1809,7 +1832,7 @@ class GraspListener():
 
             z_axis_dot_product = z_axes @ z_axes.T
             z_axis_diffs = np.clip(z_axis_dot_product, -1.0, 1.0)
-            z_rotation_cost = (np.exp(np.abs(z_axis_diffs)) - 1) / (np.exp(1) - 1) # TODO: not working halp
+            z_rotation_cost = (np.exp(np.abs(z_axis_diffs)) - 1) / (np.exp(1) - 1)
 
             grasps_quality = candidate_costs_filtered[:, np.newaxis] + candidate_costs_filtered[np.newaxis, :]
             best_quality = np.abs(np.min(grasps_quality))

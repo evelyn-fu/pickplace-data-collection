@@ -11,18 +11,18 @@ from pydrake.all import (
     StartMeshcat, MeshcatVisualizerParams, MeshcatVisualizer, LoadModelDirectives, ProcessModelDirectives
 )
 
-PETE_ASSETS =  os.path.dirname(__file__)+"/../pete_assets/"
+PETE_ASSETS = os.path.abspath(os.path.dirname(__file__)+"/../pete_assets/")
 
 def get_regions():
     meshcat = StartMeshcat()
     use_native_cpp_logging()
     params = dict(edge_step_size=0.125)
     builder = RobotDiagramBuilder()
-    directives_file = PETE_ASSETS+'assets/directives/iiwa7_on_table_with_ceiling.dmd.yaml'
-    builder.parser().package_map().Add("adaptive_decomp", PETE_ASSETS+"assets")
-    builder.parser().package_map().Add("iiwa_description", PETE_ASSETS+"assets/iiwa")
-    builder.parser().package_map().Add("wsg_description", PETE_ASSETS+"assets/wsg_description")
-    builder.parser().package_map().Add("tri_finray_gripper", PETE_ASSETS+"assets/tri_finray_gripper")
+    directives_file = PETE_ASSETS+'/assets/directives/iiwa7_on_table_with_extra_cameras.yaml'
+    builder.parser().package_map().Add("adaptive_decomp", PETE_ASSETS+"/assets")
+    builder.parser().package_map().Add("iiwa_description", PETE_ASSETS+"/assets/iiwa")
+    builder.parser().package_map().Add("wsg_description", PETE_ASSETS+"/assets/wsg_description")
+    builder.parser().package_map().Add("tri_finray_gripper", PETE_ASSETS+"/assets/tri_finray_gripper")
     directives = LoadModelDirectives(directives_file)
     models = ProcessModelDirectives(directives, builder.plant(), builder.parser())
     iiwa_model_instance_index = builder.plant().GetModelInstanceByName("iiwa7")
