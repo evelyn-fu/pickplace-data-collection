@@ -20,7 +20,7 @@ def MakePickGripperFrames(X_G, preplace_time=0.0, postpick_height=0.2):
     """
 
     # Amount of time it takes to GET TO each frame
-    times = {"prepick": 0.0}
+    times = {"prepick": 0.5}
     
     # Allow some time for the gripper to close.
     X_G["pick_start"] = X_G["pick"]
@@ -89,7 +89,7 @@ def MakePickAndDisplayGripperFrames(
     X_GprepickGpredisplay = X_G["prepick"].inverse() @ X_G["display_traj"][0]
 
     # Amount of time it takes to GET TO each frame
-    times = {"prepick": 0.0}
+    times = {"prepick": 0.5}
     
     # Allow some time for the gripper to close.
     X_G["pick_start"] = X_G["pick"]
@@ -113,7 +113,7 @@ def MakePickAndDisplayGripperFrames(
         )
     else:
         X_G["preplace"] = X_G["postpick"]
-    times["preplace"] = 0.0
+    times["preplace"] = 1.0
 
     # Place back down and allow some time for gripper to open
     X_G["place_start"] = X_G["place"]
@@ -135,7 +135,7 @@ def MakePickAndDisplayGripperFrames(
 
     return X_G, times
 
-def MakeGripperPoseTrajectory(X_G, times, traj_type=TrajType.PREDISPLAY, t0=0.0):
+def MakeGripperPoseTrajectory(X_G, times, X_G0, traj_type=TrajType.PREDISPLAY, t0=0.0):
     """Constructs a gripper position trajectory from the plan "sketch"."""
     if traj_type == TrajType.BIN:
         names = [
@@ -163,13 +163,10 @@ def MakeGripperPoseTrajectory(X_G, times, traj_type=TrajType.PREDISPLAY, t0=0.0)
         "postplace",
         ]
 
-    sample_times = []
-    poses = []
+    sample_times = [t0]
+    poses = [X_G0]
     for name in names:
-        if len(sample_times) == 0:
-            sample_times.append(times[name] + t0)
-        else:
-            sample_times.append(sample_times[-1] + times[name])
+        sample_times.append(sample_times[-1] + times[name])
         poses.append(X_G[name])
 
     return PiecewisePose.MakeLinear(sample_times, poses)
@@ -205,25 +202,29 @@ def MakeGripperCommandTrajectory(times, traj_type=TrajType.PREDISPLAY, t0=0.0):
         "postplace",
         ]
 
-    sample_times = []
+    sample_times = [t0]
     positions = []
     for name in names:
-        if len(sample_times) == 0:
-            sample_times.append(times[name] + t0)
+        print(name, times[name])
+        if name == "pick_end" or name == "place_end":
+            sample_times.append(sample_times[-1] + 0.5)
+        elif name == "postpick" or name == "postplace":
+            prev = "pick_end" if name == "postpick" else "place_end"
+            sample_times.append(sample_times[-1] + times[name] + (times[prev] - 0.5))
         else:
-            if name == "pick_end" or name == "place_end":
-                sample_times.append(sample_times[-1] + 0.5)
-            elif name == "postpick" or name == "postplace":
-                prev = "pick_end" if name == "postpick" else "place_end"
-                sample_times.append(sample_times[-1] + times[name] + (times[prev] - 0.5))
-            else:
-                sample_times.append(sample_times[-1] + times[name])
+            sample_times.append(sample_times[-1] + times[name])
         
         if name == "prepick" or name == "pick_start" or name == "place_end" or name == "postplace":
+            if len(positions) == 0:
+                positions.append(opened) # choose the same gripper position for buffer time
             positions.append(opened)
         else:
+            if len(positions) == 0:
+                positions.append(closed) # choose the same gripper position for buffer time
             positions.append(closed)
 
+    print(sample_times)
+    print(len(sample_times), len(positions))
     t = PiecewisePolynomial.FirstOrderHold(sample_times, np.array(positions).T)
     return t
 

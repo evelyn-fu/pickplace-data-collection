@@ -1323,7 +1323,7 @@ class TwoGraspPlanner(LeafSystem):
                 o3d.visualization.draw_plotly(viz_geoms)
 
                 if self.is_semimanual:
-                    reject = input("Enter '[n]' to reject this grasp, press Enter to continue")
+                    reject = input("Enter 'n' to reject this grasp, press Enter to continue ")
                     if reject != 'n':
                         break
                 else:
@@ -1492,7 +1492,7 @@ class TwoGraspPlanner(LeafSystem):
             o3d.visualization.draw_plotly(viz_geoms)
 
             if self.is_semimanual:
-                reject = input("Enter '[n]' to reject this grasp, press Enter to continue")
+                reject = input("Enter 'n' to reject this grasp, press Enter to continue ")
                 if reject != 'n':
                     break
             else:
@@ -1506,7 +1506,7 @@ class TwoGraspPlanner(LeafSystem):
             "postplace": end_bin,
         }
 
-        X_G, times = MakePickGripperFrames(X_G)
+        X_G, times = MakePickGripperFrames(X_G, preplace_time=0.5)
         
         state.get_mutable_abstract_state(int(self._times_index_single_grasp)).set_value(
             times
@@ -1533,9 +1533,10 @@ class TwoGraspPlanner(LeafSystem):
 
         X_G = context.get_abstract_state(int(self._gripper_pose_index_single_grasp)).get_value()
         times = context.get_abstract_state(int(self._times_index_single_grasp)).get_value()
-            
+        
+        X_G0 = self.GetInputPort("body_poses").Eval(context)[int(self._ee_index)]
         traj_wsg_command = MakeGripperCommandTrajectory(times, TrajType.BIN, current_time)
-        traj_gripper_pose = MakeGripperPoseTrajectory(X_G, times, TrajType.BIN, current_time)
+        traj_gripper_pose = MakeGripperPoseTrajectory(X_G, times, X_G0, TrajType.BIN, current_time)
         
         state.get_mutable_abstract_state(int(self._traj_wsg_index)).set_value(
             traj_wsg_command
@@ -2356,9 +2357,10 @@ class TwoGraspPlanner(LeafSystem):
         traj_type = TrajType.POSTDISPLAY
         if pick_mode == PickState.IDLE:
             traj_type = TrajType.PREDISPLAY
-            
+        
+        X_G0 = self.GetInputPort("body_poses").Eval(context)[int(self._ee_index)]
         traj_wsg_command = MakeGripperCommandTrajectory(times, traj_type, current_time)
-        traj_gripper_pose = MakeGripperPoseTrajectory(X_G, times, traj_type, current_time)
+        traj_gripper_pose = MakeGripperPoseTrajectory(X_G, times, X_G0, traj_type, current_time)
         
         state.get_mutable_abstract_state(int(self._traj_wsg_index)).set_value(
             traj_wsg_command
