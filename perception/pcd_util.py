@@ -41,7 +41,6 @@ def crop_connected_points(
     # Get points within initial radius
     dists = np.linalg.norm(xyz.T - center, axis=1)
     initial_mask = dists < radius
-    crop_connected_points
     if not np.any(initial_mask):
         # Return empty cloud if no points in radius
         return PointCloud(0)

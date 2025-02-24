@@ -659,7 +659,7 @@ class GraspListener():
         eff_vertical_vec = rot.dot(np.array([0, 0, 1]))
         eff_x_vec = rot[:, 0]
         eff_y_vec = rot.dot(np.array([0, 1, 0]))
-        gripper_x_axis_alignment_cost = (eff_x_vec @ split_axes.T)
+        gripper_x_axis_alignment_cost = (eff_x_vec @ split_axes[0].T)
 
         # Rotate point cloud to align the principal component with the z-axis and the minor component with the x-axis
         z_axis, y_axis = [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]
@@ -697,7 +697,7 @@ class GraspListener():
             "gripper_vertical_alignment_cost": 50.0 * gripper_vertical_alignment_cost,
             # Alignment scores are in range [-1,0] where -1 indicates perfect alignment with one of the axes. 
             # "xy_alignment_cost": -50.0 * max(gripper_x_alignment_cost, gripper_y_alignment_cost),
-            "x_principal_alignment_cost": -100.0 * gripper_x_axis_alignment_cost[0],
+            "x_principal_alignment_cost": -100.0 * gripper_x_axis_alignment_cost,
             "grasp_height_cost": grasp_height_cost,
             # Split ratio doesn't make sense on partial point clouds
             "split_ratio_minor_axis_cost": 0*split_ratio_minor_axis_cost, # This is world x-axis
@@ -938,6 +938,8 @@ class GraspListener():
             split_axes[subset_mask, :, :] = axes
             length = np.linalg.norm(max_point_vals - min_point_vals)
             lengths[subset_mask] = length
+            centers[subset_mask, :] = center
+            half_ranges[subset_mask, :] = half_range
         
         return split_ratios, split_axes, lengths, centers, half_ranges
 
@@ -1400,6 +1402,7 @@ class GraspListener():
         PARALLEL = False # There are bugs in the parallel implementation => Don't use!
         VISUALIZE_CLUSTERS = False
         VISUALIZE_FILTERED_CLOUDS = False
+        VIZUALIZE_SPLIT_RATIOS_AT_ORIGIN = False
         VISUALIZE = False
         VISUALIZE_EACH = False
         VISUALIZE_ALL = False # Heat map of good to bad grasps but too messy for fine detail
@@ -1427,12 +1430,22 @@ class GraspListener():
 
         # Filter pcd based on split ratio
         if grasp_type == GraspType.TOP:
-            split_ratios, all_split_axes, lengths, all_centers, all_half_ranges = self.compute_pcd_split_ratio_cropped(pcd_flattened_points, viz=VISUALIZE_CLUSTERS)
+            split_ratios, all_split_axes, lengths, all_centers, all_half_ranges = self.compute_pcd_split_ratio_cropped(
+                pcd_flattened_points, 
+                viz=VISUALIZE_CLUSTERS
+            )
             length = np.max(lengths)
 
             # Allow points where at least 2 out of 3 split ratios exceed the threshold
             mask = np.sum(split_ratios > split_ratio_threshold, axis=1) >= 2
             split_ratio_filtered_points = pcd_flattened_points[mask]
+
+            # make sure we filter out all information we use about the filtered points
+            split_ratios = split_ratios[mask]
+            all_split_axes = all_split_axes[mask]
+            all_centers = all_centers[mask]
+            all_half_ranges = all_half_ranges[mask]
+
             split_ratio_filtered_normals = flattened_cloud.normals()[:, mask].T
         else:
             split_ratios, split_axes, length, center, half_range = self.compute_pcd_split_ratio(downsampled_pcd_points)
@@ -1443,6 +1456,13 @@ class GraspListener():
             # Allow points where at least 2 out of 3 split ratios exceed the threshold
             mask = np.sum(split_ratios > split_ratio_threshold, axis=1) >= 2
             split_ratio_filtered_points = downsampled_pcd_points[mask]
+
+            # make sure we filter out all information we use about the filtered points
+            split_ratios = split_ratios[mask]
+            all_split_axes = all_split_axes[mask]
+            all_centers = all_centers[mask]
+            all_half_ranges = all_half_ranges[mask]
+
             split_ratio_filtered_normals = downsampled_pcd.normals()[:, mask].T
 
         if VISUALIZE_FILTERED_CLOUDS:
@@ -1473,6 +1493,12 @@ class GraspListener():
             mask = split_ratio_filtered_points[:, 0] < x_thresh
             filtered_points = split_ratio_filtered_points[mask, :]
             filtered_normals = split_ratio_filtered_normals[mask, :]
+
+            # make sure we filter out all information we use about the filtered points
+            split_ratios = split_ratios[mask]
+            all_split_axes = all_split_axes[mask]
+            all_centers = all_centers[mask]
+            all_half_ranges = all_half_ranges[mask]
 
             if VISUALIZE_FILTERED_CLOUDS:
                 manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(downsampled_pcd_points))
@@ -1571,6 +1597,26 @@ class GraspListener():
                 all_centers[darboux_frame_sample_indices], 
                 all_half_ranges[darboux_frame_sample_indices],
             ):
+                if VIZUALIZE_SPLIT_RATIOS_AT_ORIGIN:
+                    # Rotate point cloud to align the principal component with the z-axis and the minor component with the x-axis
+                    z_axis, x_axis = [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]
+                    rot_principal_component_to_axes, _ = R.align_vectors(
+                        np.array([z_axis, x_axis]), np.stack([split_axes[0], split_axes[2]])
+                    )
+                    viz_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd_points))
+                    viz_pcd.paint_uniform_color([0.7, 0.7, 0.7]) # Gray
+
+                    rot = RotationMatrix(rot_principal_component_to_axes.as_matrix().T)
+                    T = np.eye(4)
+                    T[:3,:3] = rot.matrix()
+                    T[:3, 3] = X_WP.translation()
+                    pca = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
+                    pca.transform(T)
+                    
+                    print(X_WP.translation())   
+                    print(split_axes)
+                    o3d.visualization.draw_geometries([viz_pcd, pca], window_name="split_ratio_at_origin")
+
                 color = np.random.rand(3)
                 color /= np.linalg.norm(color)
                 color = tuple(color)# NOTE: The best variations to sample/ search over is situation/ grasp environment dependent (e.g. bin vs table)
