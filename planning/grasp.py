@@ -521,7 +521,7 @@ class GraspListener():
         :param split_ratios: Array of [minor axis split ratio, major axis split ratio]. Values are in range [0,1] where
             higher indicates a more equal split along the principal object axis.
         """
-        grasp_center = (X_WG @ RigidTransform([0, 0.0, self.gripper_length/2])).translation()
+        grasp_center = (X_WG @ RigidTransform([0, 0.0, 3*self.gripper_length/4])).translation()
 
         rot = X_WG.GetAsMatrix4()[:3, :3]
         eff_vertical_vec = rot.dot(np.array([0, 0, 1])) # vertical axis of gripper (parallel to fingers)
@@ -747,6 +747,19 @@ class GraspListener():
         proportion_good_enclosed_cost = 1e3 if proportion_good_enclosed < 0.01 else 0
         proportion_enclosed_good = good_normals_within_grasp/within_box_pt_normals.shape[1]
         proportion_enclosed_good_cost = 1e3 if proportion_enclosed_good < 0.1 else 0
+
+        # Prefer alignment to one of the axes. This is a decent heuristic for standing objects.
+        eff_x_vec = R.dot(np.array([1, 0, 0]))
+        eff_y_vec = R.dot(np.array([0, 1, 0]))
+        eff_z_vec = R.dot(np.array([0, 0, 1]))
+
+        # Vertical grasps
+        gripper_z_to_world_z_alignment_score = np.abs(eff_z_vec[2])
+        # Right angled grasps
+        gripper_x_to_world_z_alignment_score = np.abs(np.dot(eff_x_vec, np.array([0, 0, 1])))
+      
+        # Prefer side grasps
+        axis_alignment_cost = -max(gripper_z_to_world_z_alignment_score, 2*gripper_x_to_world_z_alignment_score)
         
         split_ratio_minor_axis_cost = -split_ratios[0]
         split_ratio_major_axis_cost = -split_ratios[2]
@@ -763,8 +776,9 @@ class GraspListener():
             "num_pcd_pts": num_pcd_pts,
             "within_box_pt_normals.shape[1]": within_box_pt_normals.shape[1],
             "good_normals_within_grasp": good_normals_within_grasp,
-            "split_ratio_minor_axis_cost": split_ratio_minor_axis_cost,
-            "split_ratio_major_axis_cost": split_ratio_major_axis_cost
+            "split_ratio_minor_axis_cost": 50 * split_ratio_minor_axis_cost,
+            "split_ratio_major_axis_cost": 100 * split_ratio_major_axis_cost,
+            "axis_alignment_cost": 100 * axis_alignment_cost,
         }
 
         considered_costs = [
@@ -773,8 +787,7 @@ class GraspListener():
             cost_dict["proportion_enclosed_cost"],
             cost_dict["proportion_good_enclosed_cost"],
             cost_dict["proportion_enclosed_good_cost"],
-            # cost_dict["split_ratio_minor_axis_cost"],
-            # cost_dict["split_ratio_major_axis_cost"],
+            cost_dict["axis_alignment_cost"],
         ]
         cost = sum(considered_costs)
 
@@ -1385,7 +1398,7 @@ class GraspListener():
         # num_yaw_samples = 7
 
         PARALLEL = False # There are bugs in the parallel implementation => Don't use!
-        VISUALIZE_CLUSTERS = True
+        VISUALIZE_CLUSTERS = False
         VISUALIZE_FILTERED_CLOUDS = False
         VISUALIZE = False
         VISUALIZE_EACH = False

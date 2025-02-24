@@ -417,6 +417,20 @@ def start_scenario(
             wsg_state_demux.get_output_port(0),
             station.GetInputPort("wsg.position"),
         )
+        builder.Connect(
+            wsg_state_demux.get_output_port(0),
+            planner.GetInputPort("wsg.position_measured"),
+        )
+    else:
+        builder.Connect(
+            station.GetOutputPort("wsg.state_measured"),
+            wsg_state_demux.get_input_port(),
+        )
+        builder.Connect(
+            wsg_state_demux.get_output_port(0),
+            planner.GetInputPort("wsg.position_measured"),
+        )
+
 
     # Connect system ID data saver ports.
     builder.Connect(planner.GetOutputPort("planner_state"), sys_id_saver.GetInputPort("planner_state"))

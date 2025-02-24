@@ -590,7 +590,7 @@ def generate_points_in_cube(center, side_lengths, spacing=0.02):
     
     return points
     
-ceiling_vox = generate_points_in_cube((0.4, 0.0, 0.9), (0.4, 0.5, 0.001))
+ceiling_vox = generate_points_in_cube((0.6, 0.0, 0.85), (0.4, 0.5, 0.001))
 camera_vox = generate_points_in_cube((0.8, 0.0, 0.3), (0.01, 0.15, 0.6))
 bin_cam_vox = generate_points_in_cube((-0.0338161, 0.84, 0.2), (0.02, 0.10, 0.4))
 bin_cam_pole_vox = generate_points_in_cube((-0.07, 0.44, 0.21), (0.04, 0.08, 0.42))
@@ -621,8 +621,8 @@ for z_offset in np.linspace(0, -0.1, int(0.1/0.005)):
 bin_sides_vox = np.concatenate(bin_sides_components, axis=0).T
 
 # Stage center transforms are used for placing the object onto the workspace after bin picking.
-stage_center0 = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi/2)), [0.45, 0.0, 0.1])
-stage_center90 = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0.0)), [0.45, 0.0, 0.0])
+stage_center0 = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi/2)), [0.5, 0.0, 0.1])
+stage_center90 = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0.0)), [0.5, 0.0, 0.0])
 
 bin_depth = 0.06
 x_points = np.linspace(corner1[0], corner3[0])
@@ -681,11 +681,16 @@ class TwoGraspPlanner(LeafSystem):
         self.is_manual = is_manual
         self.is_semimanual = is_semimanual
         self.sys_id_grasp_only = sys_id_grasp_only
+        self.bin_pick_grasped_nothing = False
 
         # for getting current positions
         self._ee_index = plant.GetBodyByName("iiwa_link_7").index()
         self.DeclareAbstractInputPort(
             "body_poses", AbstractValue.Make([RigidTransform()])
+        )
+
+        self._wsg_position_input_port = self.DeclareVectorInputPort(
+            "wsg.position_measured", size=1
         )
 
         # FSM state
@@ -906,16 +911,27 @@ class TwoGraspPlanner(LeafSystem):
                 ).set_value(PlannerState.PICK_GRASP)
                 # Plan pick grasp
                 self.PlanBinPickPoseTraj(context, state)
+                self.bin_pick_grasped_nothing = False
             return
         if mode == PlannerState.PICK_GRASP:
             traj_pose = context.get_abstract_state(
                 int(self._traj_X_G_index)
             ).get_value()
             if traj_pose.get_number_of_segments() > 0 and context.get_time() > traj_pose.end_time():
-                state.get_mutable_abstract_state(
-                    int(self._mode_index)
-                ).set_value(PlannerState.GO_HOME0)
-                self.GoHome(context, state)
+                if self.bin_pick_grasped_nothing:
+                    state.get_mutable_abstract_state(
+                        int(self._mode_index)
+                    ).set_value(PlannerState.START)
+                    self.GoHome(context, state)
+                else:
+                    state.get_mutable_abstract_state(
+                        int(self._mode_index)
+                    ).set_value(PlannerState.GO_HOME0)
+                    self.GoHome(context, state)
+            else:
+                wsg_position = self.GetInputPort("wsg.position_measured").Eval(context)
+                if wsg_position < 0.005: # try again if nothing was grasped
+                    self.bin_pick_grasped_nothing = True
             return
         if mode == PlannerState.GO_HOME0:
             traj_q = context.get_abstract_state(
@@ -927,7 +943,7 @@ class TwoGraspPlanner(LeafSystem):
             if context.get_time() > traj_q.end_time() + start_time:
                 state.get_mutable_abstract_state(
                     int(self._mode_index)
-                ).set_value(PlannerState.RESET)
+                ).set_value(PlannerState.SCANNING1)
             return
         if mode == PlannerState.SCANNING1:
             self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP1)
@@ -1402,9 +1418,8 @@ class TwoGraspPlanner(LeafSystem):
             num_samples=30,
             random_seed=np.random.randint(1000),
             grasp_type=GraspType.STABLE,
-            split_ratio_threshold=0.5,
+            split_ratio_threshold=0.3,
             is_manual=self.is_manual,
-            use_extra_buffer=True
         )
 
         grasps, grasp_costs = self.grasp_node.get_best_grasps()
@@ -1420,7 +1435,7 @@ class TwoGraspPlanner(LeafSystem):
                     num_samples=30,
                     random_seed=np.random.randint(1000),
                     grasp_type=GraspType.STABLE,
-                    split_ratio_threshold=0.65
+                    split_ratio_threshold=0.5
                 )
                 new_grasps, new_grasp_costs = self.grasp_node.get_best_grasps()
                 print("num new grasps:", len(new_grasps))
@@ -2366,8 +2381,7 @@ class TwoGraspPlanner(LeafSystem):
             if not self.place_flipped2:
                 self.q_postgrasp2 = q
         
-        # temporarily remove for debugging
-        obstacles_vox = None #np.hstack([ceiling_vox])
+        obstacles_vox = np.hstack([ceiling_vox])
 
         traj = scs_trajopt(
             q, 
