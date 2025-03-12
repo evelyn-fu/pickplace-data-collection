@@ -635,7 +635,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--models_path",
         default="scenario_data_grasping.dmd.yaml",
-        help="dmd.yaml file with scenario, used for generating iris regions",
+        help="dmd.yaml file with scenario, used for checking for collisions",
         nargs='?',
     )
     parser.add_argument(
