@@ -69,6 +69,8 @@ from enum import Enum
 from pathlib import Path
 
 import sys
+
+# Imports below import from https://github.com/wernerpe/csdecomp
 # append path to pycuci to system path
 MMT_GCS_ROOT = os.path.abspath(os.path.join(__file__ ,"../../../mmt_gcs/"))
 PYCUCI_ROOT = os.path.dirname(__file__) + "/../../" + "cuciv0" 
