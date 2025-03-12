@@ -78,7 +78,6 @@ import pycuci as cci
 PETE_ASSETS =  os.path.dirname(__file__)+"/../pete_assets/"
 SAFE_DIRECTIVES = PETE_ASSETS+'assets/directives/iiwa7_on_table_with_ceiling.yaml'
 SYS_ID_TRAJ_PARAMETER_PATH = Path(os.path.abspath(os.path.join(__file__ ,"../../traj_feb8")))
-# SYS_ID_TRAJ_PARAMETER_PATH = Path(os.path.abspath(os.path.join(__file__ ,"../../sysid_traj_075_limits")))
 
 from mmt_gcs.planning.mintime_scs import MintimeSCSWithPathFixing
 from mmt_gcs.planning.corridor_planning_utils import CCICollisionChecker, CollisionCheckerBase
@@ -1153,11 +1152,11 @@ class TwoGraspPlanner(LeafSystem):
         scene_pcd.resize(new_scene_pts.shape[1])
         scene_pcd.mutable_xyzs()[:] = new_scene_pts
         
-        np.save(os.path.abspath(os.path.join(__file__ ,"../../bin_background.npy")), scene_pcd.xyzs())
-        np.save(os.path.abspath(os.path.join(__file__ ,"../../bin_contents.npy")), bin_pcd.xyzs())
-        np.save(os.path.abspath(os.path.join(__file__ ,"../../bin_background_normals.npy")), scene_pcd.normals())
-        np.save(os.path.abspath(os.path.join(__file__ ,"../../bin_contents_normals.npy")), bin_pcd.normals())
-        print("saved bin pcds")
+        # np.save(os.path.abspath(os.path.join(__file__ ,"../../bin_background.npy")), scene_pcd.xyzs())
+        # np.save(os.path.abspath(os.path.join(__file__ ,"../../bin_contents.npy")), bin_pcd.xyzs())
+        # np.save(os.path.abspath(os.path.join(__file__ ,"../../bin_background_normals.npy")), scene_pcd.normals())
+        # np.save(os.path.abspath(os.path.join(__file__ ,"../../bin_contents_normals.npy")), bin_pcd.normals())
+        # print("saved bin pcds")
 
         # remove outliers
         o3d_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(bin_pcd.xyzs().T))
@@ -1744,11 +1743,11 @@ class TwoGraspPlanner(LeafSystem):
         self.current_scene_pcd = merged_pcd
         print("table pcd got in", time.time()-start, "seconds")
         
-        np.save(os.path.abspath(os.path.join(__file__ ,"../../dual_grasp_background_pcd.npy")), self.current_scene_pcd.xyzs())
-        np.save(os.path.abspath(os.path.join(__file__ ,"../../dual_grasp_pcd.npy")), self.current_manipuland_pcd.xyzs())
-        np.save(os.path.abspath(os.path.join(__file__ ,"../../dual_grasp_background_normals.npy")), self.current_scene_pcd.normals())
-        np.save(os.path.abspath(os.path.join(__file__ ,"../../dual_grasp_normals.npy")), self.current_manipuland_pcd.normals())
-        print("saved dual grasp pcds")
+        # np.save(os.path.abspath(os.path.join(__file__ ,"../../dual_grasp_background_pcd.npy")), self.current_scene_pcd.xyzs())
+        # np.save(os.path.abspath(os.path.join(__file__ ,"../../dual_grasp_pcd.npy")), self.current_manipuland_pcd.xyzs())
+        # np.save(os.path.abspath(os.path.join(__file__ ,"../../dual_grasp_background_normals.npy")), self.current_scene_pcd.normals())
+        # np.save(os.path.abspath(os.path.join(__file__ ,"../../dual_grasp_normals.npy")), self.current_manipuland_pcd.normals())
+        # print("saved dual grasp pcds")
 
         # Find grasp candidates
         if mode == PlannerState.SCANNING1:
