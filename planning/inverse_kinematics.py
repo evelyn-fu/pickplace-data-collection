@@ -14,6 +14,9 @@ from pydrake.all import (
     RollPitchYaw
 )
 
+import sys
+from planning.utils.csdecomp_path import CSDECOMP_PATH
+sys.path.append(f'{CSDECOMP_PATH}/bazel-bin/csdecomp/src/pybind/pycsdecomp')
 import pycsdecomp as csd
 from planning.analytic_ik_iiwa_7 import Analytic_IK_7DoF, iiwa_limits_lower, iiwa_limits_upper, iiwa_alpha, iiwa_d
 
@@ -121,9 +124,9 @@ def solve_via_analytic_IK(pose: RigidTransform,
 def solve_via_analytic_IK_with_retries(pose: RigidTransform,
                           current_config : np.ndarray,
                           ik_domain: HPolyhedron,
-                          checker: CollisionCheckerBase,
+                          csd_plant: csd.Plant,
                           retries: int = 1):
-    result = solve_via_analytic_IK(pose, current_config, ik_domain, checker)
+    result = solve_via_analytic_IK(pose, current_config, ik_domain, csd_plant)
     if result is not None:
         return result
     

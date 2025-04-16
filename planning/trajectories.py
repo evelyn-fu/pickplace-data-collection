@@ -233,7 +233,7 @@ def MakeDisplayJointPositionsTrajectory(
         times, 
         q,
         ik_domain,
-        cci_checker):
+        csd_plant):
     """
     Returns a peicewise polynomial trajectory for the display along the last joint
 
@@ -256,7 +256,7 @@ def MakeDisplayJointPositionsTrajectory(
             pose=X_G["display_traj"][i],
             current_config=q,
             ik_domain=ik_domain,
-            checker=cci_checker
+            csd_plant=csd_plant
         )
         # q_display_center = solve_global_inverse_kinematics(
         #     plant=plant,

@@ -19,10 +19,6 @@ import os
 from pathlib import Path
 
 import numpy as np
-import sys
-PYCUCI_ROOT = os.path.dirname(__file__) + "/../../" + "cuciv0" 
-sys.path.append(PYCUCI_ROOT+'/bazel-bin/cuci/src/pybind/pycuci')
-import pycuci as cci
 
 from manipulation.station import LoadScenario
 from pydrake.all import (
@@ -40,124 +36,51 @@ import shutil
 from robot_payload_id.control.trajectory import FourierSeriesTrajectory
 from robot_payload_id.utils import FourierSeriesTrajectoryAttributes
 from manipulation.station import MakeHardwareStation, RobotDiagram
-from mmt_gcs.planning.mintime_scs import MintimeSCSWithPathFixing
-from mmt_gcs.planning.corridor_planning_utils import CCICollisionChecker
-from mmt_gcs.planning.region_generation import CCI_inflate_edges_given_pwl_path
+
+from planning.motion_planning import plan_path_custom, plan_drm
+
+import sys
+from planning.utils.csdecomp_path import CSDECOMP_PATH
+sys.path.append(f'{CSDECOMP_PATH}/bazel-bin/csdecomp/src/pybind/pycsdecomp')
+import pycsdecomp as csd
 
 PETE_ASSETS = os.path.dirname(__file__) + "/../pete_assets/"
-MMT_GCS_ROOT = os.path.abspath(os.path.join(__file__, "../../../mmt_gcs/"))
 ONLINE_VOXEL_RADIUS = 0.005
 SYS_ID_TRAJ_PARAMETER_PATH = Path(os.path.abspath(os.path.join(__file__ ,"../../traj_feb8")))
 
-def get_cci_edge_inflator(verbose=False):
-    cci_parser = cci.URDFParser()
-    cci_parser.register_package("adaptive_decomp", PETE_ASSETS + "assets")
-    cci_parser.register_package("iiwa_description", PETE_ASSETS + "assets/iiwa")
-    cci_parser.register_package(
-        "wsg_description", PETE_ASSETS + "assets/wsg_description"
-    )
-    cci_parser.register_package(
-        "tri_finray_gripper", PETE_ASSETS + "assets/tri_finray_gripper"
-    )
-    cci_parser.parse_directives(PETE_ASSETS + "assets/directives/iiwa7_on_table.yaml")
-    cci_plant = cci_parser.build_plant()
-    cci_mplant = cci_plant.getMinimalPlant()
-    cci_domain = cci.HPolyhedron()
-    cci_domain.MakeBox(
-        cci_plant.getPositionLowerLimits(), cci_plant.getPositionUpperLimits()
-    )
-    cci_objects = {
-        "cci_plant": cci_plant,
-        "cci_mplant": cci_mplant,
-        "cci_domain": cci_domain,
-    }
 
-    cci_fei_opts = cci.FastEdgeInflationOptions()
-    cci_fei_opts.num_particles = 10000
-    cci_fei_opts.max_hyperplanes_per_iteration = 20
-    cci_fei_opts.epsilon = 0.005
-    cci_fei_opts.delta = 0.005
-    cci_fei_opts.max_iterations = 30
-    cci_fei_opts.mixing_steps = 60
-    cci_fei_opts.configurataon_margin = 0.01
-    cci_fei_opts.verbose = verbose
+def get_csd_plant():
+    parser = csd.URDFParser()
+    parser.register_package("adaptive_decomp", PETE_ASSETS+"assets")
+    parser.register_package("iiwa_description", PETE_ASSETS+"assets/iiwa")
+    parser.register_package("wsg_description", PETE_ASSETS+"assets/wsg_description")
+    parser.register_package("tri_finray_gripper", PETE_ASSETS+"assets/tri_finray_gripper")
+    parser.parse_directives(PETE_ASSETS+"assets/directives/iiwa7_on_table.yaml")
+    plant = parser.build_plant()
 
-    edge_inflator = cci.CudaEdgeInflator(
-        cci_objects["cci_mplant"],
-        cci_objects["cci_plant"].getRobotGeometryIds(),
-        cci_fei_opts,
-        cci_objects["cci_domain"],
-    )
+    return plant
 
-    return edge_inflator, cci_objects
-
-
-def get_drm_planner(cci_obj, vox=None):
-    drm_pl_opts = cci.DrmPlannerOptions()
+def drm_planner(csd_plant, vox=None):
+    drm_pl_opts = csd.DrmPlannerOptions()
     drm_pl_opts.max_number_planning_attempts = 50
     drm_pl_opts.try_shortcutting = True
     drm_pl_opts.online_edge_step_size = 0.005
 
-    drm_planner = cci.DrmPlanner(cci_obj["cci_plant"], drm_pl_opts)
-    drm_planner.LoadRoadmap(
-        MMT_GCS_ROOT
-        + "/tmp/iiwa_hardware/iiwa_roadmap_1_0_0.01_0.2_50000_10_4.5_0.45.rm"
-    )
+    drm_planner = csd.DrmPlanner(csd_plant, drm_pl_opts)
+    root = os.path.abspath(os.path.dirname(__file__)+'/../')
+    drm_planner.LoadRoadmap(root+"/planning/roadmaps/iiwa_roadmap_0_0_0.01_0.2_100000_10_4.5_0.45.rm")
 
     if vox is not None:
-        online_voxel_observation = cci.Voxels(vox.T)
+        online_voxel_observation = csd.Voxels(vox.T)
         drm_planner.BuildCollisionSet(online_voxel_observation)
-
+    
     return drm_planner
 
-
-def scs_trajopt(
-    start, goal, drm_planner, cci_obj, edge_inflator, vox, vel_limits, acc_limits
-):
-    online_voxel_observation = cci.Voxels(vox) if vox is not None else cci.Voxels()
-
-    success, pwl_plan = drm_planner.Plan(
-        start, goal, online_voxel_observation, ONLINE_VOXEL_RADIUS
-    )
-
-    regions, edges = CCI_inflate_edges_given_pwl_path(
-        pwl_plan,
-        edge_inflator,
-        online_voxel_observation,
-        ONLINE_VOXEL_RADIUS,
-        verbose=True,
-    )
-
-    cci_checker = CCICollisionChecker(
-        cci_obj["cci_mplant"],
-        cci_obj["cci_plant"].getRobotGeometryIds(),
-        online_voxel_observation,
-        ONLINE_VOXEL_RADIUS,
-    )
-
-    vel_limits_reflected = [-vel_limits, vel_limits]
-    acc_limits_reflected = [-acc_limits, acc_limits]
-    traj, cost, timing_info, traj_col_free, first_solve_collision_free, collisions = (
-        MintimeSCSWithPathFixing(
-            start,
-            goal,
-            regions,
-            edges,
-            vel_limits_reflected,
-            acc_limits_reflected,
-            cci_checker,
-            edge_inflator,
-            online_voxel_observation,
-            ONLINE_VOXEL_RADIUS,
-        )
-    )
-
-    return traj
 
 class TrajSourceInitializer(LeafSystem):
     """Prevents the robot from falling down uppon simulator creation."""
 
-    def __init__(self, excitation_traj):
+    def __init__(self, excitation_traj, use_custom_path_planner=False):
         super().__init__()
         self._excitation_traj = excitation_traj
 
@@ -168,9 +91,10 @@ class TrajSourceInitializer(LeafSystem):
             "iiwa.position_measured", 7
         )
 
-         # Create cci planner.
-        self._edge_inflator, self._cci_objects = get_cci_edge_inflator()
-        self._drm_planner = get_drm_planner(self._cci_objects)
+        # Create drm planner.
+        self.csd_plant = get_csd_plant()
+        self.drm_planner = drm_planner(self.csd_plant)
+        self.use_custom_path_planner = use_custom_path_planner
 
         self.DeclareInitializationDiscreteUpdateEvent(self._init)
 
@@ -186,16 +110,21 @@ class TrajSourceInitializer(LeafSystem):
         q_current = self._iiwa_position_measured_input_port.Eval(context)
 
         q_start = self._excitation_traj.value(0.0)
-        to_start_traj = scs_trajopt(
-            start=q_current,
-            goal=q_start,
-            drm_planner=self._drm_planner,
-            cci_obj=self._cci_objects,
-            edge_inflator=self._edge_inflator,
-            vox=None,
-            vel_limits=np.ones(7)*0.5,
-            acc_limits=np.ones(7)*0.5,
-        )
+        if self.use_custom_path_planner:
+            # Use custom path planner. Warning: Must be implemented by user
+            to_start_traj = plan_path_custom(
+                q_current, 
+                q_start,
+            )
+        else:
+            # Use drm path planner
+            to_start_traj = plan_drm(
+                self.drm_planner,
+                start=q_current,
+                goal=q_start,
+                vox=None,
+                online_voxel_radius=ONLINE_VOXEL_RADIUS
+            )
 
         wait_at_start_traj = PiecewisePolynomial.ZeroOrderHold(
             breaks=[
@@ -281,6 +210,11 @@ def main():
         choices=["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"],
         help="Log level.",
     )
+    parser.add_argument(
+        "--use_custom_path_planner",
+        action="store_true",
+        help="Whether to use user implemented path planner.",
+    )
     args = parser.parse_args()
     logging.basicConfig(level=args.log_level)
     scenario_path = args.scenario_path
@@ -290,6 +224,7 @@ def main():
     time_horizon = args.time_horizon
     num_gripper_openings = args.num_gripper_openings
     num_runs = args.num_runs
+    use_custom_path_planner = args.use_custom_path_planner
 
     if os.path.exists(save_data_path):
         input(f"{save_data_path} already exists. Press enter to delete and re-create. Ctr+c to stop.")
@@ -337,7 +272,7 @@ def main():
         traj_source.get_output_port(), station.GetInputPort("iiwa.position")
     )
     initializer: TrajSourceInitializer = builder.AddSystem(
-        TrajSourceInitializer(excitation_traj)
+        TrajSourceInitializer(excitation_traj, use_custom_path_planner)
     )
     builder.Connect(
         station.GetOutputPort("iiwa.position_measured"),

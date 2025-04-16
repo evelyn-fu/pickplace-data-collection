@@ -69,6 +69,9 @@ from manipulation.meshcat_utils import AddMeshcatTriad
 from enum import Enum
 from pathlib import Path
 
+import sys
+from planning.utils.csdecomp_path import CSDECOMP_PATH
+sys.path.append(f'{CSDECOMP_PATH}/bazel-bin/csdecomp/src/pybind/pycsdecomp')
 import pycsdecomp as csd
 
 ONLINE_VOXEL_RADIUS = 0.005
@@ -243,7 +246,7 @@ def drm_planner(csd_plant, vox=None):
 
     drm_planner = csd.DrmPlanner(csd_plant, drm_pl_opts)
     root = os.path.abspath(os.path.dirname(__file__)+'/../')
-    drm_planner.LoadRoadmap(root+"/iiwa_roadmap_0_0_0.01_0.2_100000_10_4.5_0.45.rm")
+    drm_planner.LoadRoadmap(root+"/planning/roadmaps/iiwa_roadmap_0_0_0.01_0.2_100000_10_4.5_0.45.rm")
 
     if vox is not None:
         online_voxel_observation = csd.Voxels(vox.T)
@@ -488,7 +491,7 @@ class TwoGraspPlanner(LeafSystem):
             eef_to_gripper_length=0.16, # 0.16 for the real value,
             num_objs=1,
             is_manual=False,
-            is_semimanual=True,
+            is_semimanual=False,
             sys_id_grasp_only=False,
             use_custom_path_planner=False,
         ):
@@ -1024,6 +1027,9 @@ class TwoGraspPlanner(LeafSystem):
         # pregrasp is negative z in the gripper frame
         X_GgraspGpregrasp = RigidTransform([0, 0.0, -self.pregrasp_dist])
 
+        # Initialize DRM with current pcd
+        self.drm_planner = drm_planner(self.csd_plant, self.current_manipuland_pcd.xyzs().T)
+
         q_goal = None
         first_attempt = True
         while q_goal is None:
@@ -1225,7 +1231,10 @@ class TwoGraspPlanner(LeafSystem):
 
         # pregrasp is negative z in the gripper frame
         X_GgraspGpregrasp = RigidTransform([0, 0.0, -self.pregrasp_dist])
-        
+
+        # Initialize DRM with current pcd
+        self.drm_planner = drm_planner(self.csd_plant, self.current_manipuland_pcd.xyzs().T)
+
         self.grasp_node.compute_candidate_grasps(
             self.current_manipuland_pcd,
             pcd_with_background,
@@ -1581,29 +1590,29 @@ class TwoGraspPlanner(LeafSystem):
         q = self.get_input_port(self._iiwa_position_index).Eval(context)
         q_goal = context.get_discrete_state(self._q0_index).get_value().copy() # initial pose
 
-        try:
-            obstacles_vox = np.hstack([self.current_manipuland_pcd.xyzs()])
+        # try:
+        obstacles_vox = np.hstack([self.current_manipuland_pcd.xyzs()])
 
-            if self.use_custom_path_planner:
-                # Use custom path planner. Warning: Must be implemented by user
-                traj = plan_path_custom(
-                    q, 
-                    q_goal,
-                )
-            else:
-                # Use drm path planner
-                traj = plan_drm(
-                    self.drm_planner,
-                    q, 
-                    q_goal, 
-                    obstacles_vox,
-                    ONLINE_VOXEL_RADIUS
-                )
-        except:
-            input("Press enter to continue with unconstrained plan to home. Else terminate.")
-            traj = plan_unconstrained_gcs_path_start_to_goal(
-                plant=self._iiwa_controller_plant, q_start=q, q_goal=q_goal, regions=None, no_obstacles=True
+        if self.use_custom_path_planner:
+            # Use custom path planner. Warning: Must be implemented by user
+            traj = plan_path_custom(
+                q, 
+                q_goal,
             )
+        else:
+            # Use drm path planner
+            traj = plan_drm(
+                self.drm_planner,
+                q, 
+                q_goal, 
+                obstacles_vox,
+                ONLINE_VOXEL_RADIUS
+            )
+        # except:
+        #     input("Press enter to continue with unconstrained plan to home. Else terminate.")
+        #     traj = plan_unconstrained_gcs_path_start_to_goal(
+        #         plant=self._iiwa_controller_plant, q_start=q, q_goal=q_goal, regions=None, no_obstacles=True
+        #     )
 
         breaks = np.linspace(0, traj.end_time(), int(1e3), endpoint=False)
         knots = traj.vector_values(breaks)
@@ -1725,6 +1734,9 @@ class TwoGraspPlanner(LeafSystem):
                         X_PT=RigidTransform(rot,
                         [com[0], com[1], com[2]]))
         
+        # Initialize DRM with current pcd
+        self.drm_planner = drm_planner(self.csd_plant, self.current_manipuland_pcd.xyzs().T)
+
         # while not grasps_found:
         # Planning first grasping trajectory
         self.grasp_node.compute_candidate_grasps(

@@ -22,7 +22,6 @@ import yaml
 import os
 
 # from cspace_utils.plotting import plot_points, plot_triad
-# from mmt_gcs.perception.calibration import load_calibration_evelyn
 import numpy as np
 from sklearn.cluster import MiniBatchKMeans
 import networkx as nx
@@ -140,11 +139,9 @@ def select_subset_kmeans(data, n_samples, batch_size=5000, max_iter=20):
     return np.array(selected_indices)
 
 import sys
-from mmt_gcs.utils.cci_utils import cci_setup
-cci_setup()
-PYCUCI_ROOT = os.path.dirname(__file__) + "/../../" + "cuciv0"
-sys.path.append(PYCUCI_ROOT+'/bazel-bin/cuci/src/pybind/pycuci') 
-import pycuci as cci
+from planning.utils.csdecomp_path import CSDECOMP_PATH
+sys.path.append(f'{CSDECOMP_PATH}/bazel-bin/csdecomp/src/pybind/pycsdecomp')
+import pycsdecomp as csd
 
 PETE_ASSETS = os.path.abspath(os.path.dirname(__file__)+"/../pete_assets/")
 root = os.path.abspath(os.path.dirname(__file__)+'/../')
@@ -202,30 +199,26 @@ plot_points(meshcat,
             Rgba(1,0,1,0.9))
 
 
-# calib = load_calibration_evelyn()
-# for i, tf in enumerate(calib):
-#     plot_triad(RigidTransform(tf), meshcat, f'cam{i}')
-
 parser.package_map().Add("adaptive_decomp", PETE_ASSETS+"/assets")
 parser.package_map().Add("iiwa_description", PETE_ASSETS+"/assets/iiwa")
 parser.package_map().Add("wsg_description", PETE_ASSETS+"/assets/wsg_description")
 parser.package_map().Add("tri_finray_gripper", PETE_ASSETS+"/assets/tri_finray_gripper")
 
-cci_parser = cci.URDFParser()
-cci_parser.register_package("adaptive_decomp", PETE_ASSETS+"/assets")
-cci_parser.register_package("iiwa_description", PETE_ASSETS+"/assets/iiwa")
-cci_parser.register_package("wsg_description", PETE_ASSETS+"/assets/wsg_description")
-cci_parser.register_package("tri_finray_gripper", PETE_ASSETS+"/assets/tri_finray_gripper")
-cci_parser.parse_directives(PETE_ASSETS+"/assets/directives/iiwa7_on_table_with_extra_cameras.yaml")
-cci_plant = cci_parser.build_plant()
-cci_mplant = cci_plant.getMinimalPlant()
-cci_domain = cci.HPolyhedron()
-cci_domain.MakeBox(cci_plant.getPositionLowerLimits(), 
-                   cci_plant.getPositionUpperLimits())
+csd_parser = csd.URDFParser()
+csd_parser.register_package("adaptive_decomp", PETE_ASSETS+"/assets")
+csd_parser.register_package("iiwa_description", PETE_ASSETS+"/assets/iiwa")
+csd_parser.register_package("wsg_description", PETE_ASSETS+"/assets/wsg_description")
+csd_parser.register_package("tri_finray_gripper", PETE_ASSETS+"/assets/tri_finray_gripper")
+csd_parser.parse_directives(PETE_ASSETS+"/assets/directives/iiwa7_on_table_with_extra_cameras.yaml")
+csd_plant = csd_parser.build_plant()
+csd_mplant = csd_plant.getMinimalPlant()
+csd_domain = csd.HPolyhedron()
+csd_domain.MakeBox(csd_plant.getPositionLowerLimits(), 
+                   csd_plant.getPositionUpperLimits())
 
 #build the roadmap
 np.random.seed(1337)
-rm_opts = cci.RoadmapOptions()
+rm_opts = csd.RoadmapOptions()
 rm_opts.robot_map_size_x = 1.5
 rm_opts.robot_map_size_y = 2.25
 rm_opts.robot_map_size_z = 1.
@@ -235,18 +228,18 @@ rm_opts.max_configuration_distance_between_nodes = max_configuration_distance
 rm_opts.max_task_space_distance_between_nodes = max_task_space_distance
 rm_opts.offline_voxel_resolution = offline_voxel_resolution
 rm_opts.edge_step_size = edge_step_size
-rm_builder = cci.RoadmapBuilder(cci_plant, "iiwa7::iiwa_link_ee", rm_opts)
+rm_builder = csd.RoadmapBuilder(csd_plant, "iiwa7::iiwa_link_ee", rm_opts)
 cfree_samps = []
 num_samps = 0
 
 while True:
-    samples = cci.UniformSampleInHPolyhedraCuda([cci_domain], 
-                                                cci_domain.ChebyshevCenter(), 
+    samples = csd.UniformSampleInHPolyhedronCuda([csd_domain], 
+                                                csd_domain.ChebyshevCenter(), 
                                                 batchsize, 
                                                 300,
                                                 np.random.randint(0, 1000))[0]
 
-    results = cci.CheckCollisionFreeCuda(samples, cci_mplant)        
+    results = csd.CheckCollisionFreeCuda(samples, csd_mplant)        
     cfree_samps.append(samples[:, np.where(results)[0]])
     num_samps+= cfree_samps[-1].shape[1]
     print(f'num samples sofar {num_samps} delta {cfree_samps[-1].shape[1]}')

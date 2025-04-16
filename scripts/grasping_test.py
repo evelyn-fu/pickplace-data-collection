@@ -435,14 +435,25 @@ def start_scenario(
     # Connect system ID data saver ports.
     builder.Connect(planner.GetOutputPort("planner_state"), sys_id_saver.GetInputPort("planner_state"))
     builder.Connect(planner.GetOutputPort("pick_state"), sys_id_saver.GetInputPort("pick_state"))
-    builder.Connect(
-        external_station.GetOutputPort("iiwa.position_measured"),
-        sys_id_saver.GetInputPort("iiwa.position_measured"),
-    )
-    builder.Connect(
-        external_station.GetOutputPort("iiwa.torque_measured"),
-        sys_id_saver.GetInputPort("iiwa.torque_measured"),
-    )
+    if not use_hardware:
+        builder.Connect(
+            station.GetOutputPort("iiwa.position_measured"),
+            sys_id_saver.GetInputPort("iiwa.position_measured"),
+        )
+        builder.Connect(
+            station.GetOutputPort("iiwa.torque_measured"),
+            sys_id_saver.GetInputPort("iiwa.torque_measured"),
+        )
+    else:
+        builder.Connect(
+            external_station.GetOutputPort("iiwa.position_measured"),
+            sys_id_saver.GetInputPort("iiwa.position_measured"),
+        )
+        builder.Connect(
+            external_station.GetOutputPort("iiwa.torque_measured"),
+            sys_id_saver.GetInputPort("iiwa.torque_measured"),
+        )
+
     builder.Connect(
         wsg_state_demux.get_output_port(0),
         sys_id_saver.GetInputPort("wsg.position_measured"),
@@ -659,6 +670,11 @@ if __name__ == "__main__":
         "--save_imgs",
         action='store_true',
         help="yaml file with scenario",
+    )
+    parser.add_argument(
+        "--use_custom_path_planner",
+        action="store_true",
+        help="Whether to use user implemented path planner.",
     )
     parser.add_argument(
         "--turntable",

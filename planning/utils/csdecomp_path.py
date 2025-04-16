@@ -1,0 +1,1 @@
+CSDECOMP_PATH = "/home/real2sim/src/csdecomp" # replace with your path
