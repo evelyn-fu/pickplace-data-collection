@@ -12,7 +12,7 @@ from pydrake.all import (
 )
 
 class VoxelMap:
-    def __init__(self, points: np.ndarray, voxel_size: float):
+    def __init__(self, points: np.ndarray, voxel_size: float, confidence_threshold: float = 0.9):
         """
         Initializes a voxel map with signed distance values and confidence.
 
@@ -24,31 +24,27 @@ class VoxelMap:
             raise ValueError("Input points must be a 3xn array.")
 
         self.voxel_size = voxel_size
-        self.voxel_map = {}
+        self.confidences = np.zeros(points.shape[1])
+        self.confidence_threshold = confidence_threshold
 
         # Compute the center of the points
         self.center = np.mean(points, axis=1)
         print(f"Voxel map center: {self.center}")
 
         # Convert points to voxel indices
-        voxel_indices = np.floor(points / voxel_size).astype(int)
-
-        # Initialize the voxel map with signed distance and confidence
-        for idx in range(voxel_indices.shape[1]):
-            voxel_key = tuple(voxel_indices[:, idx])
-            if voxel_key not in self.voxel_map:
-                self.voxel_map[voxel_key] = {"signed_distance": 0.0, "confidence": 0.0}
-
-        self.pcd = PointCloud(points.shape[1])
-        self.pcd.mutable_xyzs()[:] = points
+        self.points = points
+        
+        self.pcd = PointCloud(self.points.shape[1])
+        self.pcd.mutable_xyzs()[:] = self.points
         self.pcd = self.pcd.VoxelizedDownSample(voxel_size=voxel_size)
         self.pcd.EstimateNormals(radius=0.1, num_closest=30)
         self.pcd.FlipNormalsTowardPoint(self.center)
         self.pcd.mutable_normals()[:] = -self.pcd.normals() # flip away from center
+        self.normals = self.pcd.normals()
 
         self.triangle_mesh, densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
             o3d.geometry.PointCloud(
-                o3d.utility.Vector3dVector(points.T)
+                o3d.utility.Vector3dVector(self.points.T)
             )
         )
 
@@ -66,7 +62,7 @@ class VoxelMap:
             extrinsic_matrix (np.ndarray): The extrinsic matrix of the camera in object frame
             width_px (int): The width of the camera image in pixels
             height_px (int): The height of the camera image in pixels
-            occlusion_mask (np.ndarray): A 3xn array indicating occluded pixels, optional
+            occlusion_mask (np.ndarray): A 1xn array indicating occluded pixels, optional
         """
 
         rays = o3d.t.geometry.RaycastingScene.create_rays_pinhole(
@@ -79,7 +75,7 @@ class VoxelMap:
         raycast = self.scene.cast_rays(rays)
 
         if occlusion_mask is not None:
-            occlusion_set = np.floor(occlusion_mask / self.voxel_size).astype(int)
+            occlusion_indices = np.where(occlusion_mask == 1)[0]
 
         for i in range(rays.shape[0]):
             ray = rays[i]
@@ -88,8 +84,29 @@ class VoxelMap:
             if raycast["t_hit"][i] < np.inf:
                 depth = raycast["t_hit"][i]
                 hit_point = ray_origin + depth * ray_dir
-                voxel_index = np.floor(hit_point / self.voxel_size).astype(int)
-                voxel_key = tuple(voxel_index)
-                if voxel_key in self.voxel_map and voxel_key:
+                nearest_voxel_index = np.argmin(np.linalg.norm(hit_point - self.points))
+                if nearest_voxel_index not in occlusion_indices:
                     # Update signed distance and confidence
-                    pass
+                    surface_normal = self.normals[nearest_voxel_index]
+                    weight = -np.dot(surface_normal, ray_dir)
+                    self.confidences[nearest_voxel_index] += weight
+    
+    def visualize(self):
+        """
+        Visualizes the voxel map using open3d
+        """
+        point_cloud = o3d.geometry.PointCloud()
+        point_cloud.points = o3d.utility.Vector3dVector(self.points.T)
+
+        base_color = np.array([0.2, 0.2, 0.2])
+        target_color = np.array([1, 0, 0])
+        colors = base_color + np.clip(self.confidences, 0, 1) * (target_color - base_color) # red more confident, gray less confident
+        point_cloud.colors = o3d.utility.Vector3dVector(colors)
+
+        o3d.visualization.draw_geometries([point_cloud])
+
+    def fully_obserrve(self):
+        """
+        Returns True if the map is fully observed
+        """
+        return np.all(self.confidences > self.confidence_threshold)
