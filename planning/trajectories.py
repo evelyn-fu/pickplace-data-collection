@@ -315,7 +315,7 @@ def MakePushingJointPositionsTrajectory(
         X_G_reset, 
         q, 
         ik_domain,
-        cci_checker
+        csd_plant
     ):
     sample_times = [0.0]
     positions = [q]
@@ -326,7 +326,7 @@ def MakePushingJointPositionsTrajectory(
             pose=X_G,
             current_config=q,
             ik_domain=ik_domain,
-            checker=cci_checker
+            csd_plant=csd_plant
         )
         # q_goal = solve_global_inverse_kinematics(
         #     plant=plant,
@@ -367,7 +367,7 @@ def MakePushingJointPositionsTrajectory(
             pose=X_G,
             current_config=q_prev,
             ik_domain=ik_domain,
-            checker=cci_checker
+            csd_plant=csd_plant
         )
         # q_goal = solve_global_inverse_kinematics(
         #     plant=plant,

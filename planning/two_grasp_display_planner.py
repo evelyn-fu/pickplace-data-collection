@@ -21,6 +21,7 @@ from planning.trajectories import (
 )
 from planning.gcs import plan_unconstrained_gcs_path_start_to_goal
 from planning.inverse_kinematics import solve_via_analytic_IK, solve_via_analytic_IK_with_retries
+from planning.motion_planning import plan_path_custom, plan_drm
 from iiwa_setup_dataclasses.trajectories import TrajectoryWithTimingInformation, Trajectory
 from iiwa_setup_dataclasses.bspline_trajectory import CompositeBezierCurveTrajectoryAttributes
 from pydrake.systems.framework import LeafSystem
@@ -68,22 +69,12 @@ from manipulation.meshcat_utils import AddMeshcatTriad
 from enum import Enum
 from pathlib import Path
 
-import sys
+import pycsdecomp as csd
 
-# Imports below import from https://github.com/wernerpe/csdecomp
-# append path to pycuci to system path
-MMT_GCS_ROOT = os.path.abspath(os.path.join(__file__ ,"../../../mmt_gcs/"))
-PYCUCI_ROOT = os.path.dirname(__file__) + "/../../" + "cuciv0" 
 ONLINE_VOXEL_RADIUS = 0.005
-sys.path.append(PYCUCI_ROOT+'/bazel-bin/cuci/src/pybind/pycuci')
-import pycuci as cci
 PETE_ASSETS =  os.path.dirname(__file__)+"/../pete_assets/"
 SAFE_DIRECTIVES = PETE_ASSETS+'assets/directives/iiwa7_on_table_with_ceiling.yaml'
 SYS_ID_TRAJ_PARAMETER_PATH = Path(os.path.abspath(os.path.join(__file__ ,"../../traj_feb8")))
-
-from mmt_gcs.planning.mintime_scs import MintimeSCSWithPathFixing
-from mmt_gcs.planning.corridor_planning_utils import CCICollisionChecker, CollisionCheckerBase
-from mmt_gcs.planning.region_generation import CCI_inflate_edges_given_pwl_path
 
 def get_seeded_region_safe(q_nominal):
     models_path = PETE_ASSETS+'assets/directives/iiwa7_on_table_with_ceiling.dmd.yaml'
@@ -209,97 +200,17 @@ def get_regions(models_path, com, rot, dims):
         return sets
     else:
         print("No solvers available")
-    
-def get_regions_cci(waypoints, voxels, voxel_radius, verbose=False):
-    '''
-    Inputs:
-        waypoints: List[np.ndarray(7,1)], list of precomputed waypoints for a
-        trajectory in configuration space around which we want to compute regions
-        voxels: np.ndarray(3, n), 3xn array of occupied 3D voxels in space
-        voxel_radius: radius of voxels in voxels
-    Returns:
-        regions: List[HPolyhedron]
-    '''
-    cci_parser = cci.URDFParser()
-    cci_parser.register_package("adaptive_decomp", PETE_ASSETS+"assets")
-    cci_parser.register_package("iiwa_description", PETE_ASSETS+"assets/iiwa")
-    cci_parser.register_package("wsg_description", PETE_ASSETS+"assets/wsg_description")
-    cci_parser.register_package("tri_finray_gripper", PETE_ASSETS+"assets/tri_finray_gripper")
-    cci_parser.parse_directives(PETE_ASSETS+"assets/directives/iiwa7_on_table.yaml")
-    cci_plant = cci_parser.build_plant()
-    cci_mplant = cci_plant.getMinimalPlant()
-    cci_domain = cci.HPolyhedron()
-    cci_domain.MakeBox(cci_plant.getPositionLowerLimits(), 
-                    cci_plant.getPositionUpperLimits())
-    cci_objects = {
-        'cci_plant' : cci_plant,
-        'cci_mplant' : cci_mplant,
-        'cci_domain' : cci_domain
-    }
 
-    cci_fei_opts = cci.FastEdgeInflationOptions()
-    cci_fei_opts.num_particles = 10000
-    cci_fei_opts.max_hyperplanes_per_iteration = 20
-    cci_fei_opts.epsilon = 0.005
-    cci_fei_opts.delta = 0.005
-    cci_fei_opts.max_iterations = 30
-    cci_fei_opts.mixing_steps = 60
-    cci_fei_opts.configurataon_margin = 0.01
-    cci_fei_opts.verbose = verbose
+def get_csd_plant():
+    parser = csd.URDFParser()
+    parser.register_package("adaptive_decomp", PETE_ASSETS+"assets")
+    parser.register_package("iiwa_description", PETE_ASSETS+"assets/iiwa")
+    parser.register_package("wsg_description", PETE_ASSETS+"assets/wsg_description")
+    parser.register_package("tri_finray_gripper", PETE_ASSETS+"assets/tri_finray_gripper")
+    parser.parse_directives(PETE_ASSETS+"assets/directives/iiwa7_on_table.yaml")
+    plant = parser.build_plant()
 
-
-    edge_inflator = cci.CudaEdgeInflator(cci_objects['cci_mplant'], 
-                                        cci_objects['cci_plant'].getRobotGeometryIds(), 
-                                        cci_fei_opts, 
-                                        cci_objects['cci_domain'])
-
-    regions = []
-    for i in range(len(waypoints)-1):
-        cci_region : cci.HPolyhedron = edge_inflator.inflateEdge(waypoints[i], 
-                                                                waypoints[i+1], 
-                                                                cci.Voxels(voxels), 
-                                                                voxel_radius, 
-                                                                verbose=verbose)
-
-        regions.append(HPolyhedron(cci_region.A(), cci_region.b()))
-    
-    return regions
-
-def get_cci_edge_inflator(verbose=False):
-    cci_parser = cci.URDFParser()
-    cci_parser.register_package("adaptive_decomp", PETE_ASSETS+"assets")
-    cci_parser.register_package("iiwa_description", PETE_ASSETS+"assets/iiwa")
-    cci_parser.register_package("wsg_description", PETE_ASSETS+"assets/wsg_description")
-    cci_parser.register_package("tri_finray_gripper", PETE_ASSETS+"assets/tri_finray_gripper")
-    cci_parser.parse_directives(PETE_ASSETS+"assets/directives/iiwa7_on_table.yaml")
-    cci_plant = cci_parser.build_plant()
-    cci_mplant = cci_plant.getMinimalPlant()
-    cci_domain = cci.HPolyhedron()
-    cci_domain.MakeBox(cci_plant.getPositionLowerLimits(), 
-                    cci_plant.getPositionUpperLimits())
-    cci_objects = {
-        'cci_plant' : cci_plant,
-        'cci_mplant' : cci_mplant,
-        'cci_domain' : cci_domain
-    }
-
-    cci_fei_opts = cci.FastEdgeInflationOptions()
-    cci_fei_opts.num_particles = 10000
-    cci_fei_opts.max_hyperplanes_per_iteration = 20
-    cci_fei_opts.epsilon = 0.005
-    cci_fei_opts.delta = 0.005
-    cci_fei_opts.max_iterations = 30
-    cci_fei_opts.mixing_steps = 60
-    cci_fei_opts.configurataon_margin = 0.01
-    cci_fei_opts.verbose = verbose
-
-
-    edge_inflator = cci.CudaEdgeInflator(cci_objects['cci_mplant'], 
-                                        cci_objects['cci_plant'].getRobotGeometryIds(), 
-                                        cci_fei_opts, 
-                                        cci_objects['cci_domain'])
-
-    return edge_inflator, cci_objects
+    return plant
 
 def make_iiwa_plant():
     directives_file = PETE_ASSETS+'assets/directives/iiwa7_on_table.yaml'
@@ -324,105 +235,21 @@ def make_iiwa_plant():
 
     return plant, plant_context
 
-def sample_goal_drm(
-        goal_pose: RigidTransform, 
-        current_config,
-        drm_planner : cci.DrmPlanner,
-        domain : HPolyhedron,
-        checker : CollisionCheckerBase,
-        num_configs_to_try : int = 10,
-        search_cutoff_distance : float = 0.5,
-        ):
-
-    close_configs = drm_planner.GetClosestNonCollidingConfigurationsByPose(goal_pose.GetAsMatrix4(), 
-                                                                    num_configs_to_try, 
-                                                                    search_cutoff_distance)
-    close_configs_array = np.array(close_configs)
-    delta = close_configs_array - current_config
-    sorted = close_configs_array[np.argsort(np.linalg.norm(delta,axis =1))]
-
-    for c in sorted[:2]:
-        goal_config = solve_via_analytic_IK(goal_pose, current_config, domain, checker)
-        
-        if goal_config is None:
-            print("[sample_goal_drm] IK failed")
-        elif not checker.CheckConfigsCollisionFree(goal_config.reshape(-1,1))[0]:
-            print("[sample_goal_biased] IK solution in collision")
-            goal_config = None
-        else:
-            break
-
-        attempts = 0
-        while goal_config is None and attempts < 10:
-            print("trying global inverse kinematics with new initial guess randomized around c")
-            goal_config = solve_via_analytic_IK(goal_pose, current_config, domain, checker)
-            if goal_config is None:
-                print("[sample_goal_drm] IK failed")
-            elif not checker.CheckConfigsCollisionFree(goal_config.reshape(-1,1))[0]:
-                print("[sample_goal_biased] IK solution in collision")
-                goal_config = None
-            attempts += 1
-        
-        if goal_config is not None:
-            break
-    
-    return goal_config, goal_pose
-
-def drm_planner(cci_obj, vox=None):
-    drm_pl_opts = cci.DrmPlannerOptions()
+def drm_planner(csd_plant, vox=None):
+    drm_pl_opts = csd.DrmPlannerOptions()
     drm_pl_opts.max_number_planning_attempts = 50
     drm_pl_opts.try_shortcutting = True
     drm_pl_opts.online_edge_step_size = 0.005
 
-    drm_planner = cci.DrmPlanner(cci_obj['cci_plant'], drm_pl_opts)
+    drm_planner = csd.DrmPlanner(csd_plant, drm_pl_opts)
     root = os.path.abspath(os.path.dirname(__file__)+'/../')
     drm_planner.LoadRoadmap(root+"/iiwa_roadmap_0_0_0.01_0.2_100000_10_4.5_0.45.rm")
 
     if vox is not None:
-        online_voxel_observation = cci.Voxels(vox.T)
+        online_voxel_observation = csd.Voxels(vox.T)
         drm_planner.BuildCollisionSet(online_voxel_observation)
     
     return drm_planner
-
-def scs_trajopt(start, goal, drm_planner, cci_obj, edge_inflator, vox, vel_limits, acc_limits):
-    if vox is None:
-        online_voxel_observation = cci.Voxels()
-    else:
-        online_voxel_observation = cci.Voxels(vox)
-    
-    success, pwl_plan = drm_planner.Plan(start,
-                     goal,
-                     online_voxel_observation,
-                     ONLINE_VOXEL_RADIUS)
-    
-    regions, edges = CCI_inflate_edges_given_pwl_path(pwl_plan, 
-                                     edge_inflator, 
-                                     online_voxel_observation,
-                                     ONLINE_VOXEL_RADIUS,
-                                     verbose = True
-                                     )
-    
-    cci_checker = CCICollisionChecker(cci_obj['cci_mplant'], 
-                                    cci_obj['cci_plant'].getRobotGeometryIds(), 
-                                    online_voxel_observation, 
-                                    ONLINE_VOXEL_RADIUS)
-
-    vel_limits_reflected = [-vel_limits, vel_limits]
-    acc_limits_reflected = [-acc_limits, acc_limits]
-    traj, cost, timing_info, traj_col_free, \
-    first_solve_collision_free, collisions =  MintimeSCSWithPathFixing(start,
-                             goal,
-                             regions,
-                             edges,
-                             vel_limits_reflected,
-                             acc_limits_reflected,
-                             cci_checker,
-                             edge_inflator,
-                             online_voxel_observation,
-                             ONLINE_VOXEL_RADIUS,
-                             )
-
-    return traj
 
 def save_regions_pkl(sets, models_path, dirstr, name=None):
     pkl_path = dirstr + f'/{name}.pkl'
@@ -662,7 +489,8 @@ class TwoGraspPlanner(LeafSystem):
             num_objs=1,
             is_manual=False,
             is_semimanual=True,
-            sys_id_grasp_only=False
+            sys_id_grasp_only=False,
+            use_custom_path_planner=False,
         ):
         LeafSystem.__init__(self)
 
@@ -683,6 +511,7 @@ class TwoGraspPlanner(LeafSystem):
         self.is_semimanual = is_semimanual
         self.sys_id_grasp_only = sys_id_grasp_only
         self.bin_pick_grasped_nothing = False
+        self.use_custom_path_planner = use_custom_path_planner
 
         # for getting current positions
         self._ee_index = plant.GetBodyByName("iiwa_link_7").index()
@@ -831,8 +660,8 @@ class TwoGraspPlanner(LeafSystem):
             self.joint_limits[i, 1] = joint.position_upper_limits()
         self.ik_domain = HPolyhedron.MakeBox(controller_plant.GetPositionLowerLimits()+1e-2, 
                                         controller_plant.GetPositionUpperLimits()-1e-2)
-        self.edge_inflator, self.cci_objects = get_cci_edge_inflator()
-        self.drm_planner = drm_planner(self.cci_objects)
+        self.csd_plant = get_csd_plant()
+        self.drm_planner = drm_planner(self.csd_plant)
 
         self.models_path = models_path
         self.savedir = dirstr
@@ -1195,13 +1024,6 @@ class TwoGraspPlanner(LeafSystem):
         # pregrasp is negative z in the gripper frame
         X_GgraspGpregrasp = RigidTransform([0, 0.0, -self.pregrasp_dist])
 
-        # Initialize DRM with current pcd
-        self.drm_planner = drm_planner(self.cci_objects, bin_pcd.xyzs().T)
-
-        cci_checker = CCICollisionChecker(self.cci_objects['cci_mplant'], 
-                                        self.cci_objects['cci_plant'].getRobotGeometryIds(), 
-                                        cci.Voxels(bin_pcd.xyzs()), 
-                                        ONLINE_VOXEL_RADIUS)
         q_goal = None
         first_attempt = True
         while q_goal is None:
@@ -1276,7 +1098,7 @@ class TwoGraspPlanner(LeafSystem):
                     pose=X_WPregrasp,
                     current_config=q,
                     ik_domain=self.ik_domain,
-                    checker=cci_checker
+                    csd_plant=self.csd_plant,
                 )
 
                 if q_goal is None:
@@ -1285,7 +1107,7 @@ class TwoGraspPlanner(LeafSystem):
                         pose=X_WPregrasp,
                         current_config=q,
                         ik_domain=self.ik_domain,
-                        checker=cci_checker
+                    csd_plant=self.csd_plant,
                     )
 
                 if q_goal is None:
@@ -1403,14 +1225,6 @@ class TwoGraspPlanner(LeafSystem):
 
         # pregrasp is negative z in the gripper frame
         X_GgraspGpregrasp = RigidTransform([0, 0.0, -self.pregrasp_dist])
-
-        # Initialize DRM with current pcd
-        self.drm_planner = drm_planner(self.cci_objects, self.current_manipuland_pcd.xyzs().T)
-
-        cci_checker = CCICollisionChecker(self.cci_objects['cci_mplant'], 
-                                        self.cci_objects['cci_plant'].getRobotGeometryIds(), 
-                                        cci.Voxels(self.current_manipuland_pcd.xyzs()), 
-                                        ONLINE_VOXEL_RADIUS)
         
         self.grasp_node.compute_candidate_grasps(
             self.current_manipuland_pcd,
@@ -1458,7 +1272,7 @@ class TwoGraspPlanner(LeafSystem):
                 pose=X_WPregrasp,
                 current_config=q,
                 ik_domain=self.ik_domain,
-                checker=cci_checker
+                csd_plant=self.csd_plant,
             )
 
             if q_goal is None:
@@ -1521,7 +1335,7 @@ class TwoGraspPlanner(LeafSystem):
             pose=X_G["preplace"],
             current_config=q_home,
             ik_domain=self.ik_domain,
-            checker=cci_checker
+            csd_plant=self.csd_plant,
         )
 
         self.PlanToPregrasp(context, state)
@@ -1686,16 +1500,11 @@ class TwoGraspPlanner(LeafSystem):
                 X_GgraspGpregrasp = RigidTransform([0, 0.0, -self.pregrasp_dist])
                 X_WPregrasp2 = (RigidTransform(self.X_WG2) @ X_GE) @ X_GgraspGpregrasp
 
-
-                cci_checker = CCICollisionChecker(self.cci_objects['cci_mplant'], 
-                                                self.cci_objects['cci_plant'].getRobotGeometryIds(), 
-                                                cci.Voxels(down_sampled_pcd.xyzs()), 
-                                                ONLINE_VOXEL_RADIUS)
                 q_goal2 = solve_via_analytic_IK_with_retries(
                     pose=X_WPregrasp2,
                     current_config=self.q_pregrasp2,
                     ik_domain=self.ik_domain,
-                    checker=cci_checker,
+                    csd_plant=self.csd_plant,
                     retries=50
                 )
 
@@ -1775,16 +1584,21 @@ class TwoGraspPlanner(LeafSystem):
         try:
             obstacles_vox = np.hstack([self.current_manipuland_pcd.xyzs()])
 
-            traj = scs_trajopt(
-                q, 
-                q_goal, 
-                self.drm_planner,
-                self.cci_objects, 
-                self.edge_inflator, 
-                obstacles_vox, 
-                self.velocity_limits, 
-                self.acceleration_limits
-            )
+            if self.use_custom_path_planner:
+                # Use custom path planner. Warning: Must be implemented by user
+                traj = plan_path_custom(
+                    q, 
+                    q_goal,
+                )
+            else:
+                # Use drm path planner
+                traj = plan_drm(
+                    self.drm_planner,
+                    q, 
+                    q_goal, 
+                    obstacles_vox,
+                    ONLINE_VOXEL_RADIUS
+                )
         except:
             input("Press enter to continue with unconstrained plan to home. Else terminate.")
             traj = plan_unconstrained_gcs_path_start_to_goal(
@@ -1832,16 +1646,21 @@ class TwoGraspPlanner(LeafSystem):
             obstacles_vox = np.hstack([self.current_manipuland_pcd.xyzs()])
 
         try:
-            traj = scs_trajopt(
-                q, 
-                q_goal, 
-                self.drm_planner,
-                self.cci_objects, 
-                self.edge_inflator, 
-                obstacles_vox, 
-                self.velocity_limits, 
-                self.acceleration_limits
-            )
+            if self.use_custom_path_planner:
+                # Use custom path planner. Warning: Must be implemented by user
+                traj = plan_path_custom(
+                    q, 
+                    q_goal,
+                )
+            else:
+                # Use drm path planner
+                traj = plan_drm(
+                    self.drm_planner,
+                    q, 
+                    q_goal, 
+                    obstacles_vox,
+                    ONLINE_VOXEL_RADIUS
+                )
         except:
             return
         if traj is None:
@@ -1906,14 +1725,6 @@ class TwoGraspPlanner(LeafSystem):
                         X_PT=RigidTransform(rot,
                         [com[0], com[1], com[2]]))
         
-
-        # Initialize DRM with current pcd
-        self.drm_planner = drm_planner(self.cci_objects, self.current_manipuland_pcd.xyzs().T)
-
-        cci_checker = CCICollisionChecker(self.cci_objects['cci_mplant'], 
-                                        self.cci_objects['cci_plant'].getRobotGeometryIds(), 
-                                        cci.Voxels(self.current_manipuland_pcd.xyzs()), 
-                                        ONLINE_VOXEL_RADIUS)
         # while not grasps_found:
         # Planning first grasping trajectory
         self.grasp_node.compute_candidate_grasps(
@@ -1974,7 +1785,7 @@ class TwoGraspPlanner(LeafSystem):
                 pose=X_WPregrasp1,
                 current_config=q,
                 ik_domain=self.ik_domain,
-                checker=cci_checker
+                csd_plant=self.csd_plant
             )
 
             if q_goal1 is None:
@@ -2015,7 +1826,7 @@ class TwoGraspPlanner(LeafSystem):
                 pose=X_WPregrasp2,
                 current_config=q,
                 ik_domain=self.ik_domain,
-                checker=cci_checker
+                csd_plant=self.csd_plant
             )
 
             if q_goal2 is None:
@@ -2095,7 +1906,7 @@ class TwoGraspPlanner(LeafSystem):
                     pose=X_Epreplace,
                     current_config=q,
                     ik_domain=self.ik_domain,
-                    checker=cci_checker
+                    csd_plant=self.csd_plant
                 )
                 if self.q_postgrasp1 is None:
                     print("failed to solve for place flipped, trying next grasp pair")
@@ -2166,7 +1977,7 @@ class TwoGraspPlanner(LeafSystem):
                     pose=X_Epreplace,
                     current_config=q,
                     ik_domain=self.ik_domain,
-                    checker=cci_checker
+                    csd_plant=self.csd_plant
                 )
                 if self.q_postgrasp2 is None:
                     print("failed to solve for place flipped, trying next grasp pair")
@@ -2247,11 +2058,6 @@ class TwoGraspPlanner(LeafSystem):
         return length
 
     def PlanPickAndDisplay(self, context, state, skip_first=False):
-        cci_checker = CCICollisionChecker(self.cci_objects['cci_mplant'], 
-                                        self.cci_objects['cci_plant'].getRobotGeometryIds(), 
-                                        cci.Voxels(), 
-                                        ONLINE_VOXEL_RADIUS)
-            
         # get end effector pose from grasp pose
         X_GE = RigidTransform(RotationMatrix(RollPitchYaw(0, 0, 0)), [0, 0, -self.eef_to_gripper_length])
         X_GgraspGpregrasp = RigidTransform([0, 0.0, -self.pregrasp_dist])
@@ -2279,7 +2085,7 @@ class TwoGraspPlanner(LeafSystem):
                 times1, 
                 self.q_pregrasp1,
                 self.ik_domain,
-                cci_checker
+                self.csd_plant
                 )
             
             state.get_mutable_abstract_state(int(self._times_index1)).set_value(
@@ -2329,7 +2135,7 @@ class TwoGraspPlanner(LeafSystem):
                 times2, 
                 self.q_pregrasp2,
                 self.ik_domain,
-                cci_checker)
+                self.csd_plant)
 
             state.get_mutable_abstract_state(int(self._times_index2)).set_value(
                 times2
@@ -2386,16 +2192,21 @@ class TwoGraspPlanner(LeafSystem):
         
         obstacles_vox = np.hstack([ceiling_vox])
 
-        traj = scs_trajopt(
-            q, 
-            q_goal, 
-            self.drm_planner,
-            self.cci_objects, 
-            self.edge_inflator, 
-            obstacles_vox, 
-            self.display_velocity_limits, 
-            self.display_acceleration_limits
-        )
+        if self.use_custom_path_planner:
+            # Use custom path planner. Warning: Must be implemented by user
+            traj = plan_path_custom(
+                q, 
+                q_goal,
+            )
+        else:
+            # Use drm path planner
+            traj = plan_drm(
+                self.drm_planner,
+                q, 
+                q_goal, 
+                obstacles_vox,
+                ONLINE_VOXEL_RADIUS
+            )
         
         breaks = np.linspace(0, traj.end_time(), int(1e3), endpoint=False)
         knots = traj.vector_values(breaks)
@@ -2449,16 +2260,21 @@ class TwoGraspPlanner(LeafSystem):
         # traj = PiecewisePolynomial.FirstOrderHold([0.0, 4.0], np.array([q, q_goal]).T)
         obstacles_vox = None
 
-        traj = scs_trajopt(
-            q, 
-            q_goal, 
-            self.drm_planner,
-            self.cci_objects, 
-            self.edge_inflator, 
-            obstacles_vox, 
-            self.display_velocity_limits, 
-            self.display_acceleration_limits
-        )
+        if self.use_custom_path_planner:
+            # Use custom path planner. Warning: Must be implemented by user
+            traj = plan_path_custom(
+                q, 
+                q_goal,
+            )
+        else:
+            # Use drm path planner
+            traj = plan_drm(
+                self.drm_planner,
+                q, 
+                q_goal, 
+                obstacles_vox,
+                ONLINE_VOXEL_RADIUS
+            )
         
         breaks = np.linspace(0, traj.end_time(), int(1e3), endpoint=False)
         knots = traj.vector_values(breaks)
@@ -2505,16 +2321,22 @@ class TwoGraspPlanner(LeafSystem):
             obstacles_vox = None
         else:
             obstacles_vox = np.hstack([ceiling_vox])
-        traj = scs_trajopt(
-            q, 
-            q_goal, 
-            self.drm_planner,
-            self.cci_objects, 
-            self.edge_inflator, 
-            obstacles_vox, 
-            self.velocity_limits, 
-            self.acceleration_limits
-        )
+            
+        if self.use_custom_path_planner:
+            # Use custom path planner. Warning: Must be implemented by user
+            traj = plan_path_custom(
+                q, 
+                q_goal,
+            )
+        else:
+            # Use drm path planner
+            traj = plan_drm(
+                self.drm_planner,
+                q, 
+                q_goal, 
+                obstacles_vox,
+                ONLINE_VOXEL_RADIUS
+            )
         
         breaks = np.linspace(0, traj.end_time(), int(1e3), endpoint=False)
         knots = traj.vector_values(breaks)

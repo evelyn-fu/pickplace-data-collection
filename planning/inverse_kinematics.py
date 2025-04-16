@@ -14,7 +14,7 @@ from pydrake.all import (
     RollPitchYaw
 )
 
-from mmt_gcs.planning.corridor_planning_utils import CollisionCheckerBase
+import pycsdecomp as csd
 from planning.analytic_ik_iiwa_7 import Analytic_IK_7DoF, iiwa_limits_lower, iiwa_limits_upper, iiwa_alpha, iiwa_d
 
 def solve_global_inverse_kinematics(
@@ -94,7 +94,7 @@ def sample_ik_params():
 def solve_via_analytic_IK(pose: RigidTransform,
                           current_config : np.ndarray,
                           ik_domain: HPolyhedron,
-                          checker: CollisionCheckerBase):
+                          csd_plant: csd.Plant):
     
     analytic_ik = Analytic_IK_7DoF(iiwa_alpha, iiwa_d, iiwa_limits_lower, iiwa_limits_upper)
     N_configs = 2000
@@ -103,7 +103,7 @@ def solve_via_analytic_IK(pose: RigidTransform,
         GC2, GC4, GC6, psi = sample_ik_params()
         configs.append(analytic_ik.IK(pose.GetAsMatrix4(), [GC2, GC4, GC6], psi))
     configs =np.array(configs).T
-    res = checker.CheckConfigsCollisionFree(configs)
+    res = csd.CheckCollisionFreeCuda(configs, csd_plant.getMinimalPlant())
     idx_col_free =np.where(res)[0]
     if len(idx_col_free)==0:
         return None
