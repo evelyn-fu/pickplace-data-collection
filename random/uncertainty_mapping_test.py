@@ -50,6 +50,13 @@ R = np.stack([x_axis, y_axis, z_axis], axis=0)
 extrinsic_matrix = np.vstack([np.hstack([R, C.reshape(3, 1)]), np.array([0, 0, 0, 1])])
 print(extrinsic_matrix)
 
-voxel_map.update_with_observation(intrinsic_matrix, extrinsic_matrix, width_px, height_px, occlusion_mask=None, visualize=True)
+voxel_map.update_with_observation(
+    intrinsic_matrix, 
+    extrinsic_matrix, 
+    width_px, height_px, 
+    occlusion_mask=None, 
+    visualize=True,
+    visualize_all=False
+    )
 
 voxel_map.visualize()
