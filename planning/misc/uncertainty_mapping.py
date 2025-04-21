@@ -57,7 +57,16 @@ class VoxelMap:
 
         print(f"Initialized voxel map with {self.points.shape[1]} voxels.")
 
-    def update_with_observation(self, intrinsic_matrix, extrinsic_matrix, width_px, height_px, occlusion_mask=None, visualize=False):
+    def update_with_observation(
+            self, 
+            intrinsic_matrix, 
+            extrinsic_matrix, 
+            width_px, 
+            height_px, 
+            voxel_size=0.005,
+            occlusion_mask=None, 
+            visualize=False,
+            visualize_all=False):
         """
         Updates the voxel map with a new observation.
 
@@ -78,41 +87,75 @@ class VoxelMap:
 
         raycast = self.scene.cast_rays(rays)
 
+        # Step 3: Extract valid hits
+        # raycast["t_hit"] is shape [H, W], float tensor of distances or inf
+        t_hit = raycast["t_hit"].reshape((-1,))
+        mask_hit = t_hit.isfinite()
+
+        # Step 4: Get ray origins and directions (shape [H*W, 3])
+        rays_flat = rays.reshape((-1, 6))
+        ray_origins = rays_flat[:, 0:3]
+        ray_dirs = rays_flat[:, 3:6]
+
+        # Step 5: Compute hit points only where hits occurred
+        hit_ray_origins = ray_origins[mask_hit]
+        hit_ray_dirs = ray_dirs[mask_hit]
+        hit_t = t_hit[mask_hit].reshape((-1, 1))
+        hit_points = hit_ray_origins + hit_t * hit_ray_dirs
+
+        # (Optional) convert to NumPy for further processing
+        hit_points_np = hit_points.numpy()
+
+        # (Optional) if occlusion_mask is used
         if occlusion_mask is not None:
             occlusion_indices = np.where(occlusion_mask == 1)[0]
+        else:
+            occlusion_indices = []
 
-        point_cloud = o3d.geometry.PointCloud()
-        point_cloud.points = o3d.utility.Vector3dVector(self.points.T)
-
-        if visualize:
-            self.visualize(X_cam=extrinsic_matrix)
-        
+        # Step 6: Iterate over the hit points (minimized)
         points = []
+        hit_points = []
         lines = []
-        print(f"ray origin: {rays[0][0][:3].numpy()}")
-        for idx in tqdm(range(rays.shape[0] * rays.shape[1]), desc="Casting rays"):
-            i = idx // rays.shape[1]
-            j = idx % rays.shape[1]
-            ray = rays[i, j]
-            ray_dir = ray[3:6]
-            ray_origin = ray[:3]
-            points += [ray_origin.numpy(), (ray_origin + ray_dir * 0.1).numpy()]
-            lines.append([len(points) - 2, len(points) - 1])
-            if raycast["t_hit"][i, j] < np.inf:
-                print(f"Hit at pixel ({i}, {j})")
-                depth = raycast["t_hit"][i, j]
-                hit_point = ray_origin + depth * ray_dir
-                nearest_voxel_index = np.argmin(np.linalg.norm(np.expand_dims(hit_point, axis=1) - self.points))
-                if occlusion_mask is not None and nearest_voxel_index not in occlusion_indices:
-                    # Update signed distance and confidence
-                    surface_normal = self.normals[nearest_voxel_index]
-                    weight = -np.dot(surface_normal, ray_dir)
-                    self.confidences[nearest_voxel_index] += weight
+        for idx, hit_point in enumerate(hit_points_np):
+            dists = np.linalg.norm(self.points - hit_point[:, None], axis=0)
+            within_radius_indices = np.where(dists < voxel_size)[0]
+            visible_indices = np.setdiff1d(within_radius_indices, occlusion_indices)
+            if len(visible_indices) == 0:
+                continue
+
+            ray_dir = hit_ray_dirs[idx].numpy()
+            surface_normals = self.normals[:, visible_indices].T
+            weights = -np.dot(surface_normals, ray_dir)
+            self.confidences[visible_indices] += weights
+
+            if visualize:
+                points += [hit_ray_origins[idx].numpy(), (hit_ray_origins[idx] + hit_ray_dirs[idx] * hit_t[idx]).numpy()]
+                lines.append([len(points) - 2, len(points) - 1])
+                hit_points.append(hit_point)
+            if visualize_all:
+                point_cloud = o3d.geometry.PointCloud()
+                point_cloud.points = o3d.utility.Vector3dVector(self.points.T)
+                hit_point_cloud = o3d.geometry.PointCloud()
+                hit_point_cloud.points = o3d.utility.Vector3dVector([hit_point])
+                hit_point_cloud.paint_uniform_color([1, 0, 0])  # Red color for hit points
+                point_cloud.paint_uniform_color([0.2, 0.2, 0.2])  # Gray color for all points
+                line_set = o3d.geometry.LineSet()
+                line_set.points = o3d.utility.Vector3dVector(np.array([hit_ray_origins[idx].numpy(), (hit_ray_origins[idx] + hit_ray_dirs[idx] * hit_t[idx]).numpy()]))
+                line_set.lines = o3d.utility.Vector2iVector([[0, 1]])
+                o3d.visualization.draw_geometries([line_set, point_cloud, hit_point_cloud])
         
-        line_set = o3d.geometry.LineSet()
-        line_set.points = o3d.utility.Vector3dVector(np.array(points))
-        line_set.lines = o3d.utility.Vector2iVector(lines)
-        o3d.visualization.draw_geometries([line_set, point_cloud])
+        if visualize:
+            line_set = o3d.geometry.LineSet()
+            line_set.points = o3d.utility.Vector3dVector(np.array(points))
+            line_set.lines = o3d.utility.Vector2iVector(lines)
+            line_set.paint_uniform_color([0, 0, 1])
+            hit_point_cloud = o3d.geometry.PointCloud()
+            hit_point_cloud.points = o3d.utility.Vector3dVector(np.array(hit_points))
+            hit_point_cloud.paint_uniform_color([1, 0, 0])  # Red color for hit points
+            point_cloud = o3d.geometry.PointCloud()
+            point_cloud.points = o3d.utility.Vector3dVector(self.points.T)
+            point_cloud.paint_uniform_color([0.2, 0.2, 0.2])  # Gray color for all points
+            o3d.visualization.draw_geometries([line_set, point_cloud, hit_point_cloud])
     
     def visualize(self, X_cam=None):
         """
