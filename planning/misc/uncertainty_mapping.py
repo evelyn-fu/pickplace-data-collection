@@ -13,7 +13,7 @@ from pydrake.all import (
 )
 
 class VoxelMap:
-    def __init__(self, points: np.ndarray, voxel_size: float, confidence_threshold: float = 0.9):
+    def __init__(self, points: np.ndarray, voxel_size: float, confidence_threshold: float = 0.9, visualize=False):
         """
         Initializes a voxel map with signed distance values and confidence.
 
@@ -34,19 +34,14 @@ class VoxelMap:
 
         # Convert points to voxel indices
         self.points = points
-        
-        self.pcd = PointCloud(self.points.shape[1])
-        self.pcd.mutable_xyzs()[:] = self.points
-        self.pcd = self.pcd.VoxelizedDownSample(voxel_size=voxel_size)
-        self.pcd.EstimateNormals(radius=0.1, num_closest=30)
-        self.pcd.FlipNormalsTowardPoint(self.center)
-        self.pcd.mutable_normals()[:] = -self.pcd.normals() # flip away from center
-        self.normals = self.pcd.normals()
 
         o3d_pcd = o3d.geometry.PointCloud(
             o3d.utility.Vector3dVector(self.points.T)
         )
-        o3d_pcd.normals = o3d.utility.Vector3dVector(self.normals.T)
+        o3d_pcd.estimate_normals()
+        o3d_pcd.orient_normals_towards_camera_location(o3d_pcd.get_center())
+        o3d_pcd.normals = o3d.utility.Vector3dVector(-np.asarray(o3d_pcd.normals))
+        self.normals = np.asarray(o3d_pcd.normals).T
         triangle_mesh, densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
             o3d_pcd
         )
@@ -54,6 +49,10 @@ class VoxelMap:
 
         self.scene = o3d.t.geometry.RaycastingScene()
         self.scene.add_triangles(tensor_mesh)
+
+        if visualize:
+            # visualize scene
+            o3d.visualization.draw_geometries([triangle_mesh, o3d_pcd], point_show_normal=True)
 
         print(f"Initialized voxel map with {self.points.shape[1]} voxels.")
 
@@ -65,6 +64,7 @@ class VoxelMap:
             height_px, 
             voxel_size=0.005,
             occlusion_mask=None, 
+            occlusion_indices=None,
             visualize=False,
             visualize_all=False):
         """
@@ -75,7 +75,8 @@ class VoxelMap:
             extrinsic_matrix (np.ndarray): The extrinsic matrix of the camera
             width_px (int): The width of the camera image in pixels
             height_px (int): The height of the camera image in pixels
-            occlusion_mask (np.ndarray): A 1xn array indicating occluded pixels, optional
+            occlusion_mask (np.ndarray): A 2xn array indicating occluded (x, y) pixels, optional
+            occlusion_indices (np.ndarray): A 1xn array indicating indices of occluded points in the voxel map, optional
         """
 
         rays = o3d.t.geometry.RaycastingScene.create_rays_pinhole(
@@ -91,6 +92,9 @@ class VoxelMap:
         # raycast["t_hit"] is shape [H, W], float tensor of distances or inf
         t_hit = raycast["t_hit"].reshape((-1,))
         mask_hit = t_hit.isfinite()
+        occlusion_mask_flat = occlusion_mask[1, :] * width_px + occlusion_mask[0, :] if occlusion_mask is not None else None
+        if occlusion_mask_flat is not None:
+            mask_hit[occlusion_mask_flat] = False
 
         # Step 4: Get ray origins and directions (shape [H*W, 3])
         rays_flat = rays.reshape((-1, 6))
@@ -103,18 +107,16 @@ class VoxelMap:
         hit_t = t_hit[mask_hit].reshape((-1, 1))
         hit_points = hit_ray_origins + hit_t * hit_ray_dirs
 
-        # (Optional) convert to NumPy for further processing
+        # Convert to NumPy for further processing
         hit_points_np = hit_points.numpy()
 
         # (Optional) if occlusion_mask is used
-        if occlusion_mask is not None:
-            occlusion_indices = np.where(occlusion_mask == 1)[0]
-        else:
+        if occlusion_indices is None:
             occlusion_indices = []
 
         # Step 6: Iterate over the hit points (minimized)
         points = []
-        hit_points = []
+        hit_points = set()
         lines = []
         for idx, hit_point in enumerate(hit_points_np):
             dists = np.linalg.norm(self.points - hit_point[:, None], axis=0)
@@ -131,12 +133,12 @@ class VoxelMap:
             if visualize:
                 points += [hit_ray_origins[idx].numpy(), (hit_ray_origins[idx] + hit_ray_dirs[idx] * hit_t[idx]).numpy()]
                 lines.append([len(points) - 2, len(points) - 1])
-                hit_points.append(hit_point)
+                hit_points.update(visible_indices)
             if visualize_all:
                 point_cloud = o3d.geometry.PointCloud()
                 point_cloud.points = o3d.utility.Vector3dVector(self.points.T)
                 hit_point_cloud = o3d.geometry.PointCloud()
-                hit_point_cloud.points = o3d.utility.Vector3dVector([hit_point])
+                hit_point_cloud.points = o3d.utility.Vector3dVector(self.points[:, visible_indices].T)
                 hit_point_cloud.paint_uniform_color([1, 0, 0])  # Red color for hit points
                 point_cloud.paint_uniform_color([0.2, 0.2, 0.2])  # Gray color for all points
                 line_set = o3d.geometry.LineSet()
@@ -150,8 +152,8 @@ class VoxelMap:
             line_set.lines = o3d.utility.Vector2iVector(lines)
             line_set.paint_uniform_color([0, 0, 1])
             hit_point_cloud = o3d.geometry.PointCloud()
-            hit_point_cloud.points = o3d.utility.Vector3dVector(np.array(hit_points))
-            hit_point_cloud.paint_uniform_color([1, 0, 0])  # Red color for hit points
+            hit_point_cloud.points = o3d.utility.Vector3dVector(self.points[:, list(hit_points)].T)
+            hit_point_cloud.paint_uniform_color([1, 0, 0])  # Red color for hit points  
             point_cloud = o3d.geometry.PointCloud()
             point_cloud.points = o3d.utility.Vector3dVector(self.points.T)
             point_cloud.paint_uniform_color([0.2, 0.2, 0.2])  # Gray color for all points
