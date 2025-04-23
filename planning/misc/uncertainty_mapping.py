@@ -1,6 +1,7 @@
 import numpy as np
 import open3d as o3d
 from tqdm import tqdm
+from scipy.spatial import cKDTree
 from pydrake.all import (
     PointCloud,
     RigidTransform,
@@ -118,10 +119,16 @@ class VoxelMap:
         points = []
         hit_points = set()
         lines = []
-        for idx, hit_point in enumerate(hit_points_np):
-            dists = np.linalg.norm(self.points - hit_point[:, None], axis=0)
-            within_radius_indices = np.where(dists < voxel_size)[0]
-            visible_indices = np.setdiff1d(within_radius_indices, occlusion_indices)
+
+        tree = cKDTree(self.points.T)
+        neighbors_list = tree.query_ball_point(hit_points_np, r=voxel_size)
+        occlusion_mask = np.ones(self.points.shape[1], dtype=bool)
+        occlusion_mask[occlusion_indices] = False
+        # for idx, hit_point in enumerate(hit_points_np):
+        for idx, neighbor_inds in enumerate(neighbors_list):
+            within_radius_indices = np.array(neighbor_inds)
+            mask = ~np.isin(within_radius_indices, occlusion_indices)
+            visible_indices = within_radius_indices[mask]
             if len(visible_indices) == 0:
                 continue
 
@@ -184,3 +191,53 @@ class VoxelMap:
         Returns True if the map is fully observed
         """
         return np.all(self.confidences > self.confidence_threshold)
+    
+    def stats(self):
+        """
+        Returns the coverage statistics of the voxel map
+        """
+
+        clipped_confidences = np.clip(self.confidences, 0, 1)
+
+        # compute the number of voxels in the largest connected component of unobserved voxels
+        unobserved_mask = clipped_confidences < self.confidence_threshold
+        tree = cKDTree(self.points.T)
+
+        # Find connected components of unobserved voxels
+        visited = np.zeros(len(clipped_confidences), dtype=bool)
+        largest_component_size = 0
+
+        for i in range(len(clipped_confidences)):
+            if not unobserved_mask[i] or visited[i]:
+                continue
+
+            # Perform a breadth-first search (BFS) to find connected components
+            queue = [i]
+            component_size = 0
+
+            while queue:
+                current = queue.pop(0)
+                if visited[current]:
+                    continue
+
+                visited[current] = True
+                component_size += 1
+
+                # Find neighbors within voxel_size
+                neighbors = tree.query_ball_point(self.points[:, current], r=self.voxel_size)
+                for neighbor in neighbors:
+                    if unobserved_mask[neighbor] and not visited[neighbor]:
+                        queue.append(neighbor)
+
+            largest_component_size = max(largest_component_size, component_size)
+
+        print(f"Largest connected component of unobserved voxels: {largest_component_size}")
+
+        return {
+            "mean_confidence": np.mean(clipped_confidences),
+            "max_confidence": np.max(clipped_confidences),
+            "min_confidence": np.min(clipped_confidences),
+            "percent_under_threshold": np.sum(clipped_confidences < self.confidence_threshold) / len(clipped_confidences),
+            "percent_fully_observed": np.sum(clipped_confidences > self.confidence_threshold) / len(clipped_confidences),
+            "largest_unobserved_component_percentage": largest_component_size / len(clipped_confidences),
+        }

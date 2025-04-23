@@ -424,6 +424,7 @@ class GraspListener():
                 The gripper frame has the y-axis connecting the two fingers and the z-axis pointing from the
                 gripper body to the fingers.
             - proportion_enclosed: proportion of normals enclosed out of all possible points in PCD
+            - indices_enclosed: indices of points in the closing region
         """
         pcd_W_np = pcd.xyzs()
         pcd_W_normals = pcd.normals()
@@ -494,7 +495,7 @@ class GraspListener():
         
         proportion_enclosed = len(indices) / (pcd_normals_G_np.shape[1])
 
-        return is_nonempty, pcd_normals_G_np[:, indices], proportion_enclosed
+        return is_nonempty, pcd_normals_G_np[:, indices], proportion_enclosed, indices
 
     def compute_costs(
             self, 
@@ -1345,7 +1346,7 @@ class GraspListener():
                         # Calculate scores (for debugging)
                         pcd_points = pcd.xyzs().T
                         split_ratio, split_axes, length, center, half_range = self.compute_pcd_split_ratio_at_point(pcd_points, origins[i])
-                        is_nonempty, within_box_pt_normals, proportion_enclosed = self.check_nonempty(pcd, X_WPnew)
+                        is_nonempty, within_box_pt_normals, proportion_enclosed, _ = self.check_nonempty(pcd, X_WPnew)
                         cost, cost_dict = self.compute_costs(
                                         X_WPnew, 
                                         within_box_pt_normals,
@@ -1689,7 +1690,7 @@ class GraspListener():
 
                                     # If the candidate has no collisions and the closing region is non
                                     # empty, then append it to the list of candidates.
-                                    is_nonempty, within_box_pt_normals, proportion_enclosed = self.check_nonempty(pcd, X_WPnew)
+                                    is_nonempty, within_box_pt_normals, proportion_enclosed, _ = self.check_nonempty(pcd, X_WPnew)
                                     if is_nonempty:
                                         if grasp_type == GraspType.PAIR:
                                             cost, cost_dict = self.compute_costs(
@@ -1717,7 +1718,7 @@ class GraspListener():
                                                     align_minor_axis
                                                 )
                                         elif grasp_type == GraspType.TOP:
-                                            _, _, proportion_enclosed = self.check_nonempty(flattened_cloud, X_WPnew)
+                                            _, _, proportion_enclosed, _ = self.check_nonempty(flattened_cloud, X_WPnew)
                                             cost, cost_dict = self.compute_costs_top(
                                                     X_WPnew, 
                                                     within_box_pt_normals, 
