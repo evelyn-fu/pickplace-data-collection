@@ -15,7 +15,7 @@ directives:
     child: iiwa::iiwa_link_0
 - add_model:
     name: wsg
-    file: file://./home/real2sim/src/Real2SimObjectManipulation/models/schunk_wsg_50_large_grippers_w_buffer.sdf
+    file: package://pickplace_data_collection/schunk_wsg_50_large_grippers_w_buffer.sdf
 - add_weld:
     parent: iiwa::iiwa_link_7
     child: wsg::body
@@ -25,7 +25,7 @@ directives:
         
 - add_model:
     name: mustard_bottle
-    file: file://./home/real2sim/src/Real2SimObjectManipulation/models/006_mustard_bottle.sdf
+    file: package://pickplace_data_collection/006_mustard_bottle.sdf
     default_free_body_pose:
         base_link_mustard:
             # translation: [0.4, 0.01, 0.15]
@@ -40,7 +40,7 @@ directives:
 
 - add_model:
     name: table
-    file: file://./home/real2sim/src/Real2SimObjectManipulation/models/table_wide.sdf
+    file: package://pickplace_data_collection/table_wide.sdf
 
 - add_weld:
     parent: table_origin
@@ -55,7 +55,7 @@ directives:
 
 - add_model:
     name: box
-    file: file://./home/real2sim/src/Real2SimObjectManipulation/models/box.sdf
+    file: package://pickplace_data_collection/box.sdf
 
 - add_weld:
     parent: box_origin

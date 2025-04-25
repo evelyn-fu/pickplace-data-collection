@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<package>
+  <name>pickplace_data_collection</name>
+  <version>1.0.0</version>
+  <description>
+    This package contains models for Drake simulation in the pickplace_data_collection repo.
+  </description>
+  <author email="evelynfu15@gmail.com">Evelyn Fu</author>
+  <maintainer email="evelynfu15@gmail.com">Evelyn Fu</maintainer>
+  <license>BSD</license>
+</package>

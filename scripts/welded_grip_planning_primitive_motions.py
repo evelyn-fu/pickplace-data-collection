@@ -168,7 +168,9 @@ def motion_primitives_with_camera(dirstr = "test3", scenario_data_filename="scen
     dir_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     full_file_path = os.path.join(dir_path, os.path.join("scenario_datas", scenario_data_filename))
     scenario = load_scenario(filename=full_file_path)
-    station = builder.AddSystem(MakeHardwareStation(scenario, meshcat))
+    directory_path = os.path.dirname(os.path.abspath(__file__))
+    models_package = os.path.abspath(os.path.join(directory_path, "..", "models", "package.xml"))
+    station = builder.AddSystem(MakeHardwareStation(scenario, meshcat, package_xmls=[models_package]))
 
     controller_plant = station.GetSubsystemByName(
         "iiwa.controller"

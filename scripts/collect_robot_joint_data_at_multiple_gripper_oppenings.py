@@ -237,12 +237,15 @@ def main():
 
     meshcat = StartMeshcat()
 
+    directory_path = os.path.dirname(os.path.abspath(__file__))
+    models_package = os.path.abspath(os.path.join(directory_path, "..", "models", "package.xml"))
     station: RobotDiagram = builder.AddNamedSystem(
         "hardware_station",
         MakeHardwareStation(
             scenario=scenario,
             meshcat=meshcat,
             hardware=use_hardware,
+            package_xmls=[models_package]
         ),
     )
 

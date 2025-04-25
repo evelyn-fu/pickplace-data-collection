@@ -64,6 +64,9 @@ class GraspListener():
         self.plant, self.scene_graph = AddMultibodyPlantSceneGraph(builder, time_step=0.0005)
         parser = Parser(self.plant)
         ConfigureParser(parser)
+        directory_path = os.path.dirname(os.path.abspath(__file__))
+        models_package = os.path.abspath(os.path.join(directory_path, "..", "models", "package.xml"))
+        parser.package_map().AddPackageXml(models_package)
         if gripper_model_path == None:
             gripper_model_path = "package://manipulation/schunk_wsg_50_welded_fingers.sdf"
         parser.AddModelsFromUrl(gripper_model_path)

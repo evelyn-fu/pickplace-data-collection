@@ -90,6 +90,9 @@ def get_seeded_region_safe(q_nominal):
     builder.parser().package_map().Add("iiwa_description", PETE_ASSETS+"assets/iiwa")
     builder.parser().package_map().Add("wsg_description", PETE_ASSETS+"assets/wsg_description")
     builder.parser().package_map().Add("tri_finray_gripper", PETE_ASSETS+"assets/tri_finray_gripper")
+    directory_path = os.path.dirname(os.path.abspath(__file__))
+    models_package = os.path.abspath(os.path.join(directory_path, "..", "models", "package.xml"))
+    builder.parser().package_map().AddPackageXml(models_package)
     builder.parser().AddModels(models_path)
     iiwa_model_instance_index = builder.plant().GetModelInstanceByName("iiwa7")
     wsg_model_instance_index = builder.plant().GetModelInstanceByName("wsg")
@@ -131,6 +134,9 @@ def get_seeded_region(models_path, com, rot, dims, q_nominal):
     use_native_cpp_logging()
     params = dict(edge_step_size=0.125)
     builder = RobotDiagramBuilder()
+    directory_path = os.path.dirname(os.path.abspath(__file__))
+    models_package = os.path.abspath(os.path.join(directory_path, "..", "models", "package.xml"))
+    builder.parser().package_map().AddPackageXml(models_package)
     builder.parser().AddModels(models_path)
     builder.parser().AddModelsFromString(bounding_box_urdf, "urdf")
     iiwa_model_instance_index = builder.plant().GetModelInstanceByName("iiwa")
@@ -173,6 +179,9 @@ def get_regions(models_path, com, rot, dims):
     use_native_cpp_logging()
     params = dict(edge_step_size=0.125)
     builder = RobotDiagramBuilder()
+    directory_path = os.path.dirname(os.path.abspath(__file__))
+    models_package = os.path.abspath(os.path.join(directory_path, "..", "models", "package.xml"))
+    builder.parser().package_map().AddPackageXml(models_package)
     builder.parser().AddModels(models_path)
     builder.parser().AddModelsFromString(bounding_box_urdf, "urdf")
     iiwa_model_instance_index = builder.plant().GetModelInstanceByName("iiwa")
@@ -295,6 +304,9 @@ def check_configuration_has_collisions(models_path, com, rot, dims, q):
     builder = RobotDiagramBuilder()
     plant = builder.plant()
     scene_graph = builder.scene_graph()
+    directory_path = os.path.dirname(os.path.abspath(__file__))
+    models_package = os.path.abspath(os.path.join(directory_path, "..", "models", "package.xml"))
+    builder.parser().package_map().AddPackageXml(models_package)
     builder.parser().AddModels(models_path)
     builder.parser().AddModelsFromString(bounding_box_urdf, "urdf")
     diagram = builder.Build()
@@ -969,9 +981,6 @@ class TwoGraspPlanner(LeafSystem):
     def PlanBinPick(self, context, state, after_scan_state):
         # Get pcd 
         cloud = self.GetInputPort("cloud_bin").Eval(context)
-        X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[0.017, 0.003, 0.0])
-        transformed_xyzs = X_adjust @ cloud.xyzs()
-        cloud.mutable_xyzs()[:] = transformed_xyzs
         bin_pcd = cloud.Crop(lower_xyz=[-0.03, 0.44, -bin_depth], upper_xyz=[0.145, 0.75, 0.2])
         bin_pcd.EstimateNormals(radius=0.1, num_closest=30)
         bin_pcd.FlipNormalsTowardPoint(self._X_WC_bin.translation())
@@ -1374,25 +1383,16 @@ class TwoGraspPlanner(LeafSystem):
         start = time.time()
         # Get manipuland pcd 
         cloud0 = self.GetInputPort("cloud_front").Eval(context)
-        X_adjust0 = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[0.005, -0.025, -0.015])
-        transformed_xyzs = X_adjust0 @ cloud0.xyzs()
-        cloud0.mutable_xyzs()[:] = transformed_xyzs
         pcd0 = cloud0.Crop(lower_xyz=[0.23, -0.17, platform_height], upper_xyz=[0.7, 0.17, 0.35])
         pcd0.EstimateNormals(radius=0.1, num_closest=30)
         pcd0.FlipNormalsTowardPoint(self._X_WC0.translation())
 
         cloud1 = self.GetInputPort("cloud_back_left").Eval(context)
-        X_adjust1 = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[0.00, 0.0, -0.015])
-        transformed_xyzs = X_adjust1 @ cloud1.xyzs()
-        cloud1.mutable_xyzs()[:] = transformed_xyzs
         pcd1 = cloud1.Crop(lower_xyz=[0.23, -0.17, platform_height], upper_xyz=[0.7, 0.17, 0.35])
         pcd1.EstimateNormals(radius=0.1, num_closest=30)
         pcd1.FlipNormalsTowardPoint(self._X_WC2.translation()) # I screwed up the cameras somewhere so the left anf right are flipped, need to fix
 
         cloud2 = self.GetInputPort("cloud_back_right").Eval(context)
-        X_adjust2 = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[0.03, 0.005, 0.005])
-        transformed_xyzs = X_adjust2 @ cloud2.xyzs()
-        cloud2.mutable_xyzs()[:] = transformed_xyzs
         pcd2 = cloud2.Crop(lower_xyz=[0.23, -0.17, platform_height], upper_xyz=[0.7, 0.17, 0.35])
         pcd2.EstimateNormals(radius=0.1, num_closest=30)
         pcd2.FlipNormalsTowardPoint(self._X_WC1.translation())
@@ -1530,22 +1530,16 @@ class TwoGraspPlanner(LeafSystem):
         start = time.time()
         # Get table pcd 
         cloud0 = self.GetInputPort("cloud_front").Eval(context)
-        transformed_xyzs = X_adjust0 @ cloud0.xyzs()
-        cloud0.mutable_xyzs()[:] = transformed_xyzs
         pcd0 = cloud0.Crop(lower_xyz=[0.1, -0.3, 0.0], upper_xyz=[0.85, 0.3, 0.07]).VoxelizedDownSample(voxel_size=0.01)
         pcd0.EstimateNormals(radius=0.1, num_closest=30)
         pcd0.FlipNormalsTowardPoint(self._X_WC0.translation())
 
         cloud1 = self.GetInputPort("cloud_back_left").Eval(context)
-        transformed_xyzs = X_adjust1 @ cloud1.xyzs()
-        cloud1.mutable_xyzs()[:] = transformed_xyzs
         pcd1 = cloud1.Crop(lower_xyz=[0.1, -0.3, 0.0], upper_xyz=[0.85, 0.3, 0.07]).VoxelizedDownSample(voxel_size=0.01)
         pcd1.EstimateNormals(radius=0.1, num_closest=30)
         pcd1.FlipNormalsTowardPoint(self._X_WC2.translation())
 
         cloud2 = self.GetInputPort("cloud_back_right").Eval(context)
-        transformed_xyzs = X_adjust2 @ cloud2.xyzs()
-        cloud2.mutable_xyzs()[:] = transformed_xyzs
         pcd2 = cloud2.Crop(lower_xyz=[0.1, -0.3, 0.0], upper_xyz=[0.85, 0.3, 0.07]).VoxelizedDownSample(voxel_size=0.01)
         pcd2.EstimateNormals(radius=0.1, num_closest=30)
         pcd2.FlipNormalsTowardPoint(self._X_WC1.translation())

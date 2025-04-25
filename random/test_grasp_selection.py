@@ -45,7 +45,9 @@ o3d_pcd.paint_uniform_color([0,0,1])
 o3d_pcd.normals = o3d.utility.Vector3dVector(pcd_normals)
 # o3d.visualization.draw_geometries([o3d_pcd], point_show_normal=True, window_name="merged pcd")
 
-gripper_model_path = "file://./home/evelyn/sources/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_buffer.sdf"
+directory_path = os.path.dirname(os.path.abspath(__file__))
+gripper_model_path = "package://pickplace_data_collection/schunk_wsg_50_large_grippers_w_buffer.sdf"
+    
 grasp_node = GraspListener(gripper_model_path=gripper_model_path)
 
 ONLINE_VOXEL_RADIUS = 0.005

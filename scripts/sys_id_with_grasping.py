@@ -203,10 +203,12 @@ def start_scenario(
     #         scenario=scenario, has_wsg=True, use_hardware=use_hardware
     #     ),
     # )
-    station = builder.AddSystem(MakeHardwareStation(scenario, meshcat, hardware=False))
+    directory_path = os.path.dirname(os.path.abspath(__file__))
+    models_package = os.path.abspath(os.path.join(directory_path, "..", "models", "package.xml"))
+    station = builder.AddSystem(MakeHardwareStation(scenario, meshcat, hardware=False, package_xmls=[models_package]))
     if use_hardware:
         scenario.plant_config.time_step = 5e-3 # Controller frequency
-        external_station = builder.AddSystem(MakeHardwareStation(scenario, meshcat, hardware=True))
+        external_station = builder.AddSystem(MakeHardwareStation(scenario, meshcat, hardware=True, package_xmls=[models_package]))
     plant = station.GetSubsystemByName("plant")
     # plant = station.get_plant()
 
@@ -501,6 +503,7 @@ def start_scenario(
             scenario=scenario,
             meshcat=meshcat,
             hardware=use_hardware,
+            package_xmls=[models_package]
         ),
     )
 
@@ -713,11 +716,9 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    gripper_model_path = "file://./home/real2sim/src/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_buffer.sdf"
-    # gripper_model_path = "file://./home/evelyn/sources/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_buffer.sdf"
-    if args.use_hardware:
-        gripper_model_path = "file://./home/real2sim/src/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_buffer.sdf"
-
+    directory_path = os.path.dirname(os.path.abspath(__file__))
+    gripper_model_path = "package://pickplace_data_collection/schunk_wsg_50_large_grippers_w_buffer.sdf"
+    
     # Start the visualizer.
     meshcat = StartMeshcat()
 

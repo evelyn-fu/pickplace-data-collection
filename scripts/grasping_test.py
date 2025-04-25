@@ -206,10 +206,12 @@ def start_scenario(
     #         scenario=scenario, has_wsg=True, use_hardware=use_hardware
     #     ),
     # )
-    station = builder.AddSystem(MakeHardwareStation(scenario, meshcat, hardware=False))
+    directory_path = os.path.dirname(os.path.abspath(__file__))
+    models_package = os.path.abspath(os.path.join(directory_path, "..", "models", "package.xml"))
+    station = builder.AddSystem(MakeHardwareStation(scenario, meshcat, hardware=False, package_xmls=[models_package]))
     if use_hardware:
         scenario.plant_config.time_step = 5e-3 # Controller frequency
-        external_station = builder.AddSystem(MakeHardwareStation(scenario, meshcat, hardware=True))
+        external_station = builder.AddSystem(MakeHardwareStation(scenario, meshcat, hardware=True, package_xmls=[models_package]))
     plant = station.GetSubsystemByName("plant")
     # plant = station.get_plant()
 
@@ -326,16 +328,28 @@ def start_scenario(
         x_bin_camera = x_bin_rgb @ x_depth_rgb_bin
     else:
         # Front camera
-        x_front_camera = RigidTransform(np.loadtxt("/home/real2sim/calibrations/2_10_calibrations_aligned/front.txt"))
+        x_front_camera = RigidTransform(
+            RotationMatrix(RollPitchYaw(-150.29508676 / 180. * np.pi, -0.49652966 / 180. * np.pi, 87.69325379 / 180. * np.pi)),
+            [1.00847, -0.0314675, 1.12864]
+        )
 
         # Back Right camera
-        x_back_right_camera = RigidTransform(np.loadtxt("/home/real2sim/calibrations/2_10_calibrations_aligned/back_right.txt"))
+        x_back_right_camera = RigidTransform(
+            RotationMatrix(RollPitchYaw(-105.81290946 / 180. * np.pi, 2.14985993, -43.7254432 / 180. * np.pi)),
+            [-0.110748, -0.931772,  0.388191]
+        )
 
         # Back Left camera
-        x_back_left_camera = RigidTransform(np.loadtxt("/home/real2sim/calibrations/2_10_calibrations_aligned/back_left.txt"))
+        x_back_left_camera = RigidTransform(
+            RotationMatrix(RollPitchYaw(-102.739428 / 180. * np.pi, -3.69469624 / 180. * np.pi, -149.1420755 / 180. * np.pi)),
+            [-0.0533544,  1.00955,  0.449207]
+        )
 
         # Bin camera
-        x_bin_camera = RigidTransform(np.loadtxt("/home/real2sim/calibrations/bin_calibration_2_7_daniilidis.txt"))
+        x_bin_camera = RigidTransform(
+            RotationMatrix(RollPitchYaw(-164.69831287 / 180. * np.pi, -35.83297034 / 180. * np.pi, -99.44115857 / 180. * np.pi)),
+            [-0.0574518,  0.874365 ,  0.332985]
+        )
 
     # connect stationary camera pcd source
     camera0_pose_source = builder.AddSystem(CameraPoseInWorldSource(x_front_camera, handeye=False))
@@ -690,10 +704,8 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    gripper_model_path = "file://./home/real2sim/src/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_buffer.sdf"
-    # gripper_model_path = "file://./home/evelyn/sources/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_buffer.sdf"
-    if args.use_hardware:
-        gripper_model_path = "file://./home/real2sim/src/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_buffer.sdf"
+    directory_path = os.path.dirname(os.path.abspath(__file__))
+    gripper_model_path = "package://pickplace_data_collection/schunk_wsg_50_large_grippers_w_buffer.sdf"
 
     # Start the visualizer.
     meshcat = StartMeshcat()

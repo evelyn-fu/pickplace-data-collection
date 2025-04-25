@@ -28,6 +28,7 @@ from manipulation.scenarios import AddFloatingRpyJoint, AddRgbdSensors, ycb
 from manipulation.utils import ConfigureParser
 from manipulation.meshcat_utils import AddMeshcatTriad
 from scipy.spatial.transform import Rotation as R
+import os
 
 # Start the visualizer.
 meshcat = StartMeshcat()
@@ -35,8 +36,13 @@ meshcat = StartMeshcat()
 builder = DiagramBuilder()
 plant, scene_graph = AddMultibodyPlantSceneGraph(builder, time_step=0.0005)
 parser = Parser(plant)
+directory_path = os.path.dirname(os.path.abspath(__file__))
+models_package = os.path.abspath(os.path.join(directory_path, "..", "models", "package.xml"))
+parser.package_map().AddPackageXml(models_package)
 ConfigureParser(parser)
-parser.AddModelsFromUrl("file://./home/evelyn/sources/Real2SimObjectManipulation/models/schunk_wsg_50_welded_fingers_w_buffer.sdf")
+directory_path = os.path.dirname(os.path.abspath(__file__))
+gripper_model_path = "package://pickplace_data_collection/schunk_wsg_50_large_grippers_w_buffer.sdf"
+parser.AddModelsFromUrl(gripper_model_path)
 plant.Finalize()
 
 params = MeshcatVisualizerParams()

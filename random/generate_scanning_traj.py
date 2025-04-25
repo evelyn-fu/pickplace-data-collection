@@ -22,6 +22,9 @@ def get_seeded_region(models_path, q_nominal):
     print("getting seeded region around", q_nominal)
     builder = RobotDiagramBuilder()
     plant = builder.plant()
+    directory_path = os.path.dirname(os.path.abspath(__file__))
+    models_package = os.path.abspath(os.path.join(directory_path, "..", "models", "package.xml"))
+    builder.parser().package_map().AddPackageXml(models_package)
     builder.parser().AddModels(models_path)
     diagram = builder.Build()
 
@@ -41,6 +44,9 @@ def get_regions(models_path):
     use_native_cpp_logging()
     params = dict(edge_step_size=0.125)
     builder = RobotDiagramBuilder()
+    directory_path = os.path.dirname(os.path.abspath(__file__))
+    models_package = os.path.abspath(os.path.join(directory_path, "..", "models", "package.xml"))
+    builder.parser().package_map().AddPackageXml(models_package)
     builder.parser().AddModels(models_path)
     iiwa_model_instance_index = builder.plant().GetModelInstanceByName("iiwa")
     wsg_model_instance_index = builder.plant().GetModelInstanceByName("wsg")
@@ -114,7 +120,9 @@ if __name__ == "__main__":
     dir_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     filename = os.path.join(dir_path, os.path.join("scenario_datas", scenario_path))
     scenario = LoadScenario(filename=filename)
-    station = builder.AddSystem(MakeHardwareStation(scenario, meshcat, hardware=False))
+    directory_path = os.path.dirname(os.path.abspath(__file__))
+    models_package = os.path.abspath(os.path.join(directory_path, "..", "models", "package.xml"))
+    station = builder.AddSystem(MakeHardwareStation(scenario, meshcat, hardware=False, package_xmls=[models_package]))
     controller_plant = station.GetSubsystemByName(
         "iiwa.controller"
     ).get_multibody_plant_for_control()
