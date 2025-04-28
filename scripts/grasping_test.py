@@ -39,7 +39,7 @@ from pydrake.math import (
     RollPitchYaw,
 )
 from pathlib import Path
-from planning.two_grasp_display_planner import PlannerState, PickState
+from planning.utils.planner_states import PlannerState, PickState
 from pydrake.solvers import MosekSolver, GurobiSolver
 from pydrake.all import LeafSystem, Value, Context, InputPort
 from planning.two_grasp_display_planner import TwoGraspPlanner

@@ -65,7 +65,7 @@ from pydrake.all import (
 from pydrake.geometry import Rgba
 
 from manipulation.meshcat_utils import AddMeshcatTriad
-from enum import Enum
+from planning.utils.planner_states import PlannerState, PickState
 from pathlib import Path
 
 import sys
@@ -510,36 +510,6 @@ def apply_centered_rotation_and_translation(pose: np.ndarray, rotation: np.ndarr
     transform = transform @ pose
     transform[:3, 3] = transform[:3, 3] + translation
     return transform
-
-class PlannerState(Enum):
-    WAIT_FOR_OBJECTS_TO_SETTLE = 1
-    START = 2
-    PLAN_PICK = 12
-    GO_TO_PICK_PREGRASP = 13
-    PICK_GRASP = 14
-    GO_HOME0 = 15
-    SCANNING1 = 3
-    GO_TO_PREGRASP1 = 4
-    GRASP1 = 5
-    GO_HOME1 = 6
-    SCANNING2 = 7
-    GO_TO_PREGRASP2 = 8
-    GRASP2 = 9
-    GO_HOME2 = 10
-    PLAN_SYS_ID = 16
-    GO_TO_SYS_ID_PREGRASP = 17
-    SYS_ID_GRASP = 18
-    GO_HOME3 = 19
-    RESET = 20
-    DONE = 11
-
-class PickState(Enum):
-    IDLE = 1
-    PICK = 2
-    TO_DISPLAY = 3
-    DISPLAY = 4
-    TO_PLACE = 5
-    PLACE = 6
 
 lift_for_display_height = 0.05
 display_traj_height_buffer = 0.05 # Height between manipuland bottom and floor
@@ -1354,15 +1324,13 @@ class TwoGraspPlanner(LeafSystem):
         eff_perpendicular_vec = rot_mat.dot(np.array([1, 0, 0]))
         eff_parallel_vec = rot_mat.dot(np.array([0, 1, 0]))
         perpendicular_score = np.abs(eff_perpendicular_vec @ principal_component)
-        parallel_score = np.abs(eff_parallel_vec @ principal_component) # idk why the secondary axis is lining up...
+        parallel_score = np.abs(eff_parallel_vec @ principal_component) 
         
         stage_center = stage_center0
-        # if perpendicular_score > parallel_score:
-        #     print("Using stage_center0")
-        #     stage_center = stage_center0
-        # else:
-        #     print("Using stage_center90")
-        #     stage_center = stage_center90
+        if perpendicular_score > parallel_score:
+            stage_center = stage_center0
+        else:
+            stage_center = stage_center90
 
         # Solve for pick trajectory before moving
         X_WE = X_WG_bin.multiply(X_GE)

@@ -41,6 +41,7 @@ class GraspType(Enum):
     SIDE = 2
     TOP = 3
     STABLE = 4
+    ADDITIONAL = 5
 
 class GraspListener():
     """The class responsible for computing and evaluation grasp candidates."""
@@ -75,9 +76,14 @@ class GraspListener():
         self.plant_context = self.plant.GetMyContextFromRoot(context)
         self.scene_graph_context = self.scene_graph.GetMyContextFromRoot(context)
 
+        self.voxel_map = None
+
         # Required for using gui. Should only ever call this once.
         gui.Application.instance.initialize()
 
+    def set_voxel_map(self, voxel_map):
+        """Set the voxel map for the grasp listener."""
+        self.voxel_map = voxel_map
 
     def check_collision(self, pcd, X_G, use_extra_buffer=False, visualize=False):
         """Returns true if not in collision and false otherwise."""
@@ -793,6 +799,18 @@ class GraspListener():
         cost = sum(considered_costs)
 
         return cost, cost_dict
+    
+    def compute_costs_voxel_map_coverage(
+            self,
+            X_WG: RigidTransform,
+            intrinsic_matrix: np.ndarray,
+            width_px: int, 
+            height_px: int,
+            indices_enclosed: np.ndarray,
+        ) -> tuple[float, dict]:
+        # TODO: Implement this function similar to in uncertainty_mapping_test.py for 8 camera views for the grasp
+        pass
+
 
     def compute_costs_batch(
             self, 
@@ -1260,6 +1278,9 @@ class GraspListener():
         proportion_enclosed_cost_thresh: float=0.1,
         proportion_good_enclosed_cost_thresh: float=0.01,
         proportion_enclosed_good_cost_thresh: float=0.1,
+        intrinsic_matrix=None,
+        width_px=None, 
+        height_px=None,
     ):
         """
         Compute sorted candidate grasps.
@@ -1690,7 +1711,7 @@ class GraspListener():
 
                                     # If the candidate has no collisions and the closing region is non
                                     # empty, then append it to the list of candidates.
-                                    is_nonempty, within_box_pt_normals, proportion_enclosed, _ = self.check_nonempty(pcd, X_WPnew)
+                                    is_nonempty, within_box_pt_normals, proportion_enclosed, indices_enclosed = self.check_nonempty(pcd, X_WPnew)
                                     if is_nonempty:
                                         if grasp_type == GraspType.PAIR:
                                             cost, cost_dict = self.compute_costs(
@@ -1734,6 +1755,16 @@ class GraspListener():
                                                     split_ratio,
                                                     proportion_enclosed,
                                                     pcd_points.shape[0]
+                                                )
+                                        elif grasp_type == GraspType.ADDITIONAL:
+                                            if intrinsic_matrix is None or width_px is None or height_px is None:
+                                                raise ValueError("Intrinsic matrix and image dimensions must be provided for GraspType.ADDITIONAL")
+                                            cost, cost_dict = self.compute_costs_voxel_map_coverage(
+                                                    X_WPnew, 
+                                                    intrinsic_matrix,
+                                                    width_px, 
+                                                    height_px,
+                                                    indices_enclosed,
                                                 )
                                         
                                         if cost < best_cost:
