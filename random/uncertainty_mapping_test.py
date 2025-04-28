@@ -150,6 +150,32 @@ o3d.visualization.draw_geometries(grasp2_geometries)
 voxel_map = VoxelMap(points_in_object_frame, voxel_size, visualize=True)
 
 start = time.time()
+confidence_improvment1 = voxel_map.get_improvement_from_observations(
+    intrinsic_matrix, 
+    [X_pick1_cams[i].GetAsMatrix4() for i in range(8)], 
+    width_px, height_px, 
+    occlusion_indices=indices_enclosed1,
+    # occlusion_mask=np.array([[width_px//2 - 25 + j, i] for j in range(50) for i in range(height_px)]).T, 
+    visualize=True,
+    visualize_all=False
+)
+print(f"improvement 1 check took {time.time() - start} seconds")
+print("confidence improvment 1", confidence_improvment1)
+
+start = time.time()
+confidence_improvment2 = voxel_map.get_improvement_from_observations(
+    intrinsic_matrix, 
+    [X_pick2_cams[i].GetAsMatrix4() for i in range(8)], 
+    width_px, height_px, 
+    occlusion_indices=indices_enclosed2,
+    # occlusion_mask=np.array([[width_px//2 - 25 + j, i] for j in range(50) for i in range(height_px)]).T, 
+    visualize=True,
+    visualize_all=False
+)
+print(f"improvement 2 check took {time.time() - start} seconds")
+print("confidence improvment 2", confidence_improvment2)
+
+start = time.time()
 for i in range(8):
     voxel_map.update_with_observation(
         intrinsic_matrix, 

@@ -28,7 +28,7 @@ import tty
 import os
 import time
 import termios
-from planning.two_grasp_display_planner import PlannerState
+from planning.utils.planner_states import PlannerState
 
 def save_image_pair(args, base_dir):
     rgb, depth, timestamp = args

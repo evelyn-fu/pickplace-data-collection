@@ -60,7 +60,7 @@ from pydrake.all import (
 from pydrake.geometry import Rgba
 
 from manipulation.meshcat_utils import AddMeshcatTriad
-from enum import Enum
+from planning.utils.planner_states import PlannerState, PickState
 
 import sys
 from planning.utils.csdecomp_path import CSDECOMP_PATH
@@ -321,26 +321,6 @@ def check_configuration_has_collisions(models_path, com, rot, dims, q):
     query_object = scene_graph.GetOutputPort("query").Eval(scene_graph_context)
     return query_object.HasCollisions()
 
-class PlannerState(Enum):
-    WAIT_FOR_OBJECTS_TO_SETTLE = 1
-    START = 2
-    GO_TO_SPINNING = 3
-    SPINNING = 4
-    GO_HOME0 = 5
-    SCANNING = 6
-    GO_TO_PREGRASP = 7
-    GRASP = 8
-    GO_HOME1 = 9
-    DONE = 10
-
-class PickState(Enum):
-    IDLE = 1
-    PICK = 2
-    TO_DISPLAY = 3
-    DISPLAY = 4
-    TO_PLACE = 5
-    PLACE = 6
-
 yaw_display_traj = []
 
 yaw_display_traj.append(RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0)), [0.4, 0.0, 0.6]))
@@ -579,14 +559,14 @@ class TurntablePlanner(LeafSystem):
             if context.get_time() > traj_q.end_time() + start_time:
                 state.get_mutable_abstract_state(
                     int(self._mode_index)
-                ).set_value(PlannerState.SCANNING)
+                ).set_value(PlannerState.SCANNING1)
                 self.PlanGripper(context, state, "open", time=0.1)
             return
-        if mode == PlannerState.SCANNING:
-            self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP)
+        if mode == PlannerState.SCANNING1:
+            self.GetPointCloud(context, state, PlannerState.GO_TO_PREGRASP1)
             input("Next: Pregrasp 1 (scs)") # pause for debugging
             return
-        if mode == PlannerState.GO_TO_PREGRASP:
+        if mode == PlannerState.GO_TO_PREGRASP1:
             traj_q = context.get_abstract_state(
                 int(self._current_joint_traj_idx)
             ).get_value().trajectory
@@ -596,7 +576,7 @@ class TurntablePlanner(LeafSystem):
             if context.get_time() > traj_q.end_time() + start_time:
                 state.get_mutable_abstract_state(
                     int(self._mode_index)
-                ).set_value(PlannerState.GRASP)
+                ).set_value(PlannerState.GRASP1)
                 # Update pick + display state
                 state.get_mutable_abstract_state(
                     int(self._pick_mode_index)
@@ -604,7 +584,7 @@ class TurntablePlanner(LeafSystem):
                 self.DoPoseTraj(context, state)
                 input("Next: Pick 1 (DiffIK)") # pause for debugging
             return
-        if mode == PlannerState.GRASP:
+        if mode == PlannerState.GRASP1:
             self.UpdateInGrasp(context, state, PlannerState.GO_HOME1)
             return
         if mode == PlannerState.GO_HOME1:
@@ -617,7 +597,13 @@ class TurntablePlanner(LeafSystem):
             if context.get_time() > traj_q.end_time() + start_time:
                 state.get_mutable_abstract_state(
                     int(self._mode_index)
-                ).set_value(PlannerState.DONE)
+                ).set_value(PlannerState.RESET)
+            return
+        if mode == PlannerState.RESET:
+            state.get_mutable_abstract_state(
+                int(self._mode_index)
+            ).set_value(PlannerState.DONE)
+            self.done = True
             return
         
     def UpdateInGrasp(self, context, state, after_grasp_state):
