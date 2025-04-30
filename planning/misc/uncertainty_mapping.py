@@ -76,7 +76,8 @@ class VoxelMap:
             extrinsic_matrix (np.ndarray): The extrinsic matrix of the camera
             width_px (int): The width of the camera image in pixels
             height_px (int): The height of the camera image in pixels
-            occlusion_mask (np.ndarray): A 2xn array indicating occluded (x, y) pixels, optional
+            occlusion_mask (np.ndarray): A (w, h) array indicating which pixels are occluded, 
+                                        where is occluded and 0 is not, optional
             occlusion_indices (np.ndarray): A 1xn array indicating indices of occluded points in the voxel map, optional
             visualize (bool): Whether to visualize the full update at the end
             visualize_all (bool): Whether to visualize each raycast step
@@ -95,8 +96,9 @@ class VoxelMap:
         # raycast["t_hit"] is shape [H, W], float tensor of distances or inf
         t_hit = raycast["t_hit"].reshape((-1,))
         mask_hit = t_hit.isfinite()
-        occlusion_mask_flat = occlusion_mask[1, :] * width_px + occlusion_mask[0, :] if occlusion_mask is not None else None
-        if occlusion_mask_flat is not None:
+        if occlusion_mask is not None:
+            occlusion_mask_inds = np.argwhere(occlusion_mask[:, :] == 1)
+            occlusion_mask_flat = occlusion_mask_inds[:, 1] * width_px + occlusion_mask_inds[:, 0]
             mask_hit[occlusion_mask_flat] = False
 
         # Step 4: Get ray origins and directions (shape [H*W, 3])
@@ -187,7 +189,7 @@ class VoxelMap:
             extrinsic_matrix (np.ndarray): The extrinsic matrix of the camera
             width_px (int): The width of the camera image in pixels
             height_px (int): The height of the camera image in pixels
-            occlusion_mask (np.ndarray): A 2xn array indicating occluded (x, y) pixels, optional
+            occlusion_indices (np.ndarray): A 1xn array indicating indices of occluded points in the voxel map, optional
             visualize (bool): Whether to visualize the full update at the end
             visualize_all (bool): Whether to visualize each raycast step
         

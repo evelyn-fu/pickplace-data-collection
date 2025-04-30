@@ -495,7 +495,7 @@ class RegraspPlanner(LeafSystem):
             "object_pose", AbstractValue.Make(RigidTransform())
         )
         self.DeclareAbstractInputPort(
-            "gripper_mask", AbstractValue.Make(ImageLabel16I())
+            "gripper_mask", AbstractValue.Make(np.zeros((0, 0), dtype=np.uint8))
         )
         # store observations in bank to update confidence model after full display trajectory
         self.object_poses = []
@@ -849,7 +849,7 @@ class RegraspPlanner(LeafSystem):
                         self._cam_obs_K, 
                         X_OC.GetAsMatrix4(), 
                         self.obs_width_px, self.obs_height_px, 
-                        occlusion_mask=gripper_mask.get_image(), 
+                        occlusion_mask=gripper_mask, 
                         visualize=False,
                         visualize_all=False
                     )
@@ -915,7 +915,7 @@ class RegraspPlanner(LeafSystem):
                         self._cam_obs_K, 
                         X_OC.GetAsMatrix4(), 
                         self.obs_width_px, self.obs_height_px, 
-                        occlusion_mask=gripper_mask.get_image(), 
+                        occlusion_mask=gripper_mask, 
                         visualize=False,
                         visualize_all=False
                     )
