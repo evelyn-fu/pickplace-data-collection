@@ -150,7 +150,7 @@ def solve_via_analytic_IK_with_retries(pose: RigidTransform,
     print("retrying with nudged end pose")
     for i in range(retries):
         nudged_pose = add_noise_to_transform(pose)
-        result = solve_via_analytic_IK(nudged_pose, current_config, ik_domain, checker)
+        result = solve_via_analytic_IK(nudged_pose, current_config, ik_domain, csd_plant)
         if result is not None:
             return result
         
