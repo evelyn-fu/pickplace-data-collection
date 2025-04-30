@@ -1194,12 +1194,10 @@ class TwoGraspPlanner(LeafSystem):
         parallel_score = np.abs(eff_parallel_vec @ principal_component) # idk why the secondary axis is lining up...
         
         stage_center = stage_center0
-        # if perpendicular_score > parallel_score:
-        #     print("Using stage_center0")
-        #     stage_center = stage_center0
-        # else:
-        #     print("Using stage_center90")
-        #     stage_center = stage_center90
+        if perpendicular_score > parallel_score:
+            stage_center = stage_center0
+        else:
+            stage_center = stage_center90
 
         # Solve for pick trajectory before moving
         X_WE = X_WG_bin.multiply(X_GE)
