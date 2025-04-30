@@ -30,6 +30,7 @@ from enum import Enum
 import math
 import random
 from perception.pcd_util import crop_connected_points
+from planning.regrasp_display_planner import get_yaw_display_traj
 
 from .frame_placer_app import FramePlacerApp
 lock = threading.Lock()
@@ -46,7 +47,7 @@ class GraspType(Enum):
 class GraspListener():
     """The class responsible for computing and evaluation grasp candidates."""
 
-    def __init__(self, gripper_length=0.145, hand_finger_path=None, hand_finger_extra_buffer_path=None, gripper_model_path=None):
+    def __init__(self, gripper_length=0.145, eef_to_gripper_length=0.16, hand_finger_path=None, hand_finger_extra_buffer_path=None, gripper_model_path=None):
         if hand_finger_path == None:
             hand_finger_path = os.path.abspath(
                 os.path.join(os.path.dirname( __file__ ), '..', 'scenario_datas', 'gripper_sdf.pkl'))
@@ -60,6 +61,7 @@ class GraspListener():
         # self.hand_collision_model.visualize()
 
         self.gripper_length = gripper_length
+        self.eef_to_gripper_length = eef_to_gripper_length
 
         builder = DiagramBuilder()
         self.plant, self.scene_graph = AddMultibodyPlantSceneGraph(builder, time_step=0.0005)
@@ -806,13 +808,62 @@ class GraspListener():
     def compute_costs_voxel_map_coverage(
             self,
             X_WG: RigidTransform,
+            pcd_points: np.ndarray, # X_WP, Shape (3, N)
             intrinsic_matrix: np.ndarray,
             width_px: int, 
             height_px: int,
             indices_enclosed: np.ndarray,
+            display_traj_height_buffer: float = 0.05,
+            visualize: bool = False,
         ) -> tuple[float, dict]:
-        # TODO: Implement this function similar to in uncertainty_mapping_test.py for 8 camera views for the grasp
-        pass
+
+        X_GE = RigidTransform(RotationMatrix(RollPitchYaw(0, 0, 0)), [0, 0, -self.eef_to_gripper_length])
+        X_WE = RigidTransform(X_WG).multiply(X_GE)
+        X_EW = X_WE.inverse()
+        manipuland_cloud_points_link7_frame = X_EW @ pcd_points # X_EP, Shape (3, N)
+        manipuland_cloud_points_link7_frame = manipuland_cloud_points_link7_frame.T # Shape (N,3)
+
+        # The link 7 z-axis points towards the gripper.
+        length = np.max(manipuland_cloud_points_link7_frame, axis=0)[2]
+
+        X_display_cams = get_yaw_display_traj(scanning_traj_height=length)
+
+        X_G_cams = [X_WG @ X_display_cam for X_display_cam in X_display_cams]
+
+        if visualize:
+            pcd = o3d.geometry.PointCloud()
+            pcd.points = o3d.utility.Vector3dVector(pcd_points.T)
+            pcd.paint_uniform_color([1.0, 0.0, 0.0])
+
+            gripper_points = X_WG @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0]) @ self.hand_collision_model.to_pcd().T
+
+            gripper_pcd = o3d.geometry.PointCloud()
+            gripper_pcd.points = o3d.utility.Vector3dVector(gripper_points.T)
+            gripper_pcd.paint_uniform_color([0.0, 1.0, 0.0])
+
+            camera_triads = []
+            for i in range(8):
+                camera_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
+                camera_frame.transform(X_G_cams[i].GetAsMatrix4())
+                camera_triads.append(camera_frame)
+
+            origin_triad = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
+            origin_triad.transform(np.eye(4))
+
+            grasp_geometries = [pcd, gripper_pcd, origin_triad] + camera_triads
+            o3d.visualization.draw_geometries(grasp_geometries)
+        
+        confidence_improvement = self.voxel_map.get_improvement_from_observations(
+            intrinsic_matrix, 
+            [X_G_cams[i].GetAsMatrix4() for i in range(8)], 
+            width_px, 
+            height_px, 
+            occlusion_indices=indices_enclosed,
+            visualize=True,
+            visualize_all=False
+        )
+
+        return -confidence_improvement
 
 
     def compute_costs_batch(
@@ -1281,9 +1332,12 @@ class GraspListener():
         proportion_enclosed_cost_thresh: float=0.1,
         proportion_good_enclosed_cost_thresh: float=0.01,
         proportion_enclosed_good_cost_thresh: float=0.1,
+
+        # For GraspType.ADDITIONAL only
         intrinsic_matrix=None,
         width_px=None, 
         height_px=None,
+        display_traj_height_buffer=None,
     ):
         """
         Compute sorted candidate grasps.
@@ -1760,14 +1814,16 @@ class GraspListener():
                                                     pcd_points.shape[0]
                                                 )
                                         elif grasp_type == GraspType.ADDITIONAL:
-                                            if intrinsic_matrix is None or width_px is None or height_px is None:
+                                            if intrinsic_matrix is None or width_px is None or height_px is None or display_traj_height_buffer is None:
                                                 raise ValueError("Intrinsic matrix and image dimensions must be provided for GraspType.ADDITIONAL")
                                             cost, cost_dict = self.compute_costs_voxel_map_coverage(
                                                     X_WPnew, 
+                                                    pcd_points,
                                                     intrinsic_matrix,
                                                     width_px, 
                                                     height_px,
                                                     indices_enclosed,
+                                                    display_traj_height_buffer,
                                                 )
                                         
                                         if cost < best_cost:

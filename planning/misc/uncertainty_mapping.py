@@ -14,7 +14,7 @@ from pydrake.all import (
 )
 
 class VoxelMap:
-    def __init__(self, points: np.ndarray, voxel_size: float, confidence_threshold: float = 0.9, visualize=False):
+    def __init__(self, points: np.ndarray, voxel_size: float, confidence_threshold: float = 0.9, fully_observed_threshold=0.95, visualize=False):
         """
         Initializes a voxel map with signed distance values and confidence.
 
@@ -28,6 +28,7 @@ class VoxelMap:
         self.voxel_size = voxel_size
         self.confidences = np.zeros(points.shape[1])
         self.confidence_threshold = confidence_threshold
+        self.fully_observed_threshold = fully_observed_threshold
 
         # Compute the center of the points
         self.center = np.mean(points, axis=1)
@@ -310,7 +311,7 @@ class VoxelMap:
         """
         Returns True if the map is fully observed
         """
-        return np.all(self.confidences > self.confidence_threshold)
+        return np.sum(self.confidences > self.confidence_threshold) / len(self.confidences) >= self.fully_observed_threshold
     
     def stats(self):
         """

@@ -519,28 +519,12 @@ display_traj_height_buffer = 0.05 # Height between manipuland bottom and floor
 q_home = [0.3, 0.4, 0.0, -1.2, 0.0, 1.0, -1.57]
 
 def get_yaw_display_traj(scanning_traj_height=0.50, scanning_traj_robot_to_workspace_dist = 0.5) -> list[RigidTransform]:
-    yaw_display_traj = []
-    yaw_display_traj.append(
-        RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0)),
-                    [scanning_traj_robot_to_workspace_dist, 0.0, scanning_traj_height]))
-    yaw_display_traj.append(
-        RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi/4)),
-                    [scanning_traj_robot_to_workspace_dist, 0.0, scanning_traj_height]))
-    yaw_display_traj.append(
-        RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi/2)),
-                    [scanning_traj_robot_to_workspace_dist, 0.0, scanning_traj_height]))
-    yaw_display_traj.append(
-        RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -3*np.pi/4)),
-                    [scanning_traj_robot_to_workspace_dist, 0.0, scanning_traj_height]))
-    yaw_display_traj.append(
-        RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi)),
-                    [scanning_traj_robot_to_workspace_dist, 0.0, scanning_traj_height]))
-    yaw_display_traj.append(
-        RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -5*np.pi)),
-                    [scanning_traj_robot_to_workspace_dist, 0.0, scanning_traj_height]))
-    yaw_display_traj.append(
-        RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -3*np.pi/2)),
-                    [scanning_traj_robot_to_workspace_dist, 0.0, scanning_traj_height]))
+    yaw_display_traj = [
+        RigidTransform(
+            RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi/4 * i)),
+            [scanning_traj_robot_to_workspace_dist, 0.0, scanning_traj_height]
+        ) for i in range(8)
+    ]
     
     return yaw_display_traj
 
@@ -1644,7 +1628,7 @@ class RegraspPlanner(LeafSystem):
                                         self.cci_objects['cci_plant'].getRobotGeometryIds(), 
                                         cci.Voxels(self.current_manipuland_pcd.xyzs()), 
                                         ONLINE_VOXEL_RADIUS)
-        
+
         self.grasp_node.compute_candidate_grasps(
             self.current_manipuland_pcd,
             pcd_with_background,
@@ -1659,6 +1643,7 @@ class RegraspPlanner(LeafSystem):
             intrinsic_matrix=self._cam_obs_K,
             width_px=self.obs_width_px,
             height_px=self.obs_height_px,
+            display_traj_height_buffer=display_traj_height_buffer,
         )
 
         grasps, grasp_costs = self.grasp_node.get_best_grasps()
@@ -1681,6 +1666,7 @@ class RegraspPlanner(LeafSystem):
                     intrinsic_matrix=self._cam_obs_K,
                     width_px=self.obs_width_px,
                     height_px=self.obs_height_px,
+                    display_traj_height_buffer=display_traj_height_buffer,
                 )
                 new_grasps, new_grasp_costs = self.grasp_node.get_best_grasps()
                 print("num new grasps:", len(new_grasps))
@@ -1709,9 +1695,8 @@ class RegraspPlanner(LeafSystem):
                 continue
             
             self.q_pregraspn = q_goal
-            X_WG_sys_id = RigidTransform(X_WG)
 
-            X_WE = X_WG_sys_id.multiply(X_GE) # E = link 7 frame
+            X_WE = RigidTransform(X_WG).multiply(X_GE) # E = link 7 frame
 
             manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(self.current_manipuland_pcd.xyzs().T))
             manipuland_cloud.paint_uniform_color([0.0, 0.0, 1.0])
@@ -1737,10 +1722,6 @@ class RegraspPlanner(LeafSystem):
                                         self.cci_objects['cci_plant'].getRobotGeometryIds(), 
                                         cci.Voxels(), 
                                         ONLINE_VOXEL_RADIUS)
-            
-        # get end effector pose from grasp pose
-        X_GE = RigidTransform(RotationMatrix(RollPitchYaw(0, 0, 0)), [0, 0, -self.eef_to_gripper_length])
-        X_GgraspGpregrasp = RigidTransform([0, 0.0, -self.pregrasp_dist])
 
         X_G = {
             "pick": X_WE,
@@ -1956,6 +1937,13 @@ class RegraspPlanner(LeafSystem):
 
         self.current_manipuland_pcd = down_sampled_pcd
         print("object pcd got in", time.time()-start, "seconds")
+
+        if mode == PlannerState.SCANNING1:
+            self.voxel_map = VoxelMap(
+                self.current_manipuland_pcd, 
+                ONLINE_VOXEL_RADIUS
+            )
+            self.grasp_node.set_voxel_map(self.voxel_map)
 
         start = time.time()
         # Get table pcd 
