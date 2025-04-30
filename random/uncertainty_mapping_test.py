@@ -92,30 +92,26 @@ X_WG2 = RigidTransform(grasp_pairs[0][1])
 _, _, _, indices_enclosed1 = grasp_node.check_nonempty(current_manipuland_pcd, X_WG1)
 _, _, _, indices_enclosed2 = grasp_node.check_nonempty(current_manipuland_pcd, X_WG2)
 
-X_WO = RigidTransform(RotationMatrix(), np.mean(points, axis=1)) # object in world frame
-X_OG1 = X_WO.inverse() @ X_WG1 # grasp 1 in object frame
-X_OG2 = X_WO.inverse() @ X_WG2 # grasp 2 in object frame
-
 display_center = [0.5, 0.0, 0.5]
 
 # Get transform of camera in display frames
 X_cam = RigidTransform(RotationMatrix(RollPitchYaw(-110 / 180 * np.pi, 0, np.pi/2)), [1.2, 0.0, 0.54])
-X_displays = [RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0, -np.pi/4 * i)), display_center) for i in range(8)]
-X_display_cams = [X_display.inverse() @ X_cam for X_display in X_displays]
+X_display_center = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0, 0)), display_center)
+X_display_cam = X_display_center.inverse() @ X_cam
+X_display_cams = [RigidTransform(RotationMatrix(RollPitchYaw(0, 0, -np.pi/4 * i)), [0, 0, 0]) @ X_display_cam for i in range(8)]
 
 # Get transform of camera in object frames for each display location and grasp
-X_pick1_cams = [X_OG1 @ X_display_cam for X_display_cam in X_display_cams]
-X_pick2_cams = [X_OG2 @ X_display_cam for X_display_cam in X_display_cams]
+X_pick1_cams = [X_WG1 @ X_display_cam for X_display_cam in X_display_cams]
+X_pick2_cams = [X_WG2 @ X_display_cam for X_display_cam in X_display_cams]
 
 # visualize grasp and camera frames
-# Translate pcd to object frame
-points_in_object_frame = X_WO.inverse() @ points
+points_in_object_frame = points
 pcd_in_object_frame = o3d.geometry.PointCloud()
 pcd_in_object_frame.points = o3d.utility.Vector3dVector(points_in_object_frame.T)
 pcd_in_object_frame.paint_uniform_color([1.0, 0.0, 0.0])
 
-gripper_points_in_object_frame1 = X_OG1 @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0]) @ grasp_node.hand_collision_model.to_pcd().T
-gripper_points_in_object_frame2 = X_OG2 @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0]) @ grasp_node.hand_collision_model.to_pcd().T
+gripper_points_in_object_frame1 = X_WG1 @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0]) @ grasp_node.hand_collision_model.to_pcd().T
+gripper_points_in_object_frame2 = X_WG2 @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0]) @ grasp_node.hand_collision_model.to_pcd().T
 
 gripper_pcd_in_object_frame1 = o3d.geometry.PointCloud()
 gripper_pcd_in_object_frame1.points = o3d.utility.Vector3dVector(gripper_points_in_object_frame1.T)
