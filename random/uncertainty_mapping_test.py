@@ -55,7 +55,7 @@ camera_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
 camera_frame.transform(extrinsic_matrix)
 point_cloud = o3d.geometry.PointCloud()
 point_cloud.points = o3d.utility.Vector3dVector(points.T)
-# o3d.visualization.draw_geometries([point_cloud, camera_frame])
+# o3d.visualization.draw_plotly([point_cloud, camera_frame])
 
 current_manipuland_pcd = PointCloud(points.shape[1])
 current_manipuland_pcd.mutable_xyzs()[:] = points
@@ -136,11 +136,11 @@ origin_triad.transform(np.eye(4))
 
 # visualize grasp 1 and camera frames
 grasp1_geometries = [pcd_in_object_frame, gripper_pcd_in_object_frame1, origin_triad] + camera_triads1
-o3d.visualization.draw_geometries(grasp1_geometries)
+o3d.visualization.draw_plotly(grasp1_geometries)
 
 # visualize grasp 2 and camera frames
 grasp2_geometries = [pcd_in_object_frame, gripper_pcd_in_object_frame2, origin_triad] + camera_triads2
-o3d.visualization.draw_geometries(grasp2_geometries)
+o3d.visualization.draw_plotly(grasp2_geometries)
 
 
 voxel_map = VoxelMap(points_in_object_frame, voxel_size, visualize=True)

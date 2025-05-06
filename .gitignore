@@ -1,4 +1,4 @@
-py310_env/
+py310env/
 old_stuff/
 tests/
 tests_realsense/
@@ -9,3 +9,4 @@ env/
 planning/**/__pycache__/
 outputs/
 .venv
+planning/utils/csdecomp_path.py

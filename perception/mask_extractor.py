@@ -41,9 +41,12 @@ class MaskExtractor(LeafSystem):
         self.gripper_mask_ind = gripper_mask_ind
     
     def ExtractMask(self, context, output):
-        label_image = self.get_input_port("label_in").Eval(context)
+        label_image = self.GetInputPort("label_in").Eval(context)
         object_labels = np.unique(label_image)
         masks = [
             np.uint8(np.where(label_image == label, 1, 0)) for label in object_labels
         ]
-        output.SetFrom(masks[self.gripper_mask_ind])
+        if len(masks) <= self.gripper_mask_ind:
+            output.set_value(np.zeros(label_image.shape, dtype=np.uint8))
+        else:
+            output.set_value(masks[self.gripper_mask_ind])

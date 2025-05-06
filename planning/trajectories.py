@@ -205,7 +205,6 @@ def MakeGripperCommandTrajectory(times, traj_type=TrajType.PREDISPLAY, t0=0.0):
     sample_times = [t0]
     positions = []
     for name in names:
-        print(name, times[name])
         if name == "pick_end" or name == "place_end":
             sample_times.append(sample_times[-1] + 0.5)
         elif name == "postpick" or name == "postplace":
@@ -223,8 +222,6 @@ def MakeGripperCommandTrajectory(times, traj_type=TrajType.PREDISPLAY, t0=0.0):
                 positions.append(closed) # choose the same gripper position for buffer time
             positions.append(closed)
 
-    print(sample_times)
-    print(len(sample_times), len(positions))
     t = PiecewisePolynomial.FirstOrderHold(sample_times, np.array(positions).T)
     return t
 

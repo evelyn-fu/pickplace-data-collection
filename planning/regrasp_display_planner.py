@@ -297,6 +297,9 @@ def check_configuration_has_collisions(models_path, com, rot, dims, q):
     builder = RobotDiagramBuilder()
     plant = builder.plant()
     scene_graph = builder.scene_graph()
+    directory_path = os.path.dirname(os.path.abspath(__file__))
+    models_package = os.path.abspath(os.path.join(directory_path, "..", "models", "package.xml"))
+    builder.parser().package_map().AddPackageXml(models_package)
     builder.parser().AddModels(models_path)
     builder.parser().AddModelsFromString(bounding_box_urdf, "urdf")
     diagram = builder.Build()
@@ -408,8 +411,8 @@ for z_offset in np.linspace(0, -0.1, int(0.1/0.005)):
 bin_sides_vox = np.concatenate(bin_sides_components, axis=0).T
 
 # Stage center transforms are used for placing the object onto the workspace after bin picking.
-stage_center0 = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi/2)), [0.5, 0.0, 0.1])
-stage_center90 = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0.0)), [0.5, 0.0, 0.0])
+stage_center0 = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi/2)), [0.4, 0.0, 0.1])
+stage_center90 = RigidTransform(RotationMatrix(RollPitchYaw(np.pi, 0.0, 0.0)), [0.4, 0.0, 0.1])
 
 bin_depth = 0.06
 x_points = np.linspace(corner1[0], corner3[0])
@@ -702,9 +705,12 @@ class RegraspPlanner(LeafSystem):
             ).get_value().start_time_s
             if context.get_time() > traj_q.end_time() + start_time:
                 if not self.sys_id_grasp_only:
+                    # state.get_mutable_abstract_state(
+                    #     int(self._mode_index)
+                    # ).set_value(PlannerState.PLAN_PICK)
                     state.get_mutable_abstract_state(
                         int(self._mode_index)
-                    ).set_value(PlannerState.PLAN_PICK)
+                    ).set_value(PlannerState.SCANNING1)
                 else:
                     state.get_mutable_abstract_state(
                         int(self._mode_index)
@@ -784,7 +790,7 @@ class RegraspPlanner(LeafSystem):
             return
         if mode == PlannerState.GRASP1:
             self.UpdateInGrasp(context, state, PlannerState.GO_HOME1)
-            X_WO = self.GetInputPort("object_pose").Eval(context)
+            X_WO = copy.deepcopy(self.GetInputPort("object_pose").Eval(context))
             self.object_poses.append(X_WO)
             gripper_mask = self.GetInputPort("gripper_mask").Eval(context)
             self.gripper_masks.append(gripper_mask)
@@ -825,7 +831,7 @@ class RegraspPlanner(LeafSystem):
             return
         if mode == PlannerState.GRASP2:
             self.UpdateInGrasp(context, state, PlannerState.GO_HOME2)
-            X_WO = self.GetInputPort("object_pose").Eval(context)
+            X_WO = copy.deepcopy(self.GetInputPort("object_pose").Eval(context))
             self.object_poses.append(X_WO)
             gripper_mask = self.GetInputPort("gripper_mask").Eval(context)
             self.gripper_masks.append(gripper_mask)
@@ -839,6 +845,16 @@ class RegraspPlanner(LeafSystem):
             ).get_value().start_time_s
             if context.get_time() > traj_q.end_time() + start_time:
                 # Add observations to voxel map
+
+                # Downsample to uniformly take 100 samples
+                if len(self.gripper_masks) > 100:
+                    indices = np.linspace(0, len(self.gripper_masks) - 1, 100, dtype=int)
+                    self.gripper_masks = [self.gripper_masks[i] for i in indices]
+                    self.object_poses = [self.object_poses[i] for i in indices]
+                
+
+                print(f'Adding {len(self.gripper_masks)} observations to voxel map')
+                start = time.time()
                 for i in range(len(self.object_poses)):
                     X_WO = self.object_poses[i]
                     gripper_mask = self.gripper_masks[i]
@@ -853,12 +869,17 @@ class RegraspPlanner(LeafSystem):
                         visualize=False,
                         visualize_all=False
                     )
+                print("Voxel map update time: ", time.time()-start)
+                self.voxel_map.visualize()
+                input()
                 
                 # Reset object poses and gripper masks
                 self.object_poses = []
                 self.gripper_masks = []
 
                 confident = self.voxel_map.fully_observed()
+                print("Voxel map confident: ", confident)
+                print(self.voxel_map.stats())
                 if confident:
                     state.get_mutable_abstract_state(
                         int(self._mode_index)
@@ -891,7 +912,7 @@ class RegraspPlanner(LeafSystem):
             return
         if mode == PlannerState.GRASPN:
             self.UpdateInGrasp(context, state, PlannerState.GO_HOMEN)
-            X_WO = self.GetInputPort("object_pose").Eval(context)
+            X_WO = copy.deepcopy(self.GetInputPort("object_pose").Eval(context))
             self.object_poses.append(X_WO)
             gripper_mask = self.GetInputPort("gripper_mask").Eval(context)
             self.gripper_masks.append(gripper_mask)
@@ -905,6 +926,15 @@ class RegraspPlanner(LeafSystem):
             ).get_value().start_time_s
             if context.get_time() > traj_q.end_time() + start_time:
                 # Add observations to voxel map
+                
+                # Downsample to uniformly take 100 samples
+                if len(self.gripper_masks) > 100:
+                    indices = np.linspace(0, len(self.gripper_masks) - 1, 100, dtype=int)
+                    self.gripper_masks = [self.gripper_masks[i] for i in indices]
+                    self.object_poses = [self.object_poses[i] for i in indices]
+
+                print(f'Adding {len(self.gripper_masks)} observations to voxel map')
+                start = time.time()
                 for i in range(len(self.object_poses)):
                     X_WO = self.object_poses[i]
                     gripper_mask = self.gripper_masks[i]
@@ -919,6 +949,9 @@ class RegraspPlanner(LeafSystem):
                         visualize=False,
                         visualize_all=False
                     )
+                print("Voxel map update time: ", time.time()-start)
+                self.voxel_map.visualize()
+                input()
                 
                 # Reset object poses and gripper masks
                 self.object_poses = []
@@ -1051,9 +1084,9 @@ class RegraspPlanner(LeafSystem):
     def PlanBinPick(self, context, state, after_scan_state):
         # Get pcd 
         cloud = self.GetInputPort("cloud_bin").Eval(context)
-        X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[0.017, 0.003, 0.0])
-        transformed_xyzs = X_adjust @ cloud.xyzs()
-        cloud.mutable_xyzs()[:] = transformed_xyzs
+        # X_adjust = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[0.017, 0.003, 0.0])
+        # transformed_xyzs = X_adjust @ cloud.xyzs()
+        # cloud.mutable_xyzs()[:] = transformed_xyzs
         bin_pcd = cloud.Crop(lower_xyz=[-0.03, 0.44, -bin_depth], upper_xyz=[0.145, 0.75, 0.2])
         bin_pcd.EstimateNormals(radius=0.1, num_closest=30)
         bin_pcd.FlipNormalsTowardPoint(self._X_WC_bin.translation())
@@ -1593,25 +1626,25 @@ class RegraspPlanner(LeafSystem):
         start = time.time()
         # Get manipuland pcd 
         cloud0 = self.GetInputPort("cloud_front").Eval(context)
-        X_adjust0 = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[0.005, -0.025, -0.015])
-        transformed_xyzs = X_adjust0 @ cloud0.xyzs()
-        cloud0.mutable_xyzs()[:] = transformed_xyzs
+        # X_adjust0 = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[0.005, -0.025, -0.015])
+        # transformed_xyzs = X_adjust0 @ cloud0.xyzs()
+        # cloud0.mutable_xyzs()[:] = transformed_xyzs
         pcd0 = cloud0.Crop(lower_xyz=[0.23, -0.17, platform_height], upper_xyz=[0.7, 0.17, 0.35])
         pcd0.EstimateNormals(radius=0.1, num_closest=30)
         pcd0.FlipNormalsTowardPoint(self._X_WC0.translation())
 
         cloud1 = self.GetInputPort("cloud_back_left").Eval(context)
-        X_adjust1 = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[0.00, 0.0, -0.015])
-        transformed_xyzs = X_adjust1 @ cloud1.xyzs()
-        cloud1.mutable_xyzs()[:] = transformed_xyzs
+        # X_adjust1 = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[0.00, 0.0, -0.015])
+        # transformed_xyzs = X_adjust1 @ cloud1.xyzs()
+        # cloud1.mutable_xyzs()[:] = transformed_xyzs
         pcd1 = cloud1.Crop(lower_xyz=[0.23, -0.17, platform_height], upper_xyz=[0.7, 0.17, 0.35])
         pcd1.EstimateNormals(radius=0.1, num_closest=30)
         pcd1.FlipNormalsTowardPoint(self._X_WC2.translation()) # I screwed up the cameras somewhere so the left anf right are flipped, need to fix
 
         cloud2 = self.GetInputPort("cloud_back_right").Eval(context)
-        X_adjust2 = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[0.03, 0.005, 0.005])
-        transformed_xyzs = X_adjust2 @ cloud2.xyzs()
-        cloud2.mutable_xyzs()[:] = transformed_xyzs
+        # X_adjust2 = RigidTransform(RotationMatrix(RollPitchYaw(0.0, 0.0, 0.0)),[0.03, 0.005, 0.005])
+        # transformed_xyzs = X_adjust2 @ cloud2.xyzs()
+        # cloud2.mutable_xyzs()[:] = transformed_xyzs
         pcd2 = cloud2.Crop(lower_xyz=[0.23, -0.17, platform_height], upper_xyz=[0.7, 0.17, 0.35])
         pcd2.EstimateNormals(radius=0.1, num_closest=30)
         pcd2.FlipNormalsTowardPoint(self._X_WC1.translation())
@@ -1748,30 +1781,31 @@ class RegraspPlanner(LeafSystem):
 
         if mode == PlannerState.SCANNING1:
             self.voxel_map = VoxelMap(
-                self.current_manipuland_pcd, 
-                ONLINE_VOXEL_RADIUS
+                self.current_manipuland_pcd.xyzs(), 
+                ONLINE_VOXEL_RADIUS,
+                visualize=True
             )
             self.grasp_node.set_voxel_map(self.voxel_map)
 
         start = time.time()
         # Get table pcd 
         cloud0 = self.GetInputPort("cloud_front").Eval(context)
-        transformed_xyzs = X_adjust0 @ cloud0.xyzs()
-        cloud0.mutable_xyzs()[:] = transformed_xyzs
+        # transformed_xyzs = X_adjust0 @ cloud0.xyzs()
+        # cloud0.mutable_xyzs()[:] = transformed_xyzs
         pcd0 = cloud0.Crop(lower_xyz=[0.1, -0.3, 0.0], upper_xyz=[0.85, 0.3, 0.07]).VoxelizedDownSample(voxel_size=0.01)
         pcd0.EstimateNormals(radius=0.1, num_closest=30)
         pcd0.FlipNormalsTowardPoint(self._X_WC0.translation())
 
         cloud1 = self.GetInputPort("cloud_back_left").Eval(context)
-        transformed_xyzs = X_adjust1 @ cloud1.xyzs()
-        cloud1.mutable_xyzs()[:] = transformed_xyzs
+        # transformed_xyzs = X_adjust1 @ cloud1.xyzs()
+        # cloud1.mutable_xyzs()[:] = transformed_xyzs
         pcd1 = cloud1.Crop(lower_xyz=[0.1, -0.3, 0.0], upper_xyz=[0.85, 0.3, 0.07]).VoxelizedDownSample(voxel_size=0.01)
         pcd1.EstimateNormals(radius=0.1, num_closest=30)
         pcd1.FlipNormalsTowardPoint(self._X_WC2.translation())
 
         cloud2 = self.GetInputPort("cloud_back_right").Eval(context)
-        transformed_xyzs = X_adjust2 @ cloud2.xyzs()
-        cloud2.mutable_xyzs()[:] = transformed_xyzs
+        # transformed_xyzs = X_adjust2 @ cloud2.xyzs()
+        # cloud2.mutable_xyzs()[:] = transformed_xyzs
         pcd2 = cloud2.Crop(lower_xyz=[0.1, -0.3, 0.0], upper_xyz=[0.85, 0.3, 0.07]).VoxelizedDownSample(voxel_size=0.01)
         pcd2.EstimateNormals(radius=0.1, num_closest=30)
         pcd2.FlipNormalsTowardPoint(self._X_WC1.translation())

@@ -12,6 +12,8 @@ from pydrake.all import (
     Parser,
     Concatenate
 )
+from scipy.spatial import ConvexHull
+from matplotlib.path import Path
 
 class VoxelMap:
     def __init__(self, points: np.ndarray, voxel_size: float, confidence_threshold: float = 0.9, fully_observed_threshold=0.95, visualize=False):
@@ -26,20 +28,62 @@ class VoxelMap:
             raise ValueError("Input points must be a 3xn array.")
 
         self.voxel_size = voxel_size
-        self.confidences = np.zeros(points.shape[1])
         self.confidence_threshold = confidence_threshold
         self.fully_observed_threshold = fully_observed_threshold
 
-        # Compute the center of the points
-        self.center = np.mean(points, axis=1)
-        print(f"Voxel map center: {self.center}")
+        o3d_pcd_no_bottom = o3d.geometry.PointCloud(
+            o3d.utility.Vector3dVector(points.T)
+        )
+
+        # Estimate horizontal plane at lowest Z (ground/table plane)
+        min_z = np.min(points[2, :])
+
+        #Find points just above the lowest plane (likely near the object bottom)
+        height_above_plane = points[2, :] - min_z
+        bottom_mask = height_above_plane < 0.005
+        bottom_edge_points = points[:, bottom_mask]
+        
+        projected_points = bottom_edge_points.copy()
+        projected_points[2, :] = min_z  # flatten Z
+
+        # Create convex hull of projected points (2D XY)
+        hull = ConvexHull(projected_points[:2, :].T)
+        hull_points_2d = projected_points[:2, hull.vertices].T
+
+        # Create a 2D path from the convex hull polygon
+        polygon = Path(hull_points_2d)
+
+        # Generate a grid of XY points that covers the polygon bounding box
+        x_min, y_min = np.min(hull_points_2d, axis=0)
+        x_max, y_max = np.max(hull_points_2d, axis=0)
+        x_vals = np.arange(x_min, x_max, self.voxel_size)
+        y_vals = np.arange(y_min, y_max, self.voxel_size)
+        xx, yy = np.meshgrid(x_vals, y_vals)
+        grid_points_2d = np.c_[xx.ravel(), yy.ravel()]
+
+        # Filter points inside the convex hull polygon
+        inside_mask = polygon.contains_points(grid_points_2d)
+        inside_points_2d = grid_points_2d[inside_mask]
+
+        # Set Z = min_z to create the 3D base points
+        filled_base_points = np.column_stack((inside_points_2d, np.full(len(inside_points_2d), min_z)))
+
+        # 5. Create Open3D point cloud
+        filled_base_cloud = o3d.geometry.PointCloud()
+        filled_base_cloud.points = o3d.utility.Vector3dVector(filled_base_points)
+
+        # 6. Merge with original point cloud
+        o3d_pcd = o3d_pcd_no_bottom + filled_base_cloud
+        o3d_pcd.voxel_down_sample(voxel_size=voxel_size)
 
         # Convert points to voxel indices
-        self.points = points
+        self.points = np.asarray(o3d_pcd.points).T
+        self.confidences = np.zeros(self.points.shape[1])
 
-        o3d_pcd = o3d.geometry.PointCloud(
-            o3d.utility.Vector3dVector(self.points.T)
-        )
+        # Compute the center of the points
+        self.center = np.mean(self.points, axis=1)
+        print(f"Voxel map center: {self.center}")
+
         o3d_pcd.estimate_normals()
         o3d_pcd.orient_normals_towards_camera_location(o3d_pcd.get_center())
         o3d_pcd.normals = o3d.utility.Vector3dVector(-np.asarray(o3d_pcd.normals))
@@ -54,7 +98,7 @@ class VoxelMap:
 
         if visualize:
             # visualize scene
-            o3d.visualization.draw_geometries([triangle_mesh, o3d_pcd], point_show_normal=True)
+            o3d.visualization.draw_plotly([triangle_mesh, o3d_pcd])
 
         print(f"Initialized voxel map with {self.points.shape[1]} voxels.")
 
@@ -155,7 +199,7 @@ class VoxelMap:
                 line_set = o3d.geometry.LineSet()
                 line_set.points = o3d.utility.Vector3dVector(np.array([hit_ray_origins[idx].numpy(), (hit_ray_origins[idx] + hit_ray_dirs[idx] * hit_t[idx]).numpy()]))
                 line_set.lines = o3d.utility.Vector2iVector([[0, 1]])
-                o3d.visualization.draw_geometries([line_set, point_cloud, hit_point_cloud])
+                o3d.visualization.draw_plotly([line_set, point_cloud, hit_point_cloud])
         
         self.confidences = np.clip(self.confidences, 0, 1)
 
@@ -170,7 +214,7 @@ class VoxelMap:
             point_cloud = o3d.geometry.PointCloud()
             point_cloud.points = o3d.utility.Vector3dVector(self.points.T)
             point_cloud.paint_uniform_color([0.2, 0.2, 0.2])  # Gray color for all points
-            o3d.visualization.draw_geometries([line_set, point_cloud, hit_point_cloud])
+            o3d.visualization.draw_plotly([line_set, point_cloud, hit_point_cloud])
     
     def get_improvement_from_observations(
             self, 
@@ -269,7 +313,7 @@ class VoxelMap:
                     line_set = o3d.geometry.LineSet()
                     line_set.points = o3d.utility.Vector3dVector(np.array([hit_ray_origins[idx].numpy(), (hit_ray_origins[idx] + hit_ray_dirs[idx] * hit_t[idx]).numpy()]))
                     line_set.lines = o3d.utility.Vector2iVector([[0, 1]])
-                    o3d.visualization.draw_geometries([line_set, point_cloud, hit_point_cloud])
+                    o3d.visualization.draw_plotly([line_set, point_cloud, hit_point_cloud])
         
         new_confidences = np.clip(new_confidences, 0, 1)
         confidence_improvement = np.mean(new_confidences) - np.mean(self.confidences)
@@ -285,7 +329,7 @@ class VoxelMap:
             point_cloud = o3d.geometry.PointCloud()
             point_cloud.points = o3d.utility.Vector3dVector(self.points.T)
             point_cloud.paint_uniform_color([0.2, 0.2, 0.2])  # Gray color for all points
-            o3d.visualization.draw_geometries([line_set, point_cloud, hit_point_cloud])
+            o3d.visualization.draw_plotly([line_set, point_cloud, hit_point_cloud])
 
         return confidence_improvement
 
@@ -307,7 +351,7 @@ class VoxelMap:
             observation_direction.transform(X_cam)
             geometries.append(observation_direction)
 
-        o3d.visualization.draw_geometries(geometries)
+        o3d.visualization.draw_plotly(geometries)
 
     def fully_observed(self):
         """

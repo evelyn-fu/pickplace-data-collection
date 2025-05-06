@@ -1,1 +1,1 @@
-CSDECOMP_PATH = "/home/real2sim/src/csdecomp" # replace with your path
+CSDECOMP_PATH = "/home/evelyn/src/csdecomp" # replace with your path

@@ -30,10 +30,20 @@ from enum import Enum
 import math
 import random
 from perception.pcd_util import crop_connected_points
-from planning.regrasp_display_planner import get_yaw_display_traj
 
 from .frame_placer_app import FramePlacerApp
 lock = threading.Lock()
+
+# copied from regrasp_display_planner.py to avoid circular imports, should make sure to match
+def get_yaw_display_traj(scanning_traj_height=0.50, scanning_traj_robot_to_workspace_dist = 0.5) -> list[RigidTransform]:
+    yaw_display_traj = [
+        RigidTransform(
+            RotationMatrix(RollPitchYaw(np.pi, 0.0, -np.pi/4 * i)),
+            [scanning_traj_robot_to_workspace_dist, 0.0, scanning_traj_height]
+        ) for i in range(8)
+    ]
+    
+    return yaw_display_traj
 
 PROCESSES = multiprocessing.cpu_count()
 
@@ -851,7 +861,7 @@ class GraspListener():
             origin_triad.transform(np.eye(4))
 
             grasp_geometries = [pcd, gripper_pcd, origin_triad] + camera_triads
-            o3d.visualization.draw_geometries(grasp_geometries)
+            o3d.visualization.draw_plotly(grasp_geometries)
         
         confidence_improvement = self.voxel_map.get_improvement_from_observations(
             intrinsic_matrix, 
@@ -1824,6 +1834,7 @@ class GraspListener():
                                                     height_px,
                                                     indices_enclosed,
                                                     display_traj_height_buffer,
+                                                    visualize=True
                                                 )
                                         
                                         if cost < best_cost:

@@ -204,7 +204,7 @@ class ObjectPoseExtractor(LeafSystem):
     
     def GetBodyPose(self, context, output):
         X_WO = self.GetInputPort("body_poses").Eval(context)[int(self.object_ind)]
-        output.SetFrom(X_WO)
+        output.set_value(X_WO)
 
 def start_scenario(
         dirstr = "temp", 
@@ -274,8 +274,6 @@ def start_scenario(
             builder.Connect(station.GetOutputPort("camera0.depth_image"), img_saver.GetInputPort("depth_in"))
             builder.Connect(station.GetOutputPort("body_poses"), img_saver.GetInputPort("body_poses"))
 
-            mask_extractor = builder.AddSystem(MaskExtractor(gripper_mask_ind=1))
-            builder.Connect(station.GetOutputPort("camera0.label_image"), mask_extractor.GetInputPort("label_in"))
 
     sys_id_saver = builder.AddSystem(SystemIDDataSaver(output_dir=os.path.join(dirstr, "system_id_data")))
 
@@ -297,6 +295,9 @@ def start_scenario(
         builder.Connect(station.GetOutputPort("camera1.depth_image"), camera1_pcd.GetInputPort("depth_image"))
         builder.Connect(station.GetOutputPort("camera2.depth_image"), camera2_pcd.GetInputPort("depth_image"))
         builder.Connect(station.GetOutputPort("camera_bin.depth_image"), camera_bin_pcd.GetInputPort("depth_image"))
+
+        mask_extractor = builder.AddSystem(MaskExtractor(gripper_mask_ind=1))
+        builder.Connect(station.GetOutputPort("camera0.label_image"), mask_extractor.GetInputPort("label_in"))
 
     else:
         camera0_pcd = builder.AddSystem(DepthImageToPointCloud(CameraInfo(848, 480, 600.165, 600.165, 429.152, 232.822)))
@@ -368,7 +369,7 @@ def start_scenario(
         # Back Left camera
         x_back_left_camera = RigidTransform(
             RotationMatrix(RollPitchYaw(-102.739428 / 180. * np.pi, -3.69469624 / 180. * np.pi, -149.1420755 / 180. * np.pi)),
-            [-0.0533544,  1.00955,  0.449207]
+            [-0.0533544,  0.90955,  0.449207]
         )
 
         # Bin camera
@@ -431,8 +432,8 @@ def start_scenario(
                 X_WC_bin=x_bin_camera,
                 X_WC_obs=x_front_camera,
                 cam_obs_K=K,
-                obs_width_px=camera0.default_color_render_camera().core().instrinsics().width(),
-                obs_height_px=camera0.default_color_render_camera().core().instrinsics().height(), 
+                obs_width_px=camera0.default_color_render_camera().core().intrinsics().width(),
+                obs_height_px=camera0.default_color_render_camera().core().intrinsics().height(), 
                 meshcat=meshcat,
                 dirstr=dirstr,
                 time_horizon=time_horizon,
@@ -444,11 +445,15 @@ def start_scenario(
     
     # for updating object surface uncertainty map (only for sim)
     if not use_hardware:
-        builder.Connect(mask_extractor.GetOutputPort("mask"), planner.GetInputPort("gripper_mask"))
+        builder.Connect(mask_extractor.GetOutputPort("mask_out"), planner.GetInputPort("gripper_mask"))
 
     if not use_hardware:
         object_pose_extractor = builder.AddSystem(
             ObjectPoseExtractor(object_ind=plant.GetBodyByName("base_link_mustard").index())
+        )
+        builder.Connect(
+            station.GetOutputPort("body_poses"),
+            object_pose_extractor.GetInputPort("body_poses"),
         )
         builder.Connect(
             object_pose_extractor.GetOutputPort("object_pose"),
