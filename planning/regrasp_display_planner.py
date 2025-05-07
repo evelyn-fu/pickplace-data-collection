@@ -792,7 +792,7 @@ class RegraspPlanner(LeafSystem):
             self.UpdateInGrasp(context, state, PlannerState.GO_HOME1)
             X_WO = copy.deepcopy(self.GetInputPort("object_pose").Eval(context))
             self.object_poses.append(X_WO)
-            gripper_mask = self.GetInputPort("gripper_mask").Eval(context)
+            gripper_mask = copy.deepcopy(self.GetInputPort("gripper_mask").Eval(context))
             self.gripper_masks.append(gripper_mask)
             return
         if mode == PlannerState.GO_HOME1:
@@ -833,7 +833,7 @@ class RegraspPlanner(LeafSystem):
             self.UpdateInGrasp(context, state, PlannerState.GO_HOME2)
             X_WO = copy.deepcopy(self.GetInputPort("object_pose").Eval(context))
             self.object_poses.append(X_WO)
-            gripper_mask = self.GetInputPort("gripper_mask").Eval(context)
+            gripper_mask = copy.deepcopy(self.GetInputPort("gripper_mask").Eval(context))
             self.gripper_masks.append(gripper_mask)
             return
         if mode == PlannerState.GO_HOME2:
@@ -856,14 +856,19 @@ class RegraspPlanner(LeafSystem):
                 print(f'Adding {len(self.gripper_masks)} observations to voxel map')
                 start = time.time()
                 for i in range(len(self.object_poses)):
-                    X_WO = self.object_poses[i]
+                    X_W0O1 = self.object_poses[i] # New object pose in original world frame
+                    X_W0O0 = self.voxel_map.X_WO0 # original object pose in original world frame
                     gripper_mask = self.gripper_masks[i]
 
-                    X_OC = X_WO.inverse() @ self._X_WC_obs
+                    # new world frame such that new object pose is at origin
+                    X_W0W1 = X_W0O1.inverse() @ X_W0O0
+
+                    # camera frame in new world frame
+                    X_W1C = X_W0W1.inverse() @ self._X_WC_obs
 
                     self.voxel_map.update_with_observation(
                         self._cam_obs_K, 
-                        X_OC.GetAsMatrix4(), 
+                        X_W1C.GetAsMatrix4(), 
                         self.obs_width_px, self.obs_height_px, 
                         occlusion_mask=gripper_mask, 
                         visualize=False,
@@ -936,14 +941,19 @@ class RegraspPlanner(LeafSystem):
                 print(f'Adding {len(self.gripper_masks)} observations to voxel map')
                 start = time.time()
                 for i in range(len(self.object_poses)):
-                    X_WO = self.object_poses[i]
+                    X_W0O1 = self.object_poses[i] # New object pose in original world frame
+                    X_W0O0 = self.voxel_map.X_WO0 # original object pose in original world frame
                     gripper_mask = self.gripper_masks[i]
 
-                    X_OC = X_WO.inverse() @ self._X_WC_obs
+                    # new world frame such that new object pose is at origin
+                    X_W0W1 = X_W0O1.inverse() @ X_W0O0
+
+                    # camera frame in new world frame
+                    X_W1C = X_W0W1.inverse() @ self._X_WC_obs
 
                     self.voxel_map.update_with_observation(
                         self._cam_obs_K, 
-                        X_OC.GetAsMatrix4(), 
+                        X_W1C.GetAsMatrix4(), 
                         self.obs_width_px, self.obs_height_px, 
                         occlusion_mask=gripper_mask, 
                         visualize=False,
@@ -1484,7 +1494,7 @@ class RegraspPlanner(LeafSystem):
             self.current_manipuland_pcd,
             pcd_with_background,
             candidate_num=1,
-            num_samples=30,
+            num_samples=5,
             random_seed=np.random.randint(1000),
             grasp_type=GraspType.ADDITIONAL,
             split_ratio_threshold=0.15,
@@ -1492,6 +1502,7 @@ class RegraspPlanner(LeafSystem):
             is_manual=self.is_manual,
             use_extra_buffer=False,
             intrinsic_matrix=self._cam_obs_K,
+            camera_extrinsic=self._X_WC_obs.GetAsMatrix4(),
             width_px=self.obs_width_px,
             height_px=self.obs_height_px,
             display_traj_height_buffer=display_traj_height_buffer,
@@ -1507,7 +1518,7 @@ class RegraspPlanner(LeafSystem):
                     self.current_manipuland_pcd,
                     pcd_with_background,
                     candidate_num=1,
-                    num_samples=30,
+                    num_samples=3,
                     random_seed=np.random.randint(1000),
                     grasp_type=GraspType.ADDITIONAL,
                     split_ratio_threshold=0.15,
@@ -1515,6 +1526,7 @@ class RegraspPlanner(LeafSystem):
                     is_manual=self.is_manual,
                     use_extra_buffer=False,
                     intrinsic_matrix=self._cam_obs_K,
+                    camera_extrinsic=self._X_WC_obs.GetAsMatrix4(),
                     width_px=self.obs_width_px,
                     height_px=self.obs_height_px,
                     display_traj_height_buffer=display_traj_height_buffer,
@@ -1779,11 +1791,12 @@ class RegraspPlanner(LeafSystem):
         self.current_manipuland_pcd = down_sampled_pcd
         print("object pcd got in", time.time()-start, "seconds")
 
-        if mode == PlannerState.SCANNING1:
+        if mode == PlannerState.SCANNING1 or mode == PlannerState.SCANNINGN:
             self.voxel_map = VoxelMap(
+                copy.deepcopy(self.GetInputPort("object_pose").Eval(context)),
                 self.current_manipuland_pcd.xyzs(), 
                 ONLINE_VOXEL_RADIUS,
-                visualize=True
+                visualize=False
             )
             self.grasp_node.set_voxel_map(self.voxel_map)
 

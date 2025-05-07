@@ -86,6 +86,12 @@ directives:
         rotation: !Rpy { deg: [0, 0, 0.0]}
 
 - add_frame:
+    name: camera_obs_staging
+    X_PF:
+        base_frame: world
+        rotation: !Rpy { deg: [0, 0, 0.0]}
+
+- add_frame:
     name: camera0_origin
     X_PF:
         base_frame: camera0_staging
@@ -97,14 +103,14 @@ directives:
     X_PF:
         base_frame: camera1_staging
         rotation: !Rpy { deg: [-105.81290946,    2.14985993,  -43.7254432]}
-        translation: [-0.110748, -0.931772,  0.388191]
+        translation: [0.0, -0.831772,  0.388191]
 
 - add_frame:
     name: camera2_origin
     X_PF:
         base_frame: camera2_staging
         rotation: !Rpy { deg: [-102.739428,   -3.69469624, -149.1420755]}
-        translation: [-0.0533544,  0.90955,  0.449207]
+        translation: [0.0,  0.80955,  0.449207]
 
 - add_frame:
     name: camera_bin_origin
@@ -113,37 +119,52 @@ directives:
         rotation: !Rpy { deg: [-164.69831287,  -35.83297034,  -99.44115857]}
         translation: [-0.0574518,  0.874365 ,  0.332985]
 
-- add_model:
-    name: camera_front
-    file: package://manipulation/camera_box.sdf
+- add_frame:
+    name: camera_obs_origin
+    X_PF:
+        base_frame: camera_obs_staging
+        rotation: !Rpy { deg: [-115.29508676,   -0.49652966,   87.69325379]}
+        translation: [1.00847, -0.0314675, 0.42864]
 
-- add_model:
-    name: camera_right
-    file: package://manipulation/camera_box.sdf
+# - add_model:
+#     name: camera_front
+#     file: package://manipulation/camera_box.sdf
 
-- add_model:
-    name: camera_left
-    file: package://manipulation/camera_box.sdf
+# - add_model:
+#     name: camera_right
+#     file: package://manipulation/camera_box.sdf
+
+# - add_model:
+#     name: camera_left
+#     file: package://manipulation/camera_box.sdf
 
 # - add_model:
 #     name: camera_bin
 #     file: package://manipulation/camera_box.sdf
 
-- add_weld:
-    parent: camera0_origin
-    child: camera_front::base
+- add_model:
+    name: camera_obs
+    file: package://manipulation/camera_box.sdf
 
-- add_weld:
-    parent: camera1_origin
-    child: camera_right::base
+# - add_weld:
+#     parent: camera0_origin
+#     child: camera_front::base
 
-- add_weld:
-    parent: camera2_origin
-    child: camera_left::base
+# - add_weld:
+#     parent: camera1_origin
+#     child: camera_right::base
+
+# - add_weld:
+#     parent: camera2_origin
+#     child: camera_left::base
 
 # - add_weld:
 #     parent: camera_bin_origin
 #     child: camera_bin::base
+
+- add_weld:
+    parent: camera_obs_origin
+    child: camera_obs::base
 
 cameras:
     camera_front:
@@ -152,21 +173,21 @@ cameras:
         width: 1920
         height: 1440
         X_PB:
-            base_frame: camera_front::base
+            base_frame: camera0_origin
     camera_right:
         name: camera1
         depth: True
         width: 1920
         height: 1440
         X_PB:
-            base_frame: camera_right::base
+            base_frame: camera1_origin
     camera_left:
         name: camera2
         depth: True
         width: 1920
         height: 1440
         X_PB:
-            base_frame: camera_left::base
+            base_frame: camera2_origin
     camera_bin:
         name: camera_bin
         depth: True
@@ -174,6 +195,13 @@ cameras:
         height: 1440
         X_PB:
             base_frame: camera_bin_origin
+    camera_obs:
+        name: camera_obs
+        depth: True
+        width: 1920
+        height: 1440
+        X_PB:
+            base_frame: camera_obs_origin
 
 plant_config:
     time_step: 0.001

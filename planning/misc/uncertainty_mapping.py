@@ -16,7 +16,7 @@ from scipy.spatial import ConvexHull
 from matplotlib.path import Path
 
 class VoxelMap:
-    def __init__(self, points: np.ndarray, voxel_size: float, confidence_threshold: float = 0.9, fully_observed_threshold=0.95, visualize=False):
+    def __init__(self, X_WO0: RigidTransform, points: np.ndarray, voxel_size: float, confidence_threshold: float = 0.9, fully_observed_threshold=0.95, visualize=False):
         """
         Initializes a voxel map with signed distance values and confidence.
 
@@ -30,6 +30,7 @@ class VoxelMap:
         self.voxel_size = voxel_size
         self.confidence_threshold = confidence_threshold
         self.fully_observed_threshold = fully_observed_threshold
+        self.X_WO0 = X_WO0
 
         o3d_pcd_no_bottom = o3d.geometry.PointCloud(
             o3d.utility.Vector3dVector(points.T)
@@ -204,17 +205,25 @@ class VoxelMap:
         self.confidences = np.clip(self.confidences, 0, 1)
 
         if visualize:
-            line_set = o3d.geometry.LineSet()
-            line_set.points = o3d.utility.Vector3dVector(np.array(points))
-            line_set.lines = o3d.utility.Vector2iVector(lines)
-            line_set.paint_uniform_color([0, 0, 1])
+            viz_geoms = []
+            cam_triad = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
+            cam_triad.transform(extrinsic_matrix)
+            viz_geoms.append(cam_triad)
+            if len(points) > 0: # prevent error if no points
+                line_set = o3d.geometry.LineSet()
+                line_set.points = o3d.utility.Vector3dVector(np.array(points))
+                line_set.lines = o3d.utility.Vector2iVector(lines)
+                line_set.paint_uniform_color([0, 0, 1])
+                viz_geoms.append(line_set)
             hit_point_cloud = o3d.geometry.PointCloud()
             hit_point_cloud.points = o3d.utility.Vector3dVector(self.points[:, list(hit_points_viz)].T)
             hit_point_cloud.paint_uniform_color([1, 0, 0])  # Red color for hit points  
+            viz_geoms.append(hit_point_cloud)
             point_cloud = o3d.geometry.PointCloud()
             point_cloud.points = o3d.utility.Vector3dVector(self.points.T)
             point_cloud.paint_uniform_color([0.2, 0.2, 0.2])  # Gray color for all points
-            o3d.visualization.draw_plotly([line_set, point_cloud, hit_point_cloud])
+            viz_geoms.append(point_cloud)
+            o3d.visualization.draw_plotly(viz_geoms)
     
     def get_improvement_from_observations(
             self, 
@@ -316,20 +325,25 @@ class VoxelMap:
                     o3d.visualization.draw_plotly([line_set, point_cloud, hit_point_cloud])
         
         new_confidences = np.clip(new_confidences, 0, 1)
-        confidence_improvement = np.mean(new_confidences) - np.mean(self.confidences)
+        confidence_improvement = np.sum(new_confidences > self.confidence_threshold) / len(new_confidences) - self.percent_observations_to_go()
 
-        if visualize:
-            line_set = o3d.geometry.LineSet()
-            line_set.points = o3d.utility.Vector3dVector(np.array(points))
-            line_set.lines = o3d.utility.Vector2iVector(lines)
-            line_set.paint_uniform_color([0, 0, 1])
+        if visualize: # prevent error if no points
+            viz_geoms = []
+            if len(points) > 0:
+                line_set = o3d.geometry.LineSet()
+                line_set.points = o3d.utility.Vector3dVector(np.array(points))
+                line_set.lines = o3d.utility.Vector2iVector(lines)
+                line_set.paint_uniform_color([0, 0, 1])
+                viz_geoms.append(line_set)
             hit_point_cloud = o3d.geometry.PointCloud()
             hit_point_cloud.points = o3d.utility.Vector3dVector(self.points[:, list(hit_points_viz)].T)
             hit_point_cloud.paint_uniform_color([1, 0, 0])  # Red color for hit points  
+            viz_geoms.append(hit_point_cloud)
             point_cloud = o3d.geometry.PointCloud()
             point_cloud.points = o3d.utility.Vector3dVector(self.points.T)
             point_cloud.paint_uniform_color([0.2, 0.2, 0.2])  # Gray color for all points
-            o3d.visualization.draw_plotly([line_set, point_cloud, hit_point_cloud])
+            viz_geoms.append(point_cloud)
+            o3d.visualization.draw_plotly(viz_geoms)
 
         return confidence_improvement
 
@@ -358,6 +372,12 @@ class VoxelMap:
         Returns True if the map is fully observed
         """
         return np.sum(self.confidences > self.confidence_threshold) / len(self.confidences) >= self.fully_observed_threshold
+    
+    def percent_observations_to_go(self):
+        """
+        Returns True if the map is fully observed
+        """
+        return np.sum(self.confidences > self.confidence_threshold) / len(self.confidences) - self.fully_observed_threshold
     
     def stats(self):
         """

@@ -818,8 +818,9 @@ class GraspListener():
     def compute_costs_voxel_map_coverage(
             self,
             X_WG: RigidTransform,
-            pcd_points: np.ndarray, # X_WP, Shape (3, N)
+            pcd_points: np.ndarray, # X_WP, Shape (N, 3)
             intrinsic_matrix: np.ndarray,
+            camera_extrinsic: np.ndarray,
             width_px: int, 
             height_px: int,
             indices_enclosed: np.ndarray,
@@ -830,39 +831,45 @@ class GraspListener():
         X_GE = RigidTransform(RotationMatrix(RollPitchYaw(0, 0, 0)), [0, 0, -self.eef_to_gripper_length])
         X_WE = RigidTransform(X_WG).multiply(X_GE)
         X_EW = X_WE.inverse()
-        manipuland_cloud_points_link7_frame = X_EW @ pcd_points # X_EP, Shape (3, N)
-        manipuland_cloud_points_link7_frame = manipuland_cloud_points_link7_frame.T # Shape (N,3)
+        manipuland_cloud_points_link7_frame = X_EW.multiply(pcd_points.T) # X_EP
 
         # The link 7 z-axis points towards the gripper.
-        length = np.max(manipuland_cloud_points_link7_frame, axis=0)[2]
+        height = max(np.max(manipuland_cloud_points_link7_frame, axis=0)[2] + display_traj_height_buffer, 0.35)
 
-        X_display_cams = get_yaw_display_traj(scanning_traj_height=length)
+        X_displays = get_yaw_display_traj(scanning_traj_height=height)
+
+        X_cam = RigidTransform(camera_extrinsic)
+        X_display_cams = [X_display.inverse() @ X_cam for X_display in X_displays]
 
         X_G_cams = [X_WG @ X_display_cam for X_display_cam in X_display_cams]
 
         if visualize:
             pcd = o3d.geometry.PointCloud()
-            pcd.points = o3d.utility.Vector3dVector(pcd_points.T)
+            pcd.points = o3d.utility.Vector3dVector(pcd_points)
             pcd.paint_uniform_color([1.0, 0.0, 0.0])
 
-            gripper_points = X_WG @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0]) @ self.hand_collision_model.to_pcd().T
+            gripper_xyzs = self.hand_collision_model.to_pcd()
 
-            gripper_pcd = o3d.geometry.PointCloud()
-            gripper_pcd.points = o3d.utility.Vector3dVector(gripper_points.T)
-            gripper_pcd.paint_uniform_color([0.0, 1.0, 0.0])
+            gripper_cloud = o3d.geometry.PointCloud(
+                            o3d.utility.Vector3dVector(gripper_xyzs)
+                        ).voxel_down_sample(0.005).transform(
+                            (X_WG @ RigidTransform(RollPitchYaw(np.pi/2, 0, np.pi/2),[0,0,0])
+                        ).GetAsMatrix4())
+            gripper_cloud.paint_uniform_color([0.0, 1.0, 0.0])
 
             camera_triads = []
             for i in range(8):
-                camera_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
-                camera_frame.transform(X_G_cams[i].GetAsMatrix4())
-                camera_triads.append(camera_frame)
+                camera_triads.append(self.make_triad_line_set(X_G_cams[i].GetAsMatrix4()))
 
-            origin_triad = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
-            origin_triad.transform(np.eye(4))
+            origin_triad = self.make_triad_line_set(np.eye(4))
 
-            grasp_geometries = [pcd, gripper_pcd, origin_triad] + camera_triads
+            grasp_geometries = [pcd, gripper_cloud, origin_triad] + camera_triads
             o3d.visualization.draw_plotly(grasp_geometries)
         
+        # scale width and height down for speed
+        width_px //= 2
+        height_px //= 2
+
         confidence_improvement = self.voxel_map.get_improvement_from_observations(
             intrinsic_matrix, 
             [X_G_cams[i].GetAsMatrix4() for i in range(8)], 
@@ -873,7 +880,20 @@ class GraspListener():
             visualize_all=False
         )
 
-        return -confidence_improvement
+        confidence_to_go = self.voxel_map.percent_observations_to_go()
+
+        confidence_improvement_cost = 1e3 if confidence_improvement < 0.5 * confidence_to_go else -confidence_improvement
+
+        cost_dict = {
+            "confidence_improvement_cost": 100 * confidence_improvement_cost,
+        }
+
+        considered_costs = [
+            cost_dict["confidence_improvement_cost"],
+        ]
+        cost = sum(considered_costs)
+
+        return cost, cost_dict
 
 
     def compute_costs_batch(
@@ -1299,7 +1319,7 @@ class GraspListener():
         line_set = o3d.geometry.LineSet()
         line_set.points = o3d.utility.Vector3dVector(hand_anchor_points)
         line_set.lines = o3d.utility.Vector2iVector(line_index)
-        line_set.colors = o3d.utility.Vector3dVector([(1,0,0), (0,1,0), (0,0,1)])
+        line_set.colors = o3d.utility.Vector3dVector([[1,0,0],[0,1,0], [0,0,1]])
         line_set.transform(pose)
         return line_set
 
@@ -1345,6 +1365,7 @@ class GraspListener():
 
         # For GraspType.ADDITIONAL only
         intrinsic_matrix=None,
+        camera_extrinsic=None,
         width_px=None, 
         height_px=None,
         display_traj_height_buffer=None,
@@ -1815,26 +1836,13 @@ class GraspListener():
                                                     proportion_enclosed,
                                                     pcd=flattened_cloud
                                                 )
-                                        elif grasp_type == GraspType.STABLE:
+                                        elif grasp_type == GraspType.STABLE or grasp_type == GraspType.ADDITIONAL:
                                             cost, cost_dict = self.compute_costs_stable(
                                                     X_WPnew, 
                                                     within_box_pt_normals, 
                                                     split_ratio,
                                                     proportion_enclosed,
                                                     pcd_points.shape[0]
-                                                )
-                                        elif grasp_type == GraspType.ADDITIONAL:
-                                            if intrinsic_matrix is None or width_px is None or height_px is None or display_traj_height_buffer is None:
-                                                raise ValueError("Intrinsic matrix and image dimensions must be provided for GraspType.ADDITIONAL")
-                                            cost, cost_dict = self.compute_costs_voxel_map_coverage(
-                                                    X_WPnew, 
-                                                    pcd_points,
-                                                    intrinsic_matrix,
-                                                    width_px, 
-                                                    height_px,
-                                                    indices_enclosed,
-                                                    display_traj_height_buffer,
-                                                    visualize=True
                                                 )
                                         
                                         if cost < best_cost:
@@ -2115,12 +2123,46 @@ class GraspListener():
                     X_WG_new[:3, 3] += x_mid * X_WG[1, :3]
                     candidate_lst_temp.append(X_WG_new)
                 candidate_lst = candidate_lst_temp
+            
 
             sorted_indices = np.argsort(candidate_costs)
             candidate_lst_sorted = [candidate_lst[idx] for idx in sorted_indices]
+            sorted_costs = [candidate_costs[i] for i in sorted_indices]
 
-            self.grasp_candidates: List[np.ndarray] = candidate_lst_sorted
-            self.sorted_costs = [candidate_costs[i] for i in sorted_indices]
+            # Check for best coverage after already pickiing most stable out of each darboux frame
+            if grasp_type == GraspType.ADDITIONAL:
+                start = time.time()
+                if intrinsic_matrix is None or camera_extrinsic is None or width_px is None or height_px is None or display_traj_height_buffer is None:
+                    raise ValueError("Intrinsic matrix, extrinsic matrix, and image dimensions must be provided for GraspType.ADDITIONAL")
+                
+                candidate_coverage_costs = []
+
+                for i in range(len(candidate_lst_sorted)):
+                    X_WG = candidate_lst_sorted[i]
+                    is_nonempty, within_box_pt_normals, proportion_enclosed, indices_enclosed = self.check_nonempty(pcd, RigidTransform(X_WG))
+                    cost, cost_dict = self.compute_costs_voxel_map_coverage(
+                            RigidTransform(X_WG), 
+                            pcd_points,
+                            intrinsic_matrix,
+                            camera_extrinsic,
+                            width_px, 
+                            height_px,
+                            indices_enclosed,
+                            display_traj_height_buffer,
+                            visualize=True
+                        )
+                    candidate_coverage_costs.append(cost + sorted_costs[i])
+                
+                candidate_list_sorted_by_coverage_indices = np.argsort(candidate_coverage_costs)
+                candidate_list_sorted_by_coverage = [candidate_lst_sorted[i] for i in candidate_list_sorted_by_coverage_indices]
+
+                self.grasp_candidates: List[np.ndarray] = candidate_list_sorted_by_coverage
+                self.sorted_costs = [candidate_coverage_costs[i] for i in candidate_list_sorted_by_coverage_indices]
+                
+                print("GraspType.ADDITIONAL time:", time.time()-start)
+            else:
+                self.grasp_candidates: List[np.ndarray] = candidate_lst_sorted
+                self.sorted_costs = sorted_costs
 
             if VISUALIZE_SORTED_WITH_COSTS:
                 manipuland_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd.xyzs().T))

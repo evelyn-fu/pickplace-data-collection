@@ -268,16 +268,18 @@ class ImageSaver(LeafSystem):
         time_ms = int(context.get_time() * 1000)
         timestr = f"{time_ms:06d}"
         
+        combined_dir = os.path.join(self.dirstr, f"obj_{self.object_ind}")
+
         if not self.use_hardware:
             # color
             color = self.GetInputPort("rgb_in").Eval(context).data
-            color_pil = Image.fromarray(color)
-            color_pil.save(self.dirstr+"/rgb_alpha/"+timestr+".png")
+            # color_pil = Image.fromarray(color)
+            # color_pil.save(combined_dir+"/rgb_alpha/"+timestr+".png")
 
             # remove alpha
             color_no_alpha = color[:, :, :3]
-            color_no_alpha_pil = Image.fromarray(color)
-            color_no_alpha_pil.save(self.dirstr+"/rgb/"+timestr+".png")
+            color_no_alpha_pil = Image.fromarray(color_no_alpha)
+            color_no_alpha_pil.save(combined_dir+"/rgb/"+timestr+".png")
 
             # depth
             if self.depth_format != "16U":
@@ -293,7 +295,7 @@ class ImageSaver(LeafSystem):
             # cap depth at 3000mm
             depth[depth > 3000] = 3000
             depth_pil = Image.fromarray(depth)
-            depth_pil.save(self.dirstr+"/depth/"+timestr+".png")
+            depth_pil.save(combined_dir+"/depth/"+timestr+".png")
 
             # labels
             if self.labels:
@@ -307,10 +309,10 @@ class ImageSaver(LeafSystem):
                     np.uint8(np.where(label_image == label, 255, 0)) for label in object_labels
                 ]
                 mask_pil = Image.fromarray(masks[0])
-                mask_pil.save(self.dirstr+"/masks/"+timestr+".png")
+                mask_pil.save(combined_dir+"/masks/"+timestr+".png")
 
                 gripper_mask_pil = Image.fromarray(masks[1])
-                gripper_mask_pil.save(self.dirstr+"/gripper_masks/"+timestr+".png")
+                gripper_mask_pil.save(combined_dir+"/gripper_masks/"+timestr+".png")
             
             # ob_in_cam pose
             if self.ob_in_cam:
@@ -319,7 +321,7 @@ class ImageSaver(LeafSystem):
 
                 o2c = c2w.inverse() @ o2w
                 T = o2c.GetAsMatrix4()
-                np.savetxt(self.dirstr+"/ob_in_cam/"+timestr+".txt", T)
+                np.savetxt(combined_dir+"/ob_in_cam/"+timestr+".txt", T)
         else:
             # Get frameset of color and depth
             frames = self.pipeline.wait_for_frames()

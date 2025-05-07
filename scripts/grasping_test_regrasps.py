@@ -269,9 +269,9 @@ def start_scenario(
                     camera_index=plant.GetBodyByName("base").index()
                 )
             )
-            builder.Connect(station.GetOutputPort("camera0.label_image"), img_saver.GetInputPort("label_in"))
-            builder.Connect(station.GetOutputPort("camera0.rgb_image"), img_saver.GetInputPort("rgb_in"))
-            builder.Connect(station.GetOutputPort("camera0.depth_image"), img_saver.GetInputPort("depth_in"))
+            builder.Connect(station.GetOutputPort("camera_obs.label_image"), img_saver.GetInputPort("label_in"))
+            builder.Connect(station.GetOutputPort("camera_obs.rgb_image"), img_saver.GetInputPort("rgb_in"))
+            builder.Connect(station.GetOutputPort("camera_obs.depth_image"), img_saver.GetInputPort("depth_in"))
             builder.Connect(station.GetOutputPort("body_poses"), img_saver.GetInputPort("body_poses"))
 
 
@@ -283,7 +283,8 @@ def start_scenario(
         camera1 = station.GetSubsystemByName("rgbd_sensor_camera1")
         camera2 = station.GetSubsystemByName("rgbd_sensor_camera2")
         camera_bin = station.GetSubsystemByName("rgbd_sensor_camera_bin")
-        K = camera0.default_color_render_camera().core().intrinsics().intrinsic_matrix()
+        camera_obs = station.GetSubsystemByName("rgbd_sensor_camera_obs")
+        K = camera_obs.default_color_render_camera().core().intrinsics().intrinsic_matrix()
         if save_imgs:
             np.savetxt(dirstr+"/cam_K.txt", K)
 
@@ -297,7 +298,7 @@ def start_scenario(
         builder.Connect(station.GetOutputPort("camera_bin.depth_image"), camera_bin_pcd.GetInputPort("depth_image"))
 
         mask_extractor = builder.AddSystem(MaskExtractor(gripper_mask_ind=1))
-        builder.Connect(station.GetOutputPort("camera0.label_image"), mask_extractor.GetInputPort("label_in"))
+        builder.Connect(station.GetOutputPort("camera_obs.label_image"), mask_extractor.GetInputPort("label_in"))
 
     else:
         camera0_pcd = builder.AddSystem(DepthImageToPointCloud(CameraInfo(848, 480, 600.165, 600.165, 429.152, 232.822)))
@@ -362,20 +363,26 @@ def start_scenario(
 
         # Back Right camera
         x_back_right_camera = RigidTransform(
-            RotationMatrix(RollPitchYaw(-105.81290946 / 180. * np.pi, 2.14985993, -43.7254432 / 180. * np.pi)),
-            [-0.110748, -0.931772,  0.388191]
+            RotationMatrix(RollPitchYaw(-105.81290946 / 180. * np.pi, 2.14985993 / 180. * np.pi, -43.7254432 / 180. * np.pi)),
+            [0.0, -0.831772,  0.388191]
         )
 
         # Back Left camera
         x_back_left_camera = RigidTransform(
             RotationMatrix(RollPitchYaw(-102.739428 / 180. * np.pi, -3.69469624 / 180. * np.pi, -149.1420755 / 180. * np.pi)),
-            [-0.0533544,  0.90955,  0.449207]
+            [0.0,  0.80955,  0.449207]
         )
 
         # Bin camera
         x_bin_camera = RigidTransform(
             RotationMatrix(RollPitchYaw(-164.69831287 / 180. * np.pi, -35.83297034 / 180. * np.pi, -99.44115857 / 180. * np.pi)),
             [-0.0574518,  0.874365 ,  0.332985]
+        )
+
+        # Obs camera
+        x_obs_camera = RigidTransform(
+            RotationMatrix(RollPitchYaw(-115.29508676 / 180. * np.pi, -0.49652966 / 180. * np.pi, 87.69325379 / 180. * np.pi)),
+            [1.00847, -0.0314675, 0.42864]
         )
 
     # connect stationary camera pcd source
@@ -430,10 +437,10 @@ def start_scenario(
                 X_WC1=x_back_left_camera,
                 X_WC2=x_back_right_camera,
                 X_WC_bin=x_bin_camera,
-                X_WC_obs=x_front_camera,
+                X_WC_obs=x_obs_camera,
                 cam_obs_K=K,
-                obs_width_px=camera0.default_color_render_camera().core().intrinsics().width(),
-                obs_height_px=camera0.default_color_render_camera().core().intrinsics().height(), 
+                obs_width_px=camera_obs.default_color_render_camera().core().intrinsics().width(),
+                obs_height_px=camera_obs.default_color_render_camera().core().intrinsics().height(), 
                 meshcat=meshcat,
                 dirstr=dirstr,
                 time_horizon=time_horizon,
