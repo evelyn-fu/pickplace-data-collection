@@ -346,8 +346,8 @@ def apply_centered_rotation_and_translation(pose: np.ndarray, rotation: np.ndarr
     transform[:3, 3] = transform[:3, 3] + translation
     return transform
 
-lift_for_display_height = 0.05
-display_traj_height_buffer = 0.05 # Height between manipuland bottom and floor
+lift_for_display_height = 0.08
+display_traj_height_buffer = 0.08 # Height between manipuland bottom and floor
 
 q_home = [0.3, 0.4, 0.0, -1.2, 0.0, 1.0, -1.57]
 
@@ -665,6 +665,8 @@ class RegraspPlanner(LeafSystem):
         self.pcd2 = None
         self.pcd3 = None
         self.bin_points = None
+        
+        self.regrasp_n = 3
 
         # Load trajectory parameters
         is_fourier_series = os.path.exists(SYS_ID_TRAJ_PARAMETER_PATH / "a_value.npy")
@@ -796,6 +798,17 @@ class RegraspPlanner(LeafSystem):
             self.gripper_masks.append(gripper_mask)
             return
         if mode == PlannerState.GO_HOME1:
+            # traj_q = context.get_abstract_state(
+            #     int(self._current_joint_traj_idx)
+            # ).get_value().trajectory
+            # start_time = context.get_abstract_state(
+            #     int(self._current_joint_traj_idx)
+            # ).get_value().start_time_s
+            # if context.get_time() > traj_q.end_time() + start_time:
+            #     state.get_mutable_abstract_state(
+            #         int(self._mode_index)
+            #     ).set_value(PlannerState.SCANNING2)
+            # return
             traj_q = context.get_abstract_state(
                 int(self._current_joint_traj_idx)
             ).get_value().trajectory
@@ -803,6 +816,52 @@ class RegraspPlanner(LeafSystem):
                 int(self._current_joint_traj_idx)
             ).get_value().start_time_s
             if context.get_time() > traj_q.end_time() + start_time:
+                # Add observations to voxel map
+
+                # Downsample to uniformly take 20 samples, plus start and end
+                if len(self.gripper_masks) > 20:
+                    indices = np.linspace(0, len(self.gripper_masks) - 1, 20, dtype=int)
+                    indices = [0] + list(indices) + [len(self.gripper_masks) - 1]
+                    self.gripper_masks = [self.gripper_masks[i] for i in indices]
+                    self.object_poses = [self.object_poses[i] for i in indices]
+
+                print(f'Adding {len(self.gripper_masks)} observations to voxel map')
+                start = time.time()
+                for i in range(len(self.object_poses)):
+                    X_W0O1 = self.object_poses[i] # New object pose in original world frame
+                    X_W0O0 = self.voxel_map.X_WO0 # original object pose in original world frame
+                    gripper_mask = self.gripper_masks[i]
+
+                    # new world frame such that new object pose is at origin
+                    X_W0W1 = X_W0O0 @ X_W0O1.inverse()
+
+                    # camera frame in new world frame
+                    X_W1C = X_W0W1 @ self._X_WC_obs
+
+                    self.voxel_map.update_with_observation(
+                        self._cam_obs_K, 
+                        X_W1C.GetAsMatrix4(), 
+                        self.obs_width_px, self.obs_height_px, 
+                        occlusion_mask=gripper_mask, 
+                        visualize=False,
+                        visualize_all=False
+                    )
+                
+                print("Voxel map update time: ", time.time()-start)
+                self.voxel_map.visualize()
+                
+                # Reset object poses and gripper masks
+                self.object_poses = []
+                self.gripper_masks = []
+
+                confident = self.voxel_map.fully_observed()
+                print("Voxel map confident: ", confident)
+                print(self.voxel_map.stats())
+
+                stats_path = os.path.join(self.savedir, "confidence_stats_1_grasp.txt")
+                with open(stats_path, "w") as stats_file:
+                    stats_file.write(str(self.voxel_map.stats()))
+                
                 state.get_mutable_abstract_state(
                     int(self._mode_index)
                 ).set_value(PlannerState.SCANNING2)
@@ -846,9 +905,10 @@ class RegraspPlanner(LeafSystem):
             if context.get_time() > traj_q.end_time() + start_time:
                 # Add observations to voxel map
 
-                # Downsample to uniformly take 100 samples
-                if len(self.gripper_masks) > 100:
-                    indices = np.linspace(0, len(self.gripper_masks) - 1, 100, dtype=int)
+                # Downsample to uniformly take 20 samples, plus start and end
+                if len(self.gripper_masks) > 20:
+                    indices = np.linspace(0, len(self.gripper_masks) - 1, 20, dtype=int)
+                    indices = [0] + list(indices) + [len(self.gripper_masks) - 1]
                     self.gripper_masks = [self.gripper_masks[i] for i in indices]
                     self.object_poses = [self.object_poses[i] for i in indices]
                 
@@ -861,10 +921,10 @@ class RegraspPlanner(LeafSystem):
                     gripper_mask = self.gripper_masks[i]
 
                     # new world frame such that new object pose is at origin
-                    X_W0W1 = X_W0O1.inverse() @ X_W0O0
+                    X_W0W1 = X_W0O0 @ X_W0O1.inverse()
 
                     # camera frame in new world frame
-                    X_W1C = X_W0W1.inverse() @ self._X_WC_obs
+                    X_W1C = X_W0W1 @ self._X_WC_obs
 
                     self.voxel_map.update_with_observation(
                         self._cam_obs_K, 
@@ -876,7 +936,6 @@ class RegraspPlanner(LeafSystem):
                     )
                 print("Voxel map update time: ", time.time()-start)
                 self.voxel_map.visualize()
-                input()
                 
                 # Reset object poses and gripper masks
                 self.object_poses = []
@@ -885,11 +944,17 @@ class RegraspPlanner(LeafSystem):
                 confident = self.voxel_map.fully_observed()
                 print("Voxel map confident: ", confident)
                 print(self.voxel_map.stats())
+
+                stats_path = os.path.join(self.savedir, "confidence_stats_2_grasp.txt")
+                with open(stats_path, "w") as stats_file:
+                    stats_file.write(str(self.voxel_map.stats()))
+                
                 if confident:
                     state.get_mutable_abstract_state(
                         int(self._mode_index)
                     ).set_value(PlannerState.PLAN_SYS_ID)
                 else:
+                    self.regrasp_n = 3
                     state.get_mutable_abstract_state(
                         int(self._mode_index)
                     ).set_value(PlannerState.SCANNINGN)
@@ -932,9 +997,10 @@ class RegraspPlanner(LeafSystem):
             if context.get_time() > traj_q.end_time() + start_time:
                 # Add observations to voxel map
                 
-                # Downsample to uniformly take 100 samples
-                if len(self.gripper_masks) > 100:
-                    indices = np.linspace(0, len(self.gripper_masks) - 1, 100, dtype=int)
+                # Downsample to uniformly take 20 samples, plus start and end
+                if len(self.gripper_masks) > 20:
+                    indices = np.linspace(0, len(self.gripper_masks) - 1, 20, dtype=int)
+                    indices = [0] + list(indices) + [len(self.gripper_masks) - 1]
                     self.gripper_masks = [self.gripper_masks[i] for i in indices]
                     self.object_poses = [self.object_poses[i] for i in indices]
 
@@ -946,10 +1012,10 @@ class RegraspPlanner(LeafSystem):
                     gripper_mask = self.gripper_masks[i]
 
                     # new world frame such that new object pose is at origin
-                    X_W0W1 = X_W0O1.inverse() @ X_W0O0
+                    X_W0W1 = X_W0O0 @ X_W0O1.inverse()
 
                     # camera frame in new world frame
-                    X_W1C = X_W0W1.inverse() @ self._X_WC_obs
+                    X_W1C = X_W0W1 @ self._X_WC_obs
 
                     self.voxel_map.update_with_observation(
                         self._cam_obs_K, 
@@ -961,18 +1027,25 @@ class RegraspPlanner(LeafSystem):
                     )
                 print("Voxel map update time: ", time.time()-start)
                 self.voxel_map.visualize()
-                input()
                 
                 # Reset object poses and gripper masks
                 self.object_poses = []
                 self.gripper_masks = []
 
                 confident = self.voxel_map.fully_observed()
+                print("Voxel map confident: ", confident)
+                print(self.voxel_map.stats())
+
+                stats_path = os.path.join(self.savedir, f'confidence_stats_{self.regrasp_n}_grasp.txt')
+                with open(stats_path, "w") as stats_file:
+                    stats_file.write(str(self.voxel_map.stats()))
+                
                 if confident:
                     state.get_mutable_abstract_state(
                         int(self._mode_index)
                     ).set_value(PlannerState.PLAN_SYS_ID)
                 else:
+                    self.regrasp_n += 1
                     state.get_mutable_abstract_state(
                         int(self._mode_index)
                     ).set_value(PlannerState.SCANNINGN)
@@ -1598,7 +1671,7 @@ class RegraspPlanner(LeafSystem):
         display_traj, self.q_display_centern = MakeDisplayJointPositionsTrajectory(
             X_G,
             times, 
-            self.q_pregrasp1,
+            self.q_pregraspn,
             self.ik_domain,
             self.csd_plant
         )
@@ -1791,7 +1864,7 @@ class RegraspPlanner(LeafSystem):
         self.current_manipuland_pcd = down_sampled_pcd
         print("object pcd got in", time.time()-start, "seconds")
 
-        if mode == PlannerState.SCANNING1 or mode == PlannerState.SCANNINGN:
+        if mode == PlannerState.SCANNING1:
             self.voxel_map = VoxelMap(
                 copy.deepcopy(self.GetInputPort("object_pose").Eval(context)),
                 self.current_manipuland_pcd.xyzs(), 
@@ -2733,7 +2806,7 @@ class RegraspPlanner(LeafSystem):
         mode = context.get_abstract_state(int(self._mode_index)).get_value()
         pick_mode = context.get_abstract_state(int(self._pick_mode_index)).get_value()
 
-        if (mode == PlannerState.GRASP1 or mode == PlannerState.GRASP2 or mode == PlannerState.SYS_ID_GRASP) \
+        if (mode == PlannerState.GRASP1 or mode == PlannerState.GRASP2 or mode == PlannerState.GRASPN or mode == PlannerState.SYS_ID_GRASP) \
             and (pick_mode == PickState.PICK or pick_mode == PickState.PLACE):
             output.set_value(InputPortIndex(1))  # Diff IK
         # elif mode == PlannerState.SYS_ID_GRASP and pick_mode == PickState.TO_PLACE:
@@ -2747,7 +2820,7 @@ class RegraspPlanner(LeafSystem):
         mode = context.get_abstract_state(int(self._mode_index)).get_value()
         pick_mode = context.get_abstract_state(int(self._pick_mode_index)).get_value()
 
-        if (mode == PlannerState.GRASP1 or mode == PlannerState.GRASP2 or mode == PlannerState.SYS_ID_GRASP) \
+        if (mode == PlannerState.GRASP1 or mode == PlannerState.GRASP2 or mode == PlannerState.GRASPN or mode == PlannerState.SYS_ID_GRASP) \
             and (pick_mode == PickState.PICK or pick_mode == PickState.PLACE):
             output.set_value(False)
         # elif mode == PlannerState.SYS_ID_GRASP and pick_mode == PickState.TO_PLACE:

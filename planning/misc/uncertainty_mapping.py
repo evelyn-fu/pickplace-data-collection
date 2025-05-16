@@ -139,26 +139,25 @@ class VoxelMap:
 
         # Step 3: Extract valid hits
         # raycast["t_hit"] is shape [H, W], float tensor of distances or inf
-        t_hit = raycast["t_hit"].reshape((-1,))
-        mask_hit = t_hit.isfinite()
+        t_hit = raycast["t_hit"].numpy()
+        mask_hit = np.isfinite(t_hit)
         if occlusion_mask is not None:
-            occlusion_mask_inds = np.argwhere(occlusion_mask[:, :] == 1)
-            occlusion_mask_flat = occlusion_mask_inds[:, 1] * width_px + occlusion_mask_inds[:, 0]
-            mask_hit[occlusion_mask_flat] = False
+            occlusion_mask_inds = np.argwhere(occlusion_mask[:, :] != 0)
+            mask_hit[occlusion_mask_inds[:, 0], occlusion_mask_inds[:, 1]] = False
+        mask_hit = mask_hit.reshape((-1,))
+        t_hit = t_hit.reshape((-1,))
 
         # Step 4: Get ray origins and directions (shape [H*W, 3])
-        rays_flat = rays.reshape((-1, 6))
+        rays_flat = rays.numpy().reshape((-1, 6))
         ray_origins = rays_flat[:, 0:3]
         ray_dirs = rays_flat[:, 3:6]
 
         # Step 5: Compute hit points only where hits occurred
-        hit_ray_origins = ray_origins[mask_hit]
-        hit_ray_dirs = ray_dirs[mask_hit]
-        hit_t = t_hit[mask_hit].reshape((-1, 1))
+        hit_inds = np.squeeze(np.argwhere(mask_hit), axis=1)
+        hit_ray_origins = ray_origins[hit_inds, :]
+        hit_ray_dirs = ray_dirs[hit_inds, :]
+        hit_t = t_hit[hit_inds].reshape((-1, 1))
         hit_points = hit_ray_origins + hit_t * hit_ray_dirs
-
-        # Convert to NumPy for further processing
-        hit_points_np = hit_points.numpy()
 
         # (Optional) if occlusion_mask is used
         if occlusion_indices is None:
@@ -169,25 +168,25 @@ class VoxelMap:
         hit_points_viz = set()
         lines = []
 
+        confidence_increases = np.zeros(self.points.shape[1])
         tree = cKDTree(self.points.T)
-        neighbors_list = tree.query_ball_point(hit_points_np, r=self.voxel_size)
+        neighbors_list = tree.query_ball_point(hit_points, r=self.voxel_size)
         occlusion_mask = np.ones(self.points.shape[1], dtype=bool)
         occlusion_mask[occlusion_indices] = False
-        # for idx, hit_point in enumerate(hit_points_np):
         for idx, neighbor_inds in enumerate(neighbors_list):
             within_radius_indices = np.array(neighbor_inds)
             mask = ~np.isin(within_radius_indices, occlusion_indices)
-            visible_indices = within_radius_indices[mask]
+            visible_indices = within_radius_indices[np.squeeze(np.argwhere(mask), axis=1)]
             if len(visible_indices) == 0:
                 continue
 
-            ray_dir = hit_ray_dirs[idx].numpy()
+            ray_dir = hit_ray_dirs[idx]
             surface_normals = self.normals[:, visible_indices].T
-            weights = -np.dot(surface_normals, ray_dir)
-            self.confidences[visible_indices] += weights
+            weights = np.maximum(-np.dot(surface_normals, ray_dir), 0)
+            confidence_increases[visible_indices] = np.maximum(weights, confidence_increases[visible_indices])
 
             if visualize:
-                points += [hit_ray_origins[idx].numpy(), (hit_ray_origins[idx] + hit_ray_dirs[idx] * hit_t[idx]).numpy()]
+                points += [hit_ray_origins[idx], (hit_ray_origins[idx] + hit_ray_dirs[idx] * hit_t[idx])]
                 lines.append([len(points) - 2, len(points) - 1])
                 hit_points_viz.update(visible_indices)
             if visualize_all:
@@ -195,14 +194,14 @@ class VoxelMap:
                 point_cloud.points = o3d.utility.Vector3dVector(self.points.T)
                 hit_point_cloud = o3d.geometry.PointCloud()
                 hit_point_cloud.points = o3d.utility.Vector3dVector(self.points[:, visible_indices].T)
-                hit_point_cloud.paint_uniform_color([1, 0, 0])  # Red color for hit points
+                hit_point_cloud.paint_uniform_color([0, 0, 1])  # Blue color for hit points
                 point_cloud.paint_uniform_color([0.2, 0.2, 0.2])  # Gray color for all points
                 line_set = o3d.geometry.LineSet()
-                line_set.points = o3d.utility.Vector3dVector(np.array([hit_ray_origins[idx].numpy(), (hit_ray_origins[idx] + hit_ray_dirs[idx] * hit_t[idx]).numpy()]))
+                line_set.points = o3d.utility.Vector3dVector(np.array([hit_ray_origins[idx], (hit_ray_origins[idx] + hit_ray_dirs[idx] * hit_t[idx])]))
                 line_set.lines = o3d.utility.Vector2iVector([[0, 1]])
                 o3d.visualization.draw_plotly([line_set, point_cloud, hit_point_cloud])
         
-        self.confidences = np.clip(self.confidences, 0, 1)
+        self.confidences = np.clip(self.confidences + confidence_increases, 0, 1)
 
         if visualize:
             viz_geoms = []
@@ -214,15 +213,15 @@ class VoxelMap:
                 line_set.points = o3d.utility.Vector3dVector(np.array(points))
                 line_set.lines = o3d.utility.Vector2iVector(lines)
                 line_set.paint_uniform_color([0, 0, 1])
-                viz_geoms.append(line_set)
-            hit_point_cloud = o3d.geometry.PointCloud()
-            hit_point_cloud.points = o3d.utility.Vector3dVector(self.points[:, list(hit_points_viz)].T)
-            hit_point_cloud.paint_uniform_color([1, 0, 0])  # Red color for hit points  
-            viz_geoms.append(hit_point_cloud)
+                # viz_geoms.append(line_set)
             point_cloud = o3d.geometry.PointCloud()
             point_cloud.points = o3d.utility.Vector3dVector(self.points.T)
             point_cloud.paint_uniform_color([0.2, 0.2, 0.2])  # Gray color for all points
             viz_geoms.append(point_cloud)
+            hit_point_cloud = o3d.geometry.PointCloud()
+            hit_point_cloud.points = o3d.utility.Vector3dVector(self.points[:, list(hit_points_viz)].T)
+            hit_point_cloud.paint_uniform_color([0, 0, 1])  # Blue color for hit points  
+            viz_geoms.append(hit_point_cloud)
             o3d.visualization.draw_plotly(viz_geoms)
     
     def get_improvement_from_observations(
@@ -268,22 +267,20 @@ class VoxelMap:
 
             # Step 3: Extract valid hits
             # raycast["t_hit"] is shape [H, W], float tensor of distances or inf
-            t_hit = raycast["t_hit"].reshape((-1,))
-            mask_hit = t_hit.isfinite()
+            t_hit = raycast["t_hit"].numpy().reshape((-1,))
+            mask_hit = np.isfinite(t_hit)
 
             # Step 4: Get ray origins and directions (shape [H*W, 3])
-            rays_flat = rays.reshape((-1, 6))
+            rays_flat = rays.numpy().reshape((-1, 6))
             ray_origins = rays_flat[:, 0:3]
             ray_dirs = rays_flat[:, 3:6]
 
             # Step 5: Compute hit points only where hits occurred
-            hit_ray_origins = ray_origins[mask_hit]
-            hit_ray_dirs = ray_dirs[mask_hit]
-            hit_t = t_hit[mask_hit].reshape((-1, 1))
+            hit_inds = np.squeeze(np.argwhere(mask_hit), axis=1)
+            hit_ray_origins = ray_origins[hit_inds, :]
+            hit_ray_dirs = ray_dirs[hit_inds, :]
+            hit_t = t_hit[hit_inds].reshape((-1, 1))
             hit_points = hit_ray_origins + hit_t * hit_ray_dirs
-
-            # Convert to NumPy for further processing
-            hit_points_np = hit_points.numpy()
 
             # (Optional) if occlusion_mask is used
             if occlusion_indices is None:
@@ -291,22 +288,22 @@ class VoxelMap:
 
             # Step 6: Iterate over the hit points (minimized)
 
+            confidence_increases = np.zeros(self.points.shape[1])
             tree = cKDTree(self.points.T)
-            neighbors_list = tree.query_ball_point(hit_points_np, r=self.voxel_size)
+            neighbors_list = tree.query_ball_point(hit_points, r=self.voxel_size)
             occlusion_mask = np.ones(self.points.shape[1], dtype=bool)
             occlusion_mask[occlusion_indices] = False
-            # for idx, hit_point in enumerate(hit_points_np):
             for idx, neighbor_inds in enumerate(neighbors_list):
                 within_radius_indices = np.array(neighbor_inds)
                 mask = ~np.isin(within_radius_indices, occlusion_indices)
-                visible_indices = within_radius_indices[mask]
+                visible_indices = within_radius_indices[np.squeeze(np.argwhere(mask), axis=1)]
                 if len(visible_indices) == 0:
                     continue
 
-                ray_dir = hit_ray_dirs[idx].numpy()
+                ray_dir = hit_ray_dirs[idx]
                 surface_normals = self.normals[:, visible_indices].T
-                weights = -np.dot(surface_normals, ray_dir)
-                new_confidences[visible_indices] += weights
+                weights = np.maximum(-np.dot(surface_normals, ray_dir), 0)
+                confidence_increases[visible_indices] = np.maximum(weights, confidence_increases[visible_indices])
 
                 if visualize:
                     points += [hit_ray_origins[idx].numpy(), (hit_ray_origins[idx] + hit_ray_dirs[idx] * hit_t[idx]).numpy()]
@@ -324,7 +321,7 @@ class VoxelMap:
                     line_set.lines = o3d.utility.Vector2iVector([[0, 1]])
                     o3d.visualization.draw_plotly([line_set, point_cloud, hit_point_cloud])
         
-        new_confidences = np.clip(new_confidences, 0, 1)
+        new_confidences = np.clip(new_confidences + confidence_increases, 0, 1)
         confidence_improvement = np.sum(new_confidences > self.confidence_threshold) / len(new_confidences) - self.percent_observations_to_go()
 
         if visualize: # prevent error if no points

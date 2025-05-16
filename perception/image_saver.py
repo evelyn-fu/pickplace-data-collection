@@ -255,6 +255,7 @@ class ImageSaver(LeafSystem):
             # PlannerState.GO_TO_PREGRASP2,
             PlannerState.GRASP2,
             # PlannerState.GO_HOME2
+            PlannerState.GRASPN,
         ]
         mode = self.GetInputPort("planner_state").Eval(context)
         if mode not in save_states:

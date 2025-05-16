@@ -836,12 +836,14 @@ class GraspListener():
         # The link 7 z-axis points towards the gripper.
         height = max(np.max(manipuland_cloud_points_link7_frame, axis=0)[2] + display_traj_height_buffer, 0.35)
 
-        X_displays = get_yaw_display_traj(scanning_traj_height=height)
+        # X_WW' = X_WG.inv() @ X_WG
+        # X_W'C = X_WW'.inv() @ X_WC
+        X_displays = get_yaw_display_traj(scanning_traj_height=height) # X_WG'
 
-        X_cam = RigidTransform(camera_extrinsic)
-        X_display_cams = [X_display.inverse() @ X_cam for X_display in X_displays]
+        X_cam = RigidTransform(camera_extrinsic) # X_WC
+        X_display_cams = [X_display.inverse() @ X_cam for X_display in X_displays] # (X_WG').inv() @ X_WC
 
-        X_G_cams = [X_WG @ X_display_cam for X_display_cam in X_display_cams]
+        X_G_cams = [X_WG @ X_display_cam for X_display_cam in X_display_cams] # X_WG @ (X_WG').inv() @ X_WC
 
         if visualize:
             pcd = o3d.geometry.PointCloud()
@@ -864,7 +866,7 @@ class GraspListener():
             origin_triad = self.make_triad_line_set(np.eye(4))
 
             grasp_geometries = [pcd, gripper_cloud, origin_triad] + camera_triads
-            o3d.visualization.draw_plotly(grasp_geometries)
+            # o3d.visualization.draw_plotly(grasp_geometries)
         
         # scale width and height down for speed
         width_px //= 2
@@ -876,7 +878,7 @@ class GraspListener():
             width_px, 
             height_px, 
             occlusion_indices=indices_enclosed,
-            visualize=True,
+            visualize=False,
             visualize_all=False
         )
 
